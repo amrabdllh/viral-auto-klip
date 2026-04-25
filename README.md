@@ -1,270 +1,375 @@
-# 🚀 Viral Auto Klip - AI-Powered Viral Video Clipper (Inspired by Klipers.pro)
+# 🚀 Viral Auto Klip
 
-**Buat klip viral otomatis dari video panjang apapun!**  
-Paste URL YouTube, TikTok, Instagram, Facebook, atau video langsung → AI deteksi momen viral (lucu, motivasi, shocking, emotional, hooks) → Auto clip, face detection & reframing, auto-caption stylish, output vertical 9:16 siap upload ke TikTok, YouTube Shorts, Instagram Reels.
+**AI-Powered Viral Video Clipper — Inspired by Klipers.pro & OpusClip**
 
-**Fitur Utama (Sempurna & Lengkap):**
-- ✅ **Support Semua URL**: YouTube, TikTok, IG Reels, FB, Twitter/X, direct MP4/MOV via yt-dlp
-- ✅ **AI Viral Detection**: Analisis transcript + audio + visual untuk score virality (0-100). Deteksi:
-  - Lucu (punchline, laughter)
-  - Motivasi / Inspirasi
-  - Shocking / Plot twist
-  - Educational tips & "cara"
-  - Emotional peaks (sedih, excited, angry)
-  - Hooks awal/akhir (pertanyaan, bold statement)
-- ✅ **Scene & Face Detection**: PySceneDetect + MediaPipe Face Detection → Auto crop & follow wajah utama (reframing pintar seperti OpusClip/Klipers)
-- ✅ **Auto-Captions Premium**: Whisper timestamps → Burn-in captions modern (pop-up words, shadow, emoji support, customizable font/color/position). Support multi-language termasuk Bahasa Indonesia.
-- ✅ **Smart Clipping**: Pilih top N klip (15-60 detik ideal), non-overlapping, berdasarkan viral score + engagement potential.
-- ✅ **Format Output Viral-Ready**:
-  - 9:16 vertical (1080x1920) atau custom aspect
-  - High quality H.264/AAC
-  - Optional: Subtle zoom on face, speed ramp, background music low, watermark, end CTA
-  - Metadata JSON dengan score, reason, timestamps
-- ✅ **Batch & Advanced**:
-  - Proses playlist/channel
-  - Multi-clip dari 1 video (10-50+ klip)
-  - Gaming mode (facecam + gameplay split view)
-  - Podcast mode (speaker diarization sederhana)
-  - Export ke folder terstruktur + auto-generate thumbnail
-- ✅ **UI Super User-Friendly**: Streamlit web app (jalan di browser lokal) atau CLI powerful
-- ✅ **Performance**: Progress bar real-time, resumeable, error handling bagus
-- ✅ **Privacy & Cost**: Utamakan local processing (Whisper local). Optional: Groq/OpenAI untuk scoring lebih cerdas (murah & cepat)
+> Paste URL video panjang → AI deteksi momen viral → Output klip 9:16 siap upload TikTok, YouTube Shorts, Instagram Reels. Gratis & lokal!
 
-**Inspired by Klipers.pro** (scene detection, face detection, auto-caption, viral shorts otomatis). Tool ini bikin kamu punya "Klipers pribadi" yang lebih customizable & powerful!
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-required-green?logo=ffmpeg)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 
 ---
 
-## 🛠️ Setup & Instalasi (5 Menit)
+## 📌 Daftar Isi
 
-### 1. Prerequisites
-- **Python 3.10+** (64-bit) — Download dari python.org
-- **FFmpeg** (WAJIB) — Lihat instruksi Windows di bawah
-- GPU optional (NVIDIA lebih cepat, tapi CPU juga berjalan normal)
+- [Fitur Utama](#-fitur-utama)
+- [Cara Kerja AI](#-cara-kerja-ai)
+- [Prasyarat](#-prasyarat)
+- [Instalasi](#️-instalasi)
+  - [Windows](#windows)
+  - [Linux / macOS](#linux--macos)
+- [Konfigurasi API Key](#-konfigurasi-api-key-opsional-tapi-direkomendasikan)
+- [Cara Menjalankan](#-cara-menjalankan)
+  - [Web UI (Streamlit)](#1-web-ui-streamlit--paling-mudah)
+  - [Web UI (HTML + Server)](#2-web-ui-html--server-alternatif)
+  - [CLI](#3-cli-command-line-interface)
+- [Parameter & Output](#-parameter--output)
+- [Advanced Usage](#-advanced-usage)
+- [FAQ & Troubleshooting](#-faq--troubleshooting)
+- [Kontribusi](#-kontribusi)
 
-### 2. Clone / Download
-```bash
-cd /path/to/your/folder
-# (atau copy folder viral_auto_klip ini)
+---
+
+## ✨ Fitur Utama
+
+| Fitur | Detail |
+|---|---|
+| 🌐 **Multi-platform URL** | YouTube, TikTok, Instagram Reels, Facebook, X/Twitter, direct MP4/MOV |
+| 🤖 **AI Viral Detection** | Score 0–100 per segmen: lucu, motivasi, shocking, emotional, hook |
+| 👤 **Face Reframing** | MediaPipe auto-follow wajah utama, crop cerdas ke 9:16 seperti OpusClip |
+| 📝 **Auto-Captions** | Whisper timestamps → burn-in caption modern (pop-up, karaoke, emoji, minimal) |
+| 🎬 **Smart Clipping** | Pilih top-N klip non-overlapping (15–60 detik ideal) |
+| 📤 **Output Viral-Ready** | 1080×1920 H.264/AAC + metadata JSON + auto thumbnail |
+| 🔁 **Batch Processing** | Proses playlist/channel sekaligus |
+| 🔒 **Local & Private** | Whisper jalan di lokal, tidak ada video yang dikirim ke server pihak ketiga |
+| 💬 **Bahasa Indonesia First** | Keyword scoring + LLM prompt support Bahasa Indonesia optimal |
+
+---
+
+## 🧠 Cara Kerja AI
+
+```
+URL Video
+    │
+    ▼
+[yt-dlp] Download video + audio (high quality)
+    │
+    ▼
+[Whisper] Transkripsi akurat → timestamp per kata/segmen
+    │
+    ▼
+[PySceneDetect] Deteksi scene change alami
+    │
+    ▼
+[MediaPipe] Deteksi wajah utama + bounding box per frame
+    │
+    ▼
+[Viral Scoring Engine]
+    ├── Rule-based: keyword viral (ID+EN), sentiment, hook, panjang
+    └── AI LLM (opsional): Groq / OpenAI / Gemini / Ollama
+    │
+    ▼
+[Selection] Top-N skor, non-overlap, kategori beragam
+    │
+    ▼
+[FFmpeg] Extract segmen → Reframe 9:16 → Burn-in caption → Encode
+    │
+    ▼
+Output: Klip MP4 + metadata.json + thumbnail
 ```
 
-### 3. Virtual Environment & Install
-```bash
+---
+
+## 📋 Prasyarat
+
+Sebelum instalasi, pastikan sudah ada:
+
+- **Python 3.10+** (64-bit) — [python.org](https://www.python.org/downloads/)
+- **FFmpeg** — **WAJIB** untuk proses video (lihat instruksi di bawah)
+- **Git** — untuk clone repo ([git-scm.com](https://git-scm.com/))
+- GPU NVIDIA (opsional, mempercepat Whisper)
+
+---
+
+## 🛠️ Instalasi
+
+### Windows
+
+#### 1. Install Python 3.10+
+
+- Download dari https://www.python.org/downloads/
+- ⚠️ **WAJIB centang "Add Python to PATH"** saat install
+
+#### 2. Install FFmpeg
+
+- Download dari https://www.gyan.dev/ffmpeg/builds/ → pilih `ffmpeg-release-essentials.zip`
+- Extract ke folder, contoh: `C:\ffmpeg`
+- Tambahkan ke PATH:
+  - Tekan `Win + S` → cari "Environment Variables"
+  - Edit System Environment Variables → **Environment Variables**
+  - Di bagian **System variables**, cari `Path` → Edit → **New**
+  - Tambahkan: `C:\ffmpeg\bin`
+- Verifikasi di Command Prompt baru:
+  ```cmd
+  ffmpeg -version
+  ```
+
+#### 3. Clone & Install Project
+
+```cmd
+git clone https://github.com/USERNAME/viral-auto-klip.git
+cd viral-auto-klip
+
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+venv\Scripts\activate
+
 pip install -r requirements.txt
 ```
 
-### 4. (Optional) API Keys untuk Fitur Super AI
-Buat file `.env` :
-```
-GROQ_API_KEY=your_groq_key_here   # Gratis & super cepat (rekomendasi!)
-OPENAI_API_KEY=your_openai_key    # Untuk scoring lebih advanced
-ASSEMBLYAI_API_KEY=...            # Alternatif transcription (opsional)
-```
-
-Dapatkan Groq key gratis di https://console.groq.com/keys (recommended untuk viral scoring)
-
-### 5. Run!
-
-**Web UI (Paling Mudah - Rekomendasi):**
-```bash
-streamlit run app.py
-```
-Buka browser http://localhost:8501 → Paste URL → Atur parameter → Process! 
-
-**CLI (Advanced / Automation):**
-```bash
-python cli.py --url "https://youtube.com/watch?v=..." --num-clips 10 --min-score 65 --face-reframe --captions-style modern
-```
+> **Tips Windows:** Selalu gunakan Command Prompt atau PowerShell (bukan Git Bash) untuk menjalankan FFmpeg.
 
 ---
 
-## 🪟 Instruksi Khusus Windows (Windows 10/11)
-
-**Ya, tool ini 100% bisa jalan di Windows!**
-
-### Langkah Instalasi di Windows:
-
-1. **Install Python 3.10+** (64-bit)
-   - Download dari: https://www.python.org/downloads/
-   - **PENTING**: Centang "Add Python to PATH" saat install
-
-2. **Install FFmpeg (WAJIB untuk render video)**
-   - Download versi Windows: https://www.gyan.dev/ffmpeg/builds/
-   - Pilih `ffmpeg-release-essentials.zip`
-   - Extract ke folder, misalnya: `C:\ffmpeg`
-   - Tambahkan ke PATH:
-     - Tekan `Win + S` → ketik "Environment Variables" → Edit System Environment Variables
-     - Klik **Environment Variables** → Cari `Path` di System variables → Edit
-     - Tambahkan: `C:\ffmpeg\bin`
-   - Verifikasi: Buka Command Prompt baru → ketik `ffmpeg -version`
-
-3. **Setup Project**
-   ```cmd
-   cd C:\path\to\viral_auto_klip
-   python -m venv venv
-   venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-
-4. **Jalankan Backend (untuk versi Real)**
-   ```cmd
-   uvicorn server:app --reload --port 8000
-   ```
-
-5. **Buka UI**
-   - Buka file `viral_auto_klip_v2_real.html` di browser, **atau**
-   - Jalankan `streamlit run app.py`
-
-**Catatan Penting Windows:**
-- Selalu gunakan **Command Prompt** atau **PowerShell** (bukan Git Bash untuk FFmpeg)
-- Jika error `ffmpeg not found`, pastikan path sudah benar di Environment Variables
-- Whisper + torch biasanya otomatis install versi CPU. Kalau mau GPU, install `torch` dengan CUDA terpisah.
-
----
-
-## 🐧 Linux / macOS (untuk referensi)
+### Linux / macOS
 
 ```bash
+# Install FFmpeg
 sudo apt install ffmpeg          # Ubuntu/Debian
 brew install ffmpeg              # macOS
+
+# Clone & setup
+git clone https://github.com/USERNAME/viral-auto-klip.git
+cd viral-auto-klip
+
+python -m venv venv
+source venv/bin/activate
+
+pip install -r requirements.txt
 ```
 
 ---
 
-## 📖 Cara Pakai Detail
+## 🔑 Konfigurasi API Key (Opsional tapi Direkomendasikan)
 
-### Input yang Didukung
-- YouTube: https://youtu.be/xxx atau full watch?v=
-- TikTok: https://www.tiktok.com/@user/video/123
-- Instagram: https://www.instagram.com/reel/ABC/
-- Facebook, X/Twitter video posts
-- Direct video: https://example.com/video.mp4
+Tool ini berjalan **100% gratis** tanpa API key (mode lokal). Tapi untuk viral scoring lebih cerdas, tambahkan API key:
 
-### Parameter Penting (di UI/CLI)
-- **Jumlah Klip**: 5-20 (default 8)
-- **Durasi Klip**: Min 15s, Max 60s (ideal viral)
-- **Min Viral Score**: 60-80 (semakin tinggi, semakin "pasti viral")
-- **Face Reframe**: On → AI ikuti wajah pembicara utama (perfect untuk talking head/podcast)
-- **Caption Style**: 
-  - modern (pop words, bold, shadow)
-  - minimal (clean subtitle)
-  - karaoke (highlight kata per kata)
-  - emoji (auto tambah emoji lucu/motivasi)
-- **Target Platform**: TikTok / Shorts / Reels (auto optimize: aspect, caption position, music hint)
-- **Bahasa**: Auto-detect (ID/EN support terbaik)
+```bash
+# Salin template ke file .env
+cp .env.example .env
+```
 
-### Output
+Kemudian edit file `.env`:
+
+```env
+# Groq - GRATIS & TERCEPAT (sangat direkomendasikan)
+# Daftar di: https://console.groq.com/keys
+GROQ_API_KEY=your_groq_key_here
+LLM_MODEL=llama-3.3-70b-versatile
+
+# Pilih salah satu provider AI
+AI_PROVIDER=Groq   # Groq | OpenAI | Gemini | OpenRouter | Ollama
+
+# Alternatif lain (opsional)
+GEMINI_API_KEY=your_gemini_key
+OPENROUTER_API_KEY=your_openrouter_key
+OPENAI_API_KEY=your_openai_key
+
+# Untuk Ollama (lokal, gratis)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Untuk fitur clipping software tambahan
+CLIPPING_SOFTWARE_API_KEY=your_key_here
+```
+
+> ⚠️ **Jangan pernah commit file `.env` ke GitHub!** File ini sudah ada di `.gitignore`.
+
+---
+
+## ▶️ Cara Menjalankan
+
+### 1. Web UI (Streamlit) — Paling Mudah
+
+```bash
+# Aktifkan virtual environment dulu
+source venv/bin/activate       # Linux/macOS
+venv\Scripts\activate          # Windows
+
+streamlit run app.py
+```
+
+Buka browser → http://localhost:8501
+
+**Cara pakai di UI:**
+1. Paste URL video (YouTube, TikTok, IG, dsb.)
+2. Atur parameter (jumlah klip, durasi, min score, dll.)
+3. Klik **Process** → tunggu progress bar selesai
+4. Download klip dari folder `output/`
+
+---
+
+### 2. Web UI (HTML + Server) — Alternatif
+
+```bash
+# Terminal 1: Jalankan backend API
+uvicorn server:app --reload --port 8000
+
+# Terminal 2 (Windows, bisa dobel-klik):
+# Buka file viral_auto_klip_v2_real.html di browser
+```
+
+---
+
+### 3. CLI (Command Line Interface)
+
+Untuk pengguna advanced / otomasi:
+
+```bash
+# Basic — proses 1 video, ambil 8 klip terbaik
+python cli.py --url "https://youtube.com/watch?v=XXXX"
+
+# Dengan semua opsi
+python cli.py \
+  --url "https://youtube.com/watch?v=XXXX" \
+  --num-clips 10 \
+  --min-score 70 \
+  --min-duration 15 \
+  --max-duration 50 \
+  --face-reframe \
+  --captions-style modern \
+  --platform tiktok \
+  --output-dir ./hasil_klip
+
+# Batch — proses seluruh playlist
+python cli.py --playlist "https://youtube.com/playlist?list=XXXX" --num-clips 5
+```
+
+---
+
+## ⚙️ Parameter & Output
+
+### Parameter Utama
+
+| Parameter | Default | Deskripsi |
+|---|---|---|
+| `--num-clips` | 8 | Jumlah klip yang dihasilkan |
+| `--min-duration` | 15 | Durasi minimum klip (detik) |
+| `--max-duration` | 60 | Durasi maksimum klip (detik) |
+| `--min-score` | 60 | Minimum viral score (0–100) |
+| `--face-reframe` | off | Aktifkan smart face reframing |
+| `--captions-style` | modern | `modern` / `minimal` / `karaoke` / `emoji` |
+| `--platform` | tiktok | `tiktok` / `shorts` / `reels` |
+| `--whisper-model` | medium | `tiny` / `base` / `medium` / `large-v3` |
+
+### Struktur Output
+
 ```
 output/
-  video_title/
-    clip_001_viral85_lucu.mp4          # Score 85 - Lucu
-    clip_002_viral78_motivasi.mp4
-    ...
-    metadata.json                       # Detail semua klip + reason
-    thumbnails/
+└── nama_video/
+    ├── clip_001_viral85_lucu.mp4         ← Score 85, kategori lucu
+    ├── clip_002_viral78_motivasi.mp4
+    ├── clip_003_viral72_shocking.mp4
+    ├── ...
+    ├── metadata.json                      ← Detail semua klip + reason AI
+    └── thumbnails/
+        ├── clip_001.jpg
+        └── clip_002.jpg
 ```
 
-Setiap klip siap upload langsung! Thumbnail auto-generated dari frame terbaik.
-
 ---
 
-## 🧠 Bagaimana AI Deteksi Viral? (Teknis)
-
-1. **Download** video + audio (yt-dlp, high quality)
-2. **Transcription** akurat dengan Whisper (large-v3 atau medium) → timestamp per kata/segmen
-3. **Scene Detection** (PySceneDetect) → potong di scene change natural
-4. **Face & Speaker Detection** (MediaPipe) → identifikasi wajah utama, bounding box per frame
-5. **Viral Scoring Engine** (Hybrid):
-   - **Rule-based** (cepat): 
-     - Keyword viral (Bahasa Indonesia & English): "rahasia", "jangan", "cara mudah", "shocking", "you won't believe", "tips rahasia", "motivasi", "sukses", dll.
-     - Sentiment analysis (VADER/TextBlob): excitement, surprise
-     - Hook detection: kalimat pendek di awal/akhir segmen
-     - Length score: 20-45s = +poin
-   - **AI LLM Scoring** (opsional via Groq/OpenAI):
-     Prompt: "Beri score virality 0-100 untuk segmen ini untuk TikTok/Shorts. Alasan: lucu/motivasi/shocking? Berikan 1 kalimat reason."
-   - **Visual/Audio**: Motion energy, face close-up ratio, audio peak (laughter/energy)
-6. **Selection**: Top skor, non-overlap, diverse category (max 1 lucu berurutan, dll.)
-7. **Processing**:
-   - Extract exact segment (ffmpeg)
-   - Reframe: Smooth crop ke 9:16 mengikuti wajah utama (kalau on)
-   - Caption burn-in dengan timing presisi + style
-   - Encode optimal (fast, high quality)
-8. **Post**: Generate reason text, suggest caption upload, thumbnail
-
-**Hasil**: Klip yang "pasti bikin orang scroll stop" karena AI pilih momen terbaik + presentasi pro.
-
----
-
-## 🔧 Advanced Usage & Customization
+## 🔧 Advanced Usage
 
 ### Edit Config
-Buka `config.py` untuk ubah:
-- Viral keywords list (tambah kata Indonesia spesifik niche kamu)
-- Scoring weights
-- Caption font path (pakai font keren gratis dari Google Fonts)
+
+Buka `config.py` untuk kustomisasi:
+- Viral keywords list (tambah kata niche kamu)
+- Bobot scoring (audio, visual, text)
+- Font caption & posisi
 - Default output folder
 
-### Batch Processing
-```bash
-python cli.py --playlist "https://youtube.com/playlist?list=xxx" --num-clips 5
-```
-
-### Integrate dengan Klipers.pro (Jika Punya Akun)
-Tool ini bisa extended untuk call Klipers API (setelah kamu baca docs mereka). Hubungi support Klipers untuk API key, lalu tambah opsi `--use-klipers-api`.
-
 ### Tips Biar Lebih Viral
-- Pilih video dengan hook kuat di awal
-- Gunakan --min-score 70+ untuk kualitas tinggi
-- Tambah music trending di post-production (CapCut atau manual)
-- Test A/B: Upload beberapa klip, lihat analytics
+
+- Gunakan `--min-score 70+` untuk kualitas tinggi
+- Pilih video dengan hook kuat di awal (pertanyaan, bold statement)
+- Aktifkan `--face-reframe` untuk talking head / podcast
+- Test A/B: upload beberapa klip, lihat yang paling engage
 
 ---
 
 ## ❓ FAQ & Troubleshooting
 
-**Q: Butuh GPU?**  
-A: Tidak wajib. CPU ok untuk video <1 jam. Untuk lebih cepat, pakai `--whisper-model medium` atau Groq transcription.
+**Q: Apakah butuh GPU?**  
+A: Tidak wajib. CPU sudah cukup untuk video di bawah 1 jam. Gunakan `--whisper-model medium` untuk keseimbangan kecepatan & akurasi.
 
-**Q: Error "No module named 'whisper'"?**  
-A: `pip install -U openai-whisper` atau gunakan faster-whisper (lebih cepat).
+**Q: Error `No module named 'whisper'`?**  
+A: Jalankan: `pip install -U openai-whisper`
 
-**Q: Klip kurang "viral"?**  
-A: Naikkan min-score atau tambah Groq key untuk AI scoring lebih pintar. Atau pilih video yang memang bagus.
+**Q: Error `ffmpeg not found`?**  
+A: Pastikan FFmpeg sudah ada di PATH. Cek dengan `ffmpeg -version` di terminal baru setelah install.
 
-**Q: Support Bahasa Indonesia bagus?**  
-A: Ya! Whisper trained bagus untuk ID, dan scoring keywords + LLM support ID.
+**Q: Klip kurang viral?**  
+A: Tambahkan Groq API key (gratis), naikkan `--min-score`, atau pilih video sumber yang lebih engaging.
 
-**Q: Bisa auto upload ke TikTok/IG?**  
-A: Belum built-in (butuh API official + approval). Tapi output sudah siap, tinggal manual upload atau pakai tools seperti Buffer nanti.
+**Q: Support Bahasa Indonesia?**  
+A: Ya! Whisper trained sangat baik untuk Bahasa Indonesia, dan scoring keywords + LLM prompt support ID.
 
-**Q: Biaya?**  
-A: Gratis 100% untuk local mode. Groq ~$0.01 per video panjang. Klipers API berbayar sesuai usage.
+**Q: Apakah bisa auto-upload ke TikTok/IG?**  
+A: Belum built-in (butuh API resmi + approval). Output sudah siap, tinggal upload manual atau pakai tools seperti Buffer.
+
+**Q: Berapa biayanya?**  
+A: Gratis 100% untuk mode lokal. Groq ~$0.01 per video panjang. OpenAI/Gemini sesuai harga masing-masing.
+
+**Q: `mediapipe` error di Python 3.12?**  
+A: Coba: `pip install mediapipe==0.10.14 --no-deps` lalu install dependensi manual jika perlu.
 
 ---
 
-## 🏆 Kenapa Tool Ini Lebih Bagus dari Lainnya?
+## 📁 Struktur Project
 
-- **Lokal & Private**: Video kamu tidak upload ke server pihak ketiga (kecuali optional LLM)
-- **Customizable Total**: Ubah semua parameter, style, scoring logic
-- **Face Reframing Pintar**: Ikuti wajah seperti pro editor (jarang di tool gratis)
-- **Bahasa Indonesia First**: Keywords, prompt, support optimal
-- **Production Ready**: Error handling, logging, metadata lengkap, scalable
-- **Inspired Klipers + OpusClip + Custom Magic**: Gabungan fitur terbaik + ekstra
+```
+viral-auto-klip/
+├── app.py                    ← Streamlit web UI
+├── server.py                 ← FastAPI backend (untuk HTML UI)
+├── cli.py                    ← Command line interface
+├── config.py                 ← Konfigurasi global
+├── requirements.txt          ← Dependensi Python
+├── .env.example              ← Template environment variables
+├── viral_auto_klip_v2_real.html ← UI alternatif (HTML)
+├── start.bat                 ← Quick start Windows
+├── core/
+│   ├── analyzer.py           ← Viral scoring engine
+│   ├── clipper.py            ← Video clipping & encoding
+│   ├── transcriber.py        ← Whisper transcription
+│   ├── fyp_agent.py          ← FYP / viral detection agent
+│   ├── audio_enhancer.py     ← Audio processing
+│   ├── utils.py              ← Utility functions
+│   └── clipping_software.py  ← Clipping software integration
+├── fonts/                    ← Font untuk caption
+├── temp/                     ← File sementara (auto-clean)
+└── output/                   ← Hasil klip (dibuat otomatis)
+```
+
+---
+
+## 🤝 Kontribusi
+
+Pull request, issue, dan saran sangat diterima!
+
+1. Fork repo ini
+2. Buat branch baru: `git checkout -b fitur-baru`
+3. Commit perubahan: `git commit -m "Tambah fitur X"`
+4. Push: `git push origin fitur-baru`
+5. Buat Pull Request
+
+---
+
+## 📄 Lisensi
+
+MIT License — bebas digunakan, dimodifikasi, dan didistribusikan dengan menyebut sumber.
+
+---
 
 **Dibuat dengan ❤️ untuk creator Indonesia yang mau scaling konten viral tanpa ribet editing!**
 
----
-
-## 📞 Support & Kontribusi
-
-- Issue / Feature request: (buat GitHub repo kamu)
-- Update: Tool ini terus di-update. Cek versi terbaru.
-- Ingin versi lebih advanced (multi AI agent, auto post, analytics)? Hubungi saya!
-
-**Selamat bikin klip viral! 🔥**  
-Contoh hasil: Banyak creator pakai sistem serupa dapat 1M+ views per klip.
-
----
-
-*Version 1.0 - April 2026 | Perfect Auto Viral Clipper*
+*Version 2.0 — April 2026*
