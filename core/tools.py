@@ -927,10 +927,18 @@ def upload_browser_job(ctx: JobContext) -> Dict:
     Deskripsi default diambil dari metadata aset (caption + hashtag hasil AI)
     kalau job tidak mengirim description sendiri.
     """
-    from . import youtube_browser
+    from . import publish_guard, youtube_browser
 
     p = ctx.params
     path = resolve_source(ctx, p)
+    previous = publish_guard.check_or_raise(path, "youtube", force=bool(p.get("force")))
+    if previous:
+        ctx.log(f"Sudah pernah diupload: {previous.get('url') or previous.get('title') or 'record lama'}")
+        return {
+            "_message": "Dilewati — klip ini sudah pernah diupload ke YouTube. "
+                        "Kirim force=true untuk mengulang.",
+            "skipped": True, "previous": previous, "clips": [], "total_clips": 0,
+        }
     meta = _asset_meta(path)
     title = str(p.get("title") or meta.get("title") or Path(path).stem)[:100]
     description = str(p.get("description") or meta.get("description") or "")
@@ -947,6 +955,9 @@ def upload_browser_job(ctx: JobContext) -> Dict:
     result = youtube_browser.upload_video(
         path, title=title, description=description,
         tags=hashtags, privacy=privacy, progress=progress)
+    publish_guard.record_upload(path, "youtube", {
+        "url": result.get("url"), "title": title, "status": "done", "at": time.time(),
+    })
     return {
         "_message": f"Terupload ke YouTube ({privacy}): {title[:60]}",
         "upload": result,
@@ -957,10 +968,18 @@ def upload_browser_job(ctx: JobContext) -> Dict:
 @handler("upload_tiktok", background=True)
 def upload_tiktok_job(ctx: JobContext) -> Dict:
     """Upload satu klip ke TikTok lewat browser **headless** (tanpa popup/jendela)."""
-    from . import tiktok_browser
+    from . import publish_guard, tiktok_browser
 
     p = ctx.params
     path = resolve_source(ctx, p)
+    previous = publish_guard.check_or_raise(path, "tiktok", force=bool(p.get("force")))
+    if previous:
+        ctx.log("Sudah pernah diupload ke TikTok — dilewati")
+        return {
+            "_message": "Dilewati — klip ini sudah pernah diupload ke TikTok. "
+                        "Kirim force=true untuk mengulang.",
+            "skipped": True, "previous": previous, "clips": [], "total_clips": 0,
+        }
     meta = _asset_meta(path)
     description = str(p.get("description") or meta.get("description") or "")
     hashtags = p.get("tags") or meta.get("hashtags") or []
@@ -974,6 +993,9 @@ def upload_tiktok_job(ctx: JobContext) -> Dict:
 
     result = tiktok_browser.upload_video(str(path), description=description[:2000],
                                          progress=progress)
+    publish_guard.record_upload(path, "tiktok", {
+        "url": result.get("url"), "status": result.get("status") or "done", "at": time.time(),
+    })
     return {
         "_message": "Upload TikTok selesai",
         "upload": result,

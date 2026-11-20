@@ -547,7 +547,7 @@ function bindCards(root) {
           const job = await api("/jobs", { body: { kind: "upload_browser", title: "Upload YouTube · " + title, params: { path, title, description: caption, privacy: "private" } } });
           toast("Upload berjalan di latar belakang — tidak ada jendela yang muncul");
           const done = await waitJob(job.id);
-          toast(done.status === "done" ? "Terupload ke YouTube (private)" : "Upload gagal: " + (done.message || "lihat Log Job"));
+          toast(done.result?.skipped ? (done.message || "Sudah pernah diupload — dilewati") : done.status === "done" ? "Terupload ke YouTube (private)" : "Upload gagal: " + (done.message || "lihat Log Job"));
         } catch (err) { fail(err); }
       });
     }
@@ -562,7 +562,7 @@ function bindCards(root) {
           const job = await api("/jobs", { body: { kind: "upload_tiktok", title: "Upload TikTok · " + title, params: { path, description: caption } } });
           toast("Upload TikTok berjalan di latar belakang");
           const done = await waitJob(job.id);
-          toast(done.status === "done" ? "TikTok: " + ((done.result?.upload?.status) || "selesai") : "Upload gagal: " + (done.message || "lihat Log Job"));
+          toast(done.result?.skipped ? (done.message || "Sudah pernah diupload — dilewati") : done.status === "done" ? "TikTok: " + ((done.result?.upload?.status) || "selesai") : "Upload gagal: " + (done.message || "lihat Log Job"));
         } catch (err) { fail(err); }
       });
     }
