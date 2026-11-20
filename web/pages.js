@@ -906,13 +906,58 @@ function mountYouTube() {
   api("/youtube/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
 }
 
+
+function mountTikTok() {
+  const box = document.getElementById("ttbox");
+  if (!box) return;
+  const when = (t) => (t ? new Date(t * 1000).toLocaleString("id-ID") : "—");
+  const paint = (s) => {
+    box.innerHTML = UI.panel({
+      title: "TikTok — upload lewat browser",
+      sub: "Sepenuhnya headless: tidak ada jendela atau popup. Butuh cookies tiktok.com dari browser yang sudah login.",
+      body: `<div class="row" style="gap:8px;flex-wrap:wrap">
+          ${UI.pill(s.configured ? "Cookies aktif" : "Belum diatur", s.configured ? "ok" : "")}
+          <span class="tiny muted">${s.count || 0} cookie · disimpan ${when(s.saved_at)} · kedaluwarsa ${when(s.expires_at)}</span>
+        </div>
+        ${UI.field("Tempel cookies", `<textarea id="ttText" rows="5" spellcheck="false" placeholder="JSON hasil export extension, atau isi cookies.txt (format Netscape) untuk tiktok.com"></textarea>`,
+          { hint: "Export cookies tiktok.com dari browser yang sudah login, lalu tempel di sini." })}
+        <div class="row" style="gap:8px">${UI.btn("Simpan cookies", { kind: "primary", size: "sm", id: "ttSave" })}
+          ${UI.btn("Tes sesi", { size: "sm", id: "ttTest" })}${UI.btn("Hapus", { size: "sm", id: "ttClear" })}</div>
+        <div id="ttRes" class="small muted"></div>`,
+    });
+    document.getElementById("ttSave").onclick = (e) => busy(e.currentTarget, async () => {
+      const text = document.getElementById("ttText").value.trim();
+      if (!text) { document.getElementById("ttRes").textContent = "Tempel cookies dulu."; return; }
+      try {
+        const r = await api("/tiktok/cookies", { body: { text } });
+        document.getElementById("ttRes").innerHTML = UI.pill(`${r.count} cookie tersimpan`, "ok");
+        paint(r);
+      } catch (err) { document.getElementById("ttRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
+    });
+    document.getElementById("ttTest").onclick = (e) => busy(e.currentTarget, async () => {
+      document.getElementById("ttRes").innerHTML = `<span class="ink2">Memeriksa sesi (headless, ±15 dtk)…</span>`;
+      try {
+        const r = await api("/tiktok/test", { body: {} });
+        document.getElementById("ttRes").innerHTML = r.ok
+          ? UI.pill("Sesi valid", "ok") + ` <span class="ink2">${esc(r.username || "akun terdeteksi")}</span>`
+          : UI.pill("Tidak valid", "bad") + " " + esc(r.error || "");
+      } catch (err) { document.getElementById("ttRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
+    });
+    document.getElementById("ttClear").onclick = (e) => busy(e.currentTarget, async () => {
+      try { paint(await api("/tiktok/cookies", { method: "DELETE" })); toast("Cookies TikTok dihapus"); }
+      catch (err) { fail(err); }
+    });
+  };
+  api("/tiktok/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
+}
+
 PAGES.settings = { render(view) {
   const st = STATE.status;
   const pill = (ok, l) => UI.pill((ok ? "✓ " : "") + l, ok ? "ok" : "");
   view.innerHTML = `<div class="page">${pageHead("Pengaturan", "Disimpan ke file .env di laptopmu dan langsung aktif tanpa restart. API key tidak pernah ditampilkan utuh.",
       UI.btn("Setel otomatis (terbaik)", { ico: "sparkles", kind: "primary", size: "sm", id: "autoCfg" }))}
     ${UI.banner("info", "Bingung? Klik <b>Setel otomatis</b> — sistem membaca API key yang terpasang lalu memilih provider, model, suara, dan mesin transkripsi terbaik. Setelah itu cukup tempel link di Beranda.")}
-    <div class="layout"><div class="stack lg"><div id="ytbox"></div><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
+    <div class="layout"><div class="stack lg"><div id="ytbox"></div><div id="ttbox"></div><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
     <aside>${st ? UI.panel({ title: "Kemampuan aktif", body: `<div class="stack">${[["LLM", st.ai.providers.map((p) => pill(p.configured, p.provider))], ["Suara", Object.entries(st.media.tts).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
         ["Gambar", Object.entries(st.media.image).map(([k, v]) => pill(v.ready, PRETTY[k] || k))], ["Lainnya", [pill(st.media.elevenlabs, "ElevenLabs"), pill(st.media.stock, "Stok"), pill(st.media.youtube_api, "YouTube API"), pill(st.ffmpeg, "FFmpeg")]]]
         .map(([k, list]) => `<div class="stack" style="gap:6px"><span class="section-title">${k}</span><div class="row" style="gap:6px">${list.join("")}</div></div>`).join("")}</div>` }) : ""}
@@ -1075,6 +1120,7 @@ PAGES.settings = { render(view) {
     catch (err) { fail(err); }
   });
   mountYouTube();
+  mountTikTok();
 } };
 
 /* ================================================================== CAMPAIGN (MotionKlip) */
@@ -1087,6 +1133,8 @@ PAGES.campaign = { render(view) {
         ${UI.text("title", "Judul bernarasi", { placeholder: "kosongkan untuk tanpa judul", hint: "Ditampilkan sebagai freeze di awal" })}
         ${UI.num("start", "Mulai", { value: 0, min: 0, step: 0.1, hint: "detik" })}
         ${UI.num("end", "Selesai", { value: "", min: 0, step: 0.1, hint: "detik · kosong = sampai akhir" })}</div>
+        ${UI.field("Batch (opsional)", `<textarea name="ranges" id="ranges" rows="3" spellcheck="false" placeholder="12.5,48.0,Judul klip 1&#10;95.0,140.5,Judul klip 2"></textarea>`,
+          { hint: "Satu baris = satu klip: mulai,selesai,judul. Kalau diisi, kolom Mulai/Selesai di atas diabaikan." })}
         <div class="small muted" id="presetInfo"></div>` })}
       ${UI.panel({ id: "f", title: "3 · Opsi", body: `<div class="fields two">
         ${UI.select("layout", "Layout", [{ v: "", l: "Ikut preset" }, { v: "split", l: "Split (facecam + gameplay)" }, { v: "full", l: "Full frame" }], "")}
@@ -1094,8 +1142,9 @@ PAGES.campaign = { render(view) {
         ${UI.select("intro_voice", "Suara judul", [{ v: "", l: "Ikut preset" }, { v: "none", l: "Tanpa narasi" }, { v: "auto", l: "Auto (ElevenLabs → lokal)" }, { v: "edge", l: "Edge TTS (gratis)" }, { v: "elevenlabs", l: "ElevenLabs" }], "")}
         ${UI.tri("highlight", "Highlight kata")}
         ${UI.select("upload_privacy", "Visibilitas upload", [{ v: "private", l: "Private" }, { v: "unlisted", l: "Unlisted" }, { v: "public", l: "Public" }], "private")}</div>
-        <div class="switches">${UI.toggle("auto_upload", "Upload ke YouTube setelah render", { checked: false, sub: "Headless — tidak ada jendela yang muncul; hashtag preset ikut terkirim" })}
-          ${UI.toggle("auto_meta", "Buat judul & deskripsi otomatis", { checked: true, sub: "Dari transkrip klip, dipakai saat upload" })}</div>`,
+        <div class="switches">${UI.toggle("auto_upload", "Upload setelah render", { checked: false, sub: "Headless — tidak ada jendela yang muncul" })}
+          ${UI.toggle("auto_meta", "Buat judul & deskripsi otomatis", { checked: true, sub: "Dari transkrip klip, dipakai saat upload" })}</div>
+        <div class="switches">${UI.toggle("up_youtube", "Ke YouTube", { checked: true })}${UI.toggle("up_tiktok", "Ke TikTok", { checked: false })}</div>`,
         foot: footAction("Export Campaign", "film", "Render 60 fps · bisa beberapa menit") })}</div>`,
     aside: UI.aside("Alur campaign", [
       "Pilih video sumber 16:9 yang sudah selesai (replay / rekaman).",
@@ -1115,6 +1164,7 @@ PAGES.campaign = { render(view) {
       ? `<option value="${esc(p.file)}" disabled>${esc(p.file)} — ${esc(p.error)}</option>`
       : `<option value="${esc(p.file)}">${esc(p.file)} · ${esc(p.layout)} · ${esc(p.fps)} fps</option>`).join("")
       || `<option value="">Tidak ada preset</option>`;
+    if (r.default && list.some((x) => x.file === r.default && !x.error)) sel.value = r.default;
     const show = () => {
       const p = list.find((x) => x.file === sel.value);
       $("#presetInfo").textContent = p && !p.error
@@ -1127,6 +1177,19 @@ PAGES.campaign = { render(view) {
     const s = requireSource(src);
     if (!s) return;
     const p = dropEmpty({ ...formValues($("#ed")) }, ["title", "end", "layout", "subtitle_provider", "intro_voice", "highlight", "preset"]);
+    const raw = ($("#ranges")?.value || "").trim();
+    if (raw) {
+      p.ranges = raw.split(/\r?\n/).map((line) => {
+        const [a, b, ...rest] = line.split(",");
+        return { start: a.trim(), end: (b || "").trim(), title: rest.join(",").trim() };
+      }).filter((r) => r.start !== "");
+      delete p.start; delete p.end;
+    }
+    const targets = [];
+    if (p.up_youtube !== false) targets.push("youtube");
+    if (p.up_tiktok === true) targets.push("tiktok");
+    delete p.up_youtube; delete p.up_tiktok;
+    if (p.auto_upload) p.upload_targets = targets;
     runJob($("#job"), "campaign_render", { ...s, ...p }, { title: "Campaign", btn: e.currentTarget });
   };
 } };

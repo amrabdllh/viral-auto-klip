@@ -455,6 +455,7 @@ YOUTUBE_CLIENT_SECRET_FILE = os.getenv("YOUTUBE_CLIENT_SECRET_FILE", "")
 YOUTUBE_PRIVACY = os.getenv("YOUTUBE_PRIVACY", "public")  # public | unlisted | private
 YOUTUBE_CATEGORY_ID = os.getenv("YOUTUBE_CATEGORY_ID", "22")  # 22 = People & Blogs
 YOUTUBE_OAUTH_TOKEN_FILE = ".yt_upload_token.json"  # tersimpan di BASE_DIR (jangan di-commit!)
+CAMPAIGN_DEFAULT_PRESET = os.getenv("CAMPAIGN_DEFAULT_PRESET", "motion-klip-gtavi-split.json")
 TIKTOK_UPLOADER_PATH = os.getenv("TIKTOK_UPLOADER_PATH", "")  # opsional, path ke executable tiktok-uploader
 TIKTOK_COOKIES_FILE = os.getenv("TIKTOK_COOKIES_FILE", "")    # cookies.txt sesi TikTok untuk tiktok-uploader
 
