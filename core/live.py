@@ -949,7 +949,9 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
     layout = None
     if settings["layout"] == "split":
         cam, game = settings["facecam_rect"], settings["gameplay_rect"]
-        if p.get("auto_facecam", True):
+        # Bila preset sudah menentukan koordinat tetap (ala Clipper), pakai langsung.
+        # Auto-deteksi hanya jalan bila preset tidak punya facecam_rect.
+        if not cam and p.get("auto_facecam", True):
             try:
                 det = detect_stream_layout(video, picked)
                 if det:
