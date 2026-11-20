@@ -178,7 +178,9 @@ const UI = {
     return `<label class="field ${cls}"><span class="lbl">${esc(label)}${val}</span>${control}${hint ? `<span class="hint">${hint}</span>` : ""}</label>`;
   },
   text(name, label, { value = "", placeholder = "", hint = "", type = "text", cls = "" } = {}) {
-    return UI.field(label, `<input type="${type}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${type === "password" ? 'autocomplete="off"' : ""}>`, { hint, cls });
+    // API key: "new-password" (bukan "off", yang diabaikan Chrome) agar browser/password manager tidak mengisi
+    // password login tersimpan ke kolom key — nilai isian otomatis bisa terbaca kosong oleh JS sehingga form menolak
+    return UI.field(label, `<input type="${type}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${type === "password" ? 'autocomplete="new-password" data-lpignore="true" data-1p-ignore spellcheck="false"' : ""}>`, { hint, cls });
   },
   num(name, label, { value = "", min = "", max = "", step = "", hint = "", cls = "" } = {}) {
     // "detik · 0 = otomatis" → satuan di kanan label, sisanya jadi hint

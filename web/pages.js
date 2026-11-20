@@ -910,13 +910,21 @@ PAGES.settings = { render(view) {
   function connModal() {
     modal({ title: "Tambah koneksi API", sub: "Base URL + API key. Model chat & gambar dideteksi otomatis.",
       body: `<div class="fields">${UI.text("name", "Nama", { placeholder: "mis. Gateway Claude", hint: "Bebas, muncul di dropdown provider." })}
-        ${UI.text("base_url", "Base URL", { type: "url", placeholder: "https://host.com atau https://host.com/v1", cls: "span-all" })}
+        ${UI.text("base_url", "Base URL", { placeholder: "https://host.com atau https://host.com/v1", cls: "span-all" })}
         ${UI.text("api_key", "API key", { type: "password", placeholder: "sk-…", cls: "span-all" })}
         ${UI.select("format", "Format", [{ v: "auto", l: "Otomatis (disarankan)" }, { v: "openai", l: "OpenAI (/v1/chat/completions)" }, { v: "anthropic", l: "Anthropic (/v1/messages)" }], "auto")}</div>`,
       foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Tes & simpan", { ico: "check", kind: "primary", attrs: "data-ok" }) }, (m) => {
       $("[data-ok]", m).onclick = (ev) => busy(ev.currentTarget, async () => {
         const v = formValues(m);
-        if (!/^https?:\/\//.test(v.base_url || "") || !v.api_key) return toast("Isi Base URL dan API key", true);
+        // tempelan sering membawa spasi/karakter tak terlihat (zero-width, BOM, baris baru) → bersihkan dulu
+        const clean = (s) => String(s || "").replace(/[​-‍﻿\s]+/g, "");
+        v.base_url = clean(v.base_url);
+        v.api_key = clean(v.api_key);
+        v.name = String(v.name || "").trim();
+        if (v.base_url && !/^https?:\/\//i.test(v.base_url)) v.base_url = "http://" + v.base_url;  // "127.0.0.1:3425/v1"
+        if (!v.base_url) return toast("Base URL belum diisi", true);
+        if (!/^https?:\/\/[^/\s]+/i.test(v.base_url)) return toast("Base URL tidak valid — contoh: https://host.com/v1", true);
+        if (!v.api_key) return toast("API key terbaca kosong. Bila kolom terisi otomatis oleh browser, hapus lalu tempel ulang key-nya.", true);
         try {
           const c = await api("/api/connections", { body: v });
           closeModal();
