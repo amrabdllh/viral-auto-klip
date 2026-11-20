@@ -96,6 +96,27 @@ def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> No
             ctx.log(f"Logo Brand Kit gagal di {Path(c['file_path']).name}: {exc}")
 
 
+def enforce_clip_duration(clips: List[Dict], *, tolerance: float = 0.75) -> List[Dict]:
+    """Buang kandidat di luar MIN/MAX_CLIP_DURATION.
+
+    AI kadang mengembalikan momen lebih pendek dari batas (mis. 12 dtk padahal
+    minimum 15). Kalau semua kandidat gugur, ambil yang paling panjang supaya
+    jendela tidak kosong.
+    """
+    lo, hi = float(config.MIN_CLIP_DURATION), float(config.MAX_CLIP_DURATION)
+
+    def dur(c: Dict) -> float:
+        try:
+            return float(c.get("end") or 0) - float(c.get("start") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    kept = [c for c in clips if lo - tolerance <= dur(c) <= hi + tolerance]
+    if not kept and clips:
+        kept = [max(clips, key=dur)]
+    return kept
+
+
 def render_options(params: Dict) -> Dict:
     aspect = params.get("output_type", "Vertical")
     return dict(
@@ -220,6 +241,7 @@ def clip_quick(ctx: JobContext) -> Dict:
     p["_lower_third"] = build_lower_third(p, transcript)
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
     clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video)
+    clips_data = enforce_clip_duration(clips_data)
     if p.get("categories"):
         clips_data = [c for c in clips_data if c.get("category") in p["categories"]]
     if p.get("keyword"):
