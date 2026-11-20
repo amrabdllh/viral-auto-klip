@@ -19,6 +19,7 @@ bisa dicocokkan ke video.
 from __future__ import annotations
 
 import csv
+import os
 import json
 import re
 import subprocess
@@ -265,6 +266,7 @@ class Recorder:
         except Exception:
             avg = 5.0
         n = max(3, int(round(backlog / max(avg, 1.0))))
+        self.log(f"Backlog {backlog:.0f} dtk, segmen rata-rata {avg:.1f} dtk → mulai {n} segmen ke belakang")
         run_no = len(self.runs)
         csv_path = self.dir / f"list_{run_no:02d}.csv"
         hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k.lower() in ("user-agent", "referer", "origin", "cookie"))
@@ -281,7 +283,7 @@ class Recorder:
             # playlist, lalu audio digeser dengan -itsoffset.
             # (Jangan pakai -copyts: timestamp absolut membuat segmen pertama
             #  menjadi raksasa dan akuntansi durasi ikut rusak.)
-            offset = self._audio_offset(v_url, a_url, headers, n)
+            offset = self._audio_offset(v_url, a_url, headers, n) if AUDIO_OFFSET_ENABLED else 0.0
             if abs(offset) > 0.05:
                 self.log(f"Offset audio {offset:+.2f} dtk dikoreksi")
                 cmd += ["-itsoffset", f"{offset:.3f}"]
