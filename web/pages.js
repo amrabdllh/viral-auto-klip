@@ -12,7 +12,15 @@ const ASPECT_CLIP = [{ v: "Vertical", l: "9:16 vertikal (crop wajah)" }, { v: "F
 const FIT = [{ v: "blur", l: "Utuh + latar blur" }, { v: "cover", l: "Crop penuh" }, { v: "pad", l: "Letterbox hitam" }];
 const VIDEO_MODES = [{ v: "single", l: "1 pembicara" }, { v: "podcast", l: "Podcast / 2 orang" }, { v: "group", l: "Grup 3+ orang" }, { v: "auto", l: "Deteksi otomatis" }];
 const WHISPER_DEVICES = [{ v: "", l: "Ikut Pengaturan" }, { v: "elevenlabs", l: "ElevenLabs Scribe (paling akurat)" }, { v: "auto", l: "Whisper di GPU (gratis)" }, { v: "cpu", l: "Whisper di CPU (lambat)" }, { v: "groq", l: "Groq Whisper (cloud)" }];
-const EDIT_STYLES = [{ v: "", l: "Ikut Pengaturan" }, { v: "minimal", l: "Minimal" }, { v: "dinamis", l: "Dinamis" }, { v: "maksimal", l: "Maksimal" }];
+const EDIT_STYLES = [{ v: "", l: "Ikut Pengaturan" }, { v: "auto", l: "Otomatis (AI per klip)" }, { v: "minimal", l: "Minimal" }, { v: "dinamis", l: "Dinamis" }, { v: "maksimal", l: "Maksimal" }];
+const PUBLISH_CATS = [{ v: "", l: "Otomatis (AI dari isi klip)" }, { v: "gaming", l: "Gaming" }, { v: "comedy", l: "Komedi" }, { v: "education", l: "Edukasi" },
+  { v: "finance", l: "Keuangan" }, { v: "motivation", l: "Motivasi" }, { v: "tech", l: "Teknologi" }, { v: "relationship", l: "Hubungan" }, { v: "general", l: "Umum" }];
+const pubStatus = () => {
+  const pf = STATE.status?.platforms || {};
+  const on = Object.values(pf).filter((p) => p.ready && (p.logged_in !== false)).map((p) => p.label);
+  return on.length ? `Terhubung: ${on.join(", ")}.` : "Belum ada platform terhubung — hubungkan YouTube/TikTok di <a href='#upload'>Jadwal Upload</a> dulu.";
+};
+const CLIP_COUNTS = [{ v: "", l: "Otomatis — kualitas (AI)" }, { v: "farm", l: "Otomatis — farming (lebih banyak)" }, ...[3, 5, 8, 10, 15, 20, 25, 30, 40].map((n) => ({ v: n, l: `${n} klip` }))];
 const captionSelect = (v = "viral") => UI.select("caption_style", "Gaya caption", CAPTION_STYLES(), v);
 const CAPTION_LABELS = { viral: "Viral (kuning tebal)", modern: "Modern", tiktok_bold: "TikTok Bold", karaoke: "Karaoke", neon: "Neon",
   gradient: "Gradasi", minimal: "Minimal", emoji: "Emoji", hormozi: "Hormozi", mrbeast: "MrBeast", clean: "Bersih", bold: "Tebal" };
@@ -146,12 +154,16 @@ PAGES.analisis = { render(view, q) {
   view.innerHTML = toolPage({ id: "analisis", needs: ["llm", "ffmpeg"],
     desc: "AI membaca seluruh transkrip, memilih momen paling viral, lalu merender klip vertikal dengan reframe wajah, caption animasi, dan editing dinamis.",
     main: UI.panel({ id: "f", body: UI.section("Sumber video", `<div id="src"></div>`) +
-      UI.section("Klip", `<div class="fields">${UI.num("num_clips", "Jumlah klip", { value: 8, min: 1, max: 25 })}${UI.num("min_duration", "Durasi minimum", { value: 15, min: 5, max: 120, hint: "detik" })}
-        ${UI.num("max_duration", "Durasi maksimum", { value: 60, min: 10, max: 180, hint: "detik" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
-        ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "single")}${UI.select("language", "Bahasa video", LANGS, "id")}</div>`) +
-      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Opsional — klip yang menyebut kata ini diutamakan." })}</div>
+      UI.section("Klip", `<div class="fields">${UI.select("num_clips", "Jumlah klip", CLIP_COUNTS, "", { hint: "Kualitas: hanya klip yang benar-benar bagus (±1 per 4,5 menit maks). Farming: klip 'lumayan' ikut diambil (±1 per 3 menit, maks 40)." })}${UI.num("min_duration", "Durasi minimum", { value: "", min: 5, max: 120, hint: "detik · kosong = otomatis (AI, mulai 15)" })}
+        ${UI.num("max_duration", "Durasi maksimum", { value: "", min: 10, max: 180, hint: "detik · kosong = otomatis (AI, hingga 90)" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
+        ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "auto")}${UI.select("language", "Bahasa video", LANGS, "id")}</div>`) +
+      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "auto")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Kosong = otomatis: klip yang menyebut topik yang lagi naik diutamakan." })}</div>
         <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
-      UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 55, min: 0, max: 100 })}${UI.tri("jump_cuts", "Potong jeda")}${UI.tri("dynamic_zoom", "Zoom dinamis")}${UI.tri("progress_bar", "Progress bar")}
+      UI.section("Upload otomatis", `<div class="switches">${UI.toggle("auto_publish", "Upload otomatis ke jam FYP terbaik", { checked: false, sub: "Klip langsung dijadwalkan & diupload sendiri ke platform yang terhubung — tanpa isi jadwal." })}</div>
+        <div class="fields">${UI.select("auto_publish_platform", "Platform", [{ v: "", l: "Semua yang terhubung" }, { v: "youtube", l: "YouTube Shorts" }, { v: "tiktok", l: "TikTok" }], "")}
+        ${UI.select("publish_category", "Kategori jadwal", PUBLISH_CATS, "")}${UI.text("extra_hashtags", "Hashtag tambahan (job ini)", { placeholder: "#gta6 #windah", hint: "Ditambah hashtag AI + hashtag global di Pengaturan." })}</div>
+        <p class="tiny muted" style="margin:4px 0 0">${pubStatus()}</p>`) +
+      UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: "", min: 0, max: 100, hint: "Kosong = otomatis (saringan kualitas Editor-AI)" })}${UI.tri("jump_cuts", "Potong jeda")}${UI.tri("dynamic_zoom", "Zoom dinamis")}${UI.tri("progress_bar", "Progress bar")}
         ${UI.tri("sfx", "SFX transisi")}${UI.tri("end_cta", "Ajakan di akhir")}${UI.select("color_grade", "Warna", [{ v: "", l: "Ikut preset" }, "none", "natural", "vibrant", "cinematic"], "")}
         ${UI.tri("cold_open", "Cold open + rewind")}${UI.tri("caption_fx", "Caption animasi + emoji")}${UI.tri("sound_design", "Sound design")}
         ${UI.tri("speaker_cam", "Kamera ikut pembicara")}${UI.tri("broll", "B-roll otomatis")}${UI.tri("shake", "Layar goyang")}
@@ -167,7 +179,9 @@ PAGES.analisis = { render(view, q) {
   const src = sourceInput($("#src"), { prefill: q.url || "" });
   $("#go").onclick = (e) => {
     const s = requireSource(src); if (!s) return;
-    const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names"]);
+    const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names", "publish_category", "extra_hashtags"]);
+    if (p.auto_publish_platform) p.auto_publish_platforms = [p.auto_publish_platform];
+    delete p.auto_publish_platform;
     runJob($("#job"), "clip_quick", { ...p, ...s }, { title: "Analisis AI", btn: e.currentTarget });
   };
 } };
@@ -540,7 +554,13 @@ PAGES.analytics = { render(view) {
     try {
       const d = await api(`/api/analytics?category=${encodeURIComponent(cat)}&refresh=${refresh}`);
       const s = d.summary;
-      $("#out").innerHTML = `<div class="cols-4">${UI.stat("Rata-rata views", fmtNum(s.avg_views))}${UI.stat("Est. pendapatan / video", fmtIDR(s.est_revenue_idr), "estimasi kasar")}
+      const ago = d._ts ? Math.max(0, Math.round((Date.now() / 1000 - d._ts) / 60)) : null;
+      const fresh = `<p class="tiny muted" style="margin:0">Data ${ago == null ? "" : ago < 1 ? "baru saja diperbarui" : `diperbarui ${ago} menit lalu`}${d.auto_refresh_min ? ` · otomatis tiap ${d.auto_refresh_min} menit` : ""} · sumber: ${esc(d.source)}</p>`;
+      const topics = (d.trending_topics || []).length ? UI.panel({ title: "Topik yang lagi naik minggu ini", sub: "Muncul berulang di video terbaru dari banyak channel — klik untuk cari ide",
+        body: `<div class="row">${d.trending_topics.map((t) => `<button type="button" class="pill accent" data-topic="${esc(t.topic)}" title="${esc((t.examples || []).join(" · "))}" style="cursor:pointer;border:0">${esc(t.topic)} · ${t.channels} channel</button>`).join("")}</div>` }) : "";
+      const gt = (d.google_trends || []).length ? UI.panel({ title: "Pencarian Google yang melonjak (Indonesia)", sub: "Real-time dari Google Trends",
+        body: `<div class="row">${d.google_trends.slice(0, 12).map((g) => `<button type="button" class="pill" data-topic="${esc(g.topic)}" title="${esc((g.news || []).join(" · "))}" style="cursor:pointer;border:0">${esc(g.topic)} <span class="muted">${esc(g.traffic)}</span></button>`).join("")}</div>` }) : "";
+      $("#out").innerHTML = fresh + (topics || gt ? `<div class="cols-2">${topics}${gt}</div>` : "") + `<div class="cols-4">${UI.stat("Rata-rata views", fmtNum(s.avg_views))}${UI.stat("Est. pendapatan / video", fmtIDR(s.est_revenue_idr), "estimasi kasar")}
         ${UI.stat("Skor viral rata-rata", `${s.viral_score}<small>/100</small>`)}${UI.stat("Persaingan", esc(s.competition))}</div>
         <div class="cols-2">${UI.panel({ title: "Waktu upload terbaik", body: `<dl class="kv" style="grid-template-columns:auto 1fr">${Object.entries(d.best_times).map(([pf, t]) => `<dt>${esc(pf)}</dt><dd><div class="row" style="justify-content:flex-end;gap:6px">${t.map((x) => UI.pill(x, "teal")).join("")}</div></dd>`).join("")}</dl>` })}
           ${UI.panel({ title: "Hashtag teratas", body: `<div class="row">${d.top_hashtags.map((h) => UI.pill("#" + h, "accent")).join("")}</div><p class="tiny muted">${esc(d.note)} Sumber: ${esc(d.source)}.</p>` })}</div>
@@ -552,23 +572,31 @@ PAGES.analytics = { render(view) {
             <td class="r">${UI.btn("Buat klip", { size: "sm", href: `#analisis?url=${encodeURIComponent(v.url)}` })}</td></tr>`).join("")}</tbody></table></div>` })}`;
     } catch (e) { $("#out").innerHTML = UI.banner("bad", esc(e.message)); }
   }
+  $("#out").addEventListener("click", (ev) => {  // topik → langsung cari ide konten di Saran Viral AI
+    const b = ev.target.closest("[data-topic]"); if (!b) return;
+    STATE.prefill.ideas = { niche: b.dataset.topic }; location.hash = "#ideas";
+  });
   $("#rf").onclick = () => load(true);
   load(false);
 } };
 
 /* ================================================================== SARAN VIRAL */
 PAGES.ideas = { render(view) {
-  view.innerHTML = `<div class="page">${pageHead("Saran Viral AI", "AI membaca judul yang sedang ramai di niche-mu lalu memberi pola viral dan ide konten siap eksekusi.")}${keyBanner(["llm"])}
+  view.innerHTML = `<div class="page">${pageHead("Saran Viral AI", "AI membaca video yang naik HARI INI & MINGGU INI di niche-mu, topik yang sedang booming, dan Google Trends, lalu memberi ide konten siap eksekusi.")}${keyBanner(["llm"])}
     ${UI.panel({ id: "f", body: `<div class="fields" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr) 120px">${UI.text("niche", "Niche", { placeholder: "mis. keuangan anak muda, horor, resep murah" })}
       ${UI.select("platform", "Platform", ["TikTok & YouTube Shorts", "TikTok", "YouTube Shorts", "Instagram Reels"], "TikTok & YouTube Shorts")}${UI.num("count", "Jumlah ide", { value: 10, min: 3, max: 20 })}</div>`,
       foot: footAction("Cari ide", "bulb") })}<div id="out" class="stack lg"></div></div>`;
+  if (STATE.prefill.ideas) { $('#f [name="niche"]').value = STATE.prefill.ideas.niche || ""; delete STATE.prefill.ideas; }
   $("#go").onclick = (e) => {
     const p = formValues($("#f")); if (!p.niche.trim()) return toast("Isi niche dulu", true);
     busy(e.currentTarget, async () => {
-      $("#out").innerHTML = UI.panel({ body: UI.empty("bulb", "AI sedang menganalisis tren…", "Butuh 10–40 detik.") });
+      $("#out").innerHTML = UI.panel({ body: UI.empty("bulb", "Mengambil tren hari ini & minggu ini, lalu AI menganalisis…", "Butuh 15–45 detik.") });
       try {
         const d = await api("/api/tools/viral-ideas", { body: { params: p } });
-        $("#out").innerHTML = (d.patterns?.length ? UI.panel({ title: "Pola viral yang terlihat", body: `<ul class="ink2" style="display:grid;gap:6px">${d.patterns.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` }) : "") +
+        const trendInfo = (d.trend_topics?.length || d.google_trends?.length) ? UI.panel({ title: "Data tren yang dipakai AI", sub: d.data_date ? `Diambil ${esc(d.data_date)}` : "",
+          body: `${d.trend_topics?.length ? `<div class="row">${d.trend_topics.map((t) => UI.pill(`${t.topic} · ${t.channels} channel`, "accent")).join("")}</div>` : ""}
+            ${d.google_trends?.length ? `<p class="tiny muted" style="margin:8px 0 4px">Pencarian Google yang melonjak</p><div class="row">${d.google_trends.slice(0, 8).map((g) => UI.pill(g.topic)).join("")}</div>` : ""}` }) : "";
+        $("#out").innerHTML = trendInfo + (d.patterns?.length ? UI.panel({ title: "Pola viral yang terlihat", body: `<ul class="ink2" style="display:grid;gap:6px">${d.patterns.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` }) : "") +
           `<div class="cols-2">${(d.ideas || []).map((i, n) => UI.panel({ title: i.title, sub: [i.format, i.difficulty].filter(Boolean).map(esc).join(" · "),
             body: `<p><b class="small">Hook</b><br><span class="ink2">${esc(i.hook)}</span></p><p class="small muted">${esc(i.why)}</p>`,
             foot: `${i.tool ? UI.pill(i.tool, "teal") : ""}<span class="spacer"></span>${UI.btn("Buat di Content Creator", { size: "sm", ico: "wand", attrs: `data-i="${n}"` })}` })).join("")}</div>` +
@@ -601,7 +629,8 @@ PAGES.title = { render(view) {
             body: `<h3 style="font-size:16px">${esc(t.title)}</h3><p class="small muted">${esc(t.why || "")}</p>` })).join("")}</div>
           ${UI.panel({ title: "Deskripsi", head: UI.btn("Salin", { ico: "copy", size: "sm", kind: "ghost", attrs: `data-copy="${esc(d.description)}"` }), body: `<p class="ink2">${esc(d.description)}</p>` })}
           ${UI.panel({ title: `Tag (${(d.tags || []).length})`, head: UI.btn("Salin", { ico: "copy", size: "sm", kind: "ghost", attrs: `data-copy="${esc(tags)}"` }), body: `<div class="row">${(d.tags || []).map((t) => UI.pill(t)).join("")}</div>${d.hashtags?.length ? `<div class="row">${d.hashtags.map((t) => UI.pill(t, "teal")).join("")}</div>` : ""}` })}
-          ${d.thumbnail_text?.length ? UI.panel({ title: "Teks thumbnail", body: `<div class="row">${d.thumbnail_text.map((t) => UI.pill(t, "accent")).join("")}</div>` }) : ""}</div>`;
+          ${d.thumbnail_text?.length ? UI.panel({ title: "Teks thumbnail", body: `<div class="row">${d.thumbnail_text.map((t) => UI.pill(t, "accent")).join("")}</div>` }) : ""}
+          ${d.trend_topics?.length ? UI.panel({ title: "Topik terkait yang lagi naik", sub: "Dari video minggu ini — dipakai AI untuk kata kunci", body: `<div class="row">${d.trend_topics.map((t) => UI.pill(`${t.topic} · ${t.channels} channel`, "teal")).join("")}</div>` }) : ""}</div>`;
         bindCards(out);
       } catch (err) { out.innerHTML = UI.banner("bad", esc(err.message)); }
     });
@@ -698,12 +727,24 @@ PAGES.upload = { render(view) {
   view.innerHTML = `<div class="page">${pageHead("Jadwal Upload", "Jadwalkan klip ke YouTube Shorts & TikTok. Server mengunggah otomatis saat jadwal tiba (laptop harus menyala).",
     UI.btn("Jadwalkan klip", { ico: "plus", id: "addOne" }) + UI.btn("Smart Cadence", { ico: "calendar", kind: "primary", id: "addBulk" }))}
     <div class="cols-2" id="pf"></div>
+    <div id="ins"></div>
     ${UI.panel({ head: `<div class="row nw">${UI.btn("", { ico: "left", size: "sm", title: "Bulan sebelumnya", id: "prev" })}<h2 id="mon" style="min-width:150px;text-align:center"></h2>${UI.btn("", { ico: "right", size: "sm", title: "Bulan berikutnya", id: "next" })}${UI.btn("Hari ini", { size: "sm", kind: "ghost", id: "today" })}</div><span class="spacer"></span><div class="row" id="counts"></div>`,
       bodyCls: "flush", body: `<div class="cal" id="cal"></div>` })}
     ${UI.panel({ title: "Daftar jadwal", bodyCls: "flush", body: `<div class="table-wrap"><table><thead><tr><th>Klip</th><th>Platform</th><th>Waktu</th><th>Status</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>` })}</div>`;
   const pf = STATE.status?.platforms || {};
   $("#pf").innerHTML = Object.entries(pf).map(([, v]) => UI.panel({ title: v.label, head: v.ready ? UI.pill("Terhubung", "ok") : UI.pill("Belum diset", "warn"),
     body: v.ready ? `<p class="small muted">Siap mengunggah.</p>` : `<p class="small ink2">${esc(v.hint)}</p>${UI.btn("Buka Pengaturan", { size: "sm", href: "#settings", ico: "sliders" })}` })).join("");
+  // v6.8: jam upload otomatis hari ini + yang sudah dipelajari dari views 24 jam
+  const WHY = { jangkar: ["Jangkar", "teal"], terbukti: ["Terbukti ramai", "ok"], eksplorasi: ["Coba jam baru", "accent"] };
+  const DT = { weekday: "hari kerja", weekend: "akhir pekan" };
+  api("/api/upload-insights").then((d) => {
+    $("#ins").innerHTML = UI.panel({ title: "Jam upload otomatis", sub: "Jam jangkar stabil, disesuaikan per hari, lalu bergeser ke jam yang terbukti ramai untuk channel-mu",
+      body: `<div class="cols-2">${Object.entries(d.platforms).map(([k, v]) => `<div><b class="small">${k === "youtube" ? "YouTube Shorts" : "TikTok"}</b>
+        <div class="row" style="margin:6px 0">${v.today.map((t) => UI.pill(`${t.time} · ${WHY[t.why]?.[0] || t.why}`, WHY[t.why]?.[1] || "")).join("")}</div>
+        <p class="tiny muted" style="margin:0">${v.learning ? `Belajar aktif dari ${v.measured} upload (median ${fmtNum(v.median_views)} views 24 jam).` : `Mengumpulkan data: ${v.measured}/${v.needed} upload terukur.`}
+        ${v.best.length ? " Jam terbaik: " + v.best.map((b) => `${String(b.hour).padStart(2, "0")}:00 ${DT[b.daytype]} (${b.score}×)`).join(", ") : ""}
+        ${k === "tiktok" && !d.tiktok_profile ? " Isi <a href='#settings'>Username TikTok</a> agar views TikTok bisa diukur." : ""}</p></div>`).join("")}</div>` });
+  }).catch(() => {});
   let cursor = new Date(); cursor.setDate(1);
   let items = [];
   const STL = { pending: "Menunggu", uploading: "Mengunggah", done: "Berhasil", failed: "Gagal", paused: "Dijeda" };
@@ -853,7 +894,8 @@ PAGES.settings = { render(view) {
     ${UI.banner("info", "Bingung? Klik <b>Setel otomatis</b> — sistem membaca API key yang terpasang lalu memilih provider, model, suara, dan mesin transkripsi terbaik. Setelah itu cukup tempel link di Beranda.")}
     <div class="layout"><div class="stack lg"><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
     <aside>${st ? UI.panel({ title: "Kemampuan aktif", body: `<div class="stack">${[["LLM", st.ai.providers.map((p) => pill(p.configured, p.provider))], ["Suara", Object.entries(st.media.tts).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
-        ["Gambar", Object.entries(st.media.image).map(([k, v]) => pill(v.ready, PRETTY[k] || k))], ["Lainnya", [pill(st.media.elevenlabs, "ElevenLabs"), pill(st.media.stock, "Stok"), pill(st.media.youtube_api, "YouTube API"), pill(st.ffmpeg, "FFmpeg")]]]
+        ["Gambar", Object.entries(st.media.image).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
+        ["Video AI", Object.entries(st.media.video || {}).map(([k, v]) => pill(v.ready, v.label))], ["Lainnya", [pill(st.media.elevenlabs, "ElevenLabs"), pill(st.media.stock, "Stok"), pill(st.media.youtube_api, "YouTube API"), pill(st.ffmpeg, "FFmpeg")]]]
         .map(([k, list]) => `<div class="stack" style="gap:6px"><span class="section-title">${k}</span><div class="row" style="gap:6px">${list.join("")}</div></div>`).join("")}</div>` }) : ""}
       ${st ? UI.panel({ title: "Tes provider AI", body: `${UI.field("Provider", `<select id="tp">${UI.options(st.ai.providers.map((p) => p.provider), st.ai.provider)}</select>`)}${UI.field("Model", `<select id="tm">${UI.options(aiModelOptions(st.ai.provider), "")}</select>`)}
         <div class="row">${UI.btn("Tes koneksi", { size: "sm", id: "tbtn" })}${UI.btn("Deteksi model", { ico: "refresh", size: "sm", id: "dbtn" })}</div><div id="aiRes" class="small"></div>` }) : ""}</aside></div>

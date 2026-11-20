@@ -149,6 +149,21 @@ def _source_title(params: Dict, video: str) -> str:
     return Path(video).stem
 
 
+_GAMING_RE = re.compile(r"\b(gta|grand theft auto|minecraft|roblox|valorant|mobile legends?|mlbb|pubg|free ?fire|"
+                        r"fortnite|genshin|elden ring|resident evil|horror game|gameplay|let'?s play|walkthrough|"
+                        r"live ?stream|mabar|speedrun|ranked|push rank|playthrough|ps5|nintendo|steam|\bgame\b)", re.I)
+
+
+def content_type(params: Dict, title: str, url: str = "") -> str:
+    """v6.8: tebak tipe konten untuk menyesuaikan kriteria momen. 'gaming_stream' bila judul/link menunjukkan
+    gaming atau siaran live (youtube.com/live/…), selain itu kosong (obrolan/podcast)."""
+    if params.get("content_type"):
+        return str(params["content_type"])
+    if _GAMING_RE.search(title or "") or "/live/" in (url or ""):
+        return "gaming_stream"
+    return ""
+
+
 def source_channel(url: str) -> str:
     """Nama channel/uploader sumber (untuk lower third). Kosong bila gagal."""
     if not url:
@@ -190,11 +205,19 @@ def clip_quick(ctx: JobContext) -> Dict:
     from .clipper import process_clips
     from .utils import get_video_info
     p = ctx.params
-    config.MIN_VIRAL_SCORE = max(0.0, min(float(p.get("min_score", 55)), 100.0))
-    config.MIN_CLIP_DURATION = max(5, int(p.get("min_duration", 15)))
-    config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(p.get("max_duration", 60)))
-    num = max(1, min(int(p.get("num_clips", 8)), 25))
-    config.MAX_CLIPS_PER_VIDEO = num
+
+    def _auto(v) -> bool:  # isian dikosongkan / "auto" = AI yang menentukan (v6.8)
+        return v is None or str(v).strip().lower() in ("", "0", "auto", "otomatis")
+    farm = str(p.get("num_clips") or "").strip().lower() in ("farm", "farming")  # v6.8: lebih banyak klip
+    auto_n, auto_score = _auto(p.get("num_clips")) or farm, _auto(p.get("min_score"))
+    auto_dur = _auto(p.get("min_duration")) and _auto(p.get("max_duration"))
+    # skor minimum otomatis: gerbang kandidat dilonggarkan, kualitas akhirnya disaring Editor-AI
+    config.MIN_VIRAL_SCORE = 45.0 if auto_score else max(0.0, min(float(p["min_score"]), 100.0))
+    config.MIN_CLIP_DURATION = int(config.AUTO_MIN_DURATION) if _auto(p.get("min_duration")) else max(5, int(p["min_duration"]))
+    config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(config.AUTO_MAX_DURATION) if _auto(p.get("max_duration")) else int(p["max_duration"]))
+    num = 0 if auto_n else max(1, min(int(p["num_clips"]), 40))
+    auto_mode = ("farm" if farm else "quality") if auto_n else False
+    config.MAX_CLIPS_PER_VIDEO = num or int(config.AUTO_MAX_CLIPS)
     if p.get("watermark_text"):
         config.WATERMARK_TEXT = p["watermark_text"]
     llm = apply_ai_params(p) and p.get("use_llm", True)
@@ -210,33 +233,71 @@ def clip_quick(ctx: JobContext) -> Dict:
     video = resolve_source(ctx, p)
     info = get_video_info(video)
     info["title"] = _source_title(p, video)
+    info["content_type"] = content_type(p, info["title"], p.get("url", ""))
+    if info["content_type"] == "gaming_stream":
+        ctx.log("Tipe konten: live/gaming → momen reaksi & kejadian game diutamakan, kandidat dari puncak suara ikut dinilai")
+        if _auto(p.get("min_duration")):
+            config.MIN_CLIP_DURATION = max(config.MIN_CLIP_DURATION, 22)  # reaksi butuh pengantar
+    if auto_n:  # batas atas sesuai panjang video: ±1 klip per 4,5 menit (video 4 jam → hingga 30 klip)
+        minutes = float(info.get("duration") or 0) / 60
+        per, cap = ((config.AUTO_FARM_MINUTES_PER_CLIP, config.AUTO_FARM_MAX_CLIPS) if farm
+                    else (config.AUTO_MINUTES_PER_CLIP, config.AUTO_MAX_CLIPS))
+        num = int(max(config.AUTO_MIN_CLIPS, min(cap, math.ceil(minutes / per))))
+        config.MAX_CLIPS_PER_VIDEO = num
+        ctx.log(f"Mode otomatis{' farming' if farm else ''}: video {minutes:.0f} menit → hingga {num} klip (jumlah akhir ditentukan kualitas)"
+                + (f", durasi {config.MIN_CLIP_DURATION}–{config.MAX_CLIP_DURATION} dtk" if auto_dur else ""))
     transcript, tinfo = transcribe(ctx, video, p, 18)
     # Nama channel bukan nama pembicara: di podcast ia menempel pada tamu/host yang sedang tampil.
     # Kartu nama hanya muncul bila pengguna mengisi "Nama pembicara".
     p["_lower_third"] = build_lower_third(p, transcript)
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
-    clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video)
+    clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video, auto_count=auto_mode)
     if p.get("categories"):
         clips_data = [c for c in clips_data if c.get("category") in p["categories"]]
     if p.get("keyword"):
         kw = p["keyword"].lower()
         boosted = [c for c in clips_data if kw in (c.get("transcript") or c.get("text", "")).lower()]
         clips_data = boosted + [c for c in clips_data if c not in boosted]
+    else:  # v6.8: tanpa kata kunci → momen yang menyebut topik yang SEDANG naik diutamakan otomatis
+        try:
+            from . import trends
+            hits = trends.boost_trending(clips_data)
+            if hits:
+                ctx.log(f"Topik lagi naik disebut di {len(hits)} klip: {', '.join(sorted(set(hits)))[:120]}")
+        except Exception as exc:
+            logger.warning(f"Boost topik tren dilewati: {str(exc)[:120]}")
     if not clips_data:
         raise RuntimeError("Tidak ada momen yang lolos skor minimum — turunkan Min Score atau perpendek durasi")
     if p.get("hook_card") is False:
         for c in clips_data:
             c["no_hook_card"] = True
-    ctx.progress(58, "Render", f"Merender {min(len(clips_data), num)} klip (reframe wajah, caption, editing)…")
-    clips = process_clips(video, clips_data[:num], ctx.dir, **render_options(p))
+    n_render = len(clips_data) if auto_n else min(len(clips_data), num)
+    ctx.progress(58, "Render", f"Merender {n_render} klip (reframe wajah, caption, editing)"
+                 + (f" — mode otomatis, perkiraan ±{max(1, round(n_render * 4))} menit…" if auto_n else "…"))
+    clips = process_clips(video, clips_data[:n_render], ctx.dir, **render_options(p))
     brand_clips(ctx, clips, p.get("brand_kit"))
     ctx.progress(92, "Publish", "Paket upload & metadata")
     publish = _publish(ctx, clips, p)
     register_clips(ctx, clips, "analisis_ai")
     (ctx.dir / "transcript.json").write_text(json.dumps(transcript, ensure_ascii=False), encoding="utf-8")
-    return {"_message": f"{len(clips)} klip viral siap", "clips": clips, "total_clips": len(clips),
+    auto_pub = None
+    if p.get("auto_publish") and clips:  # v6.8: langsung dijadwalkan ke jam FYP terbaik, upload sendiri
+        from . import autopublish
+        ctx.progress(96, "Upload otomatis", "Menjadwalkan klip ke jam FYP terbaik…")
+        auto_pub = autopublish.schedule_clips(clips, platforms=p.get("auto_publish_platforms") or None,
+                                              niche_override=p.get("publish_category") or "",
+                                              extra_tags=p.get("extra_hashtags") or "", content_type=info.get("content_type", ""))
+        if auto_pub["skipped"]:
+            ctx.log(f"Upload otomatis dilewati: {auto_pub['skipped']}")
+        for s in auto_pub["scheduled"]:
+            ctx.log(f"Dijadwalkan {datetime.fromtimestamp(s['run_at']).strftime('%a %d %b %H:%M')} → "
+                    f"{', '.join(s['platforms'])} ({s['niche']}, jam {s.get('slot', 'jangkar')}): {s['title'][:60]}")
+    return {"_message": f"{len(clips)} klip viral siap" + (f" · {len(auto_pub['scheduled'])} dijadwalkan otomatis"
+                                                            if auto_pub and auto_pub["scheduled"] else ""),
+            "clips": clips, "total_clips": len(clips),
             "transcription": tinfo, "publish_folder": publish, "source": video,
-            "ai": f"{config.AI_PROVIDER}/{config.LLM_MODEL}" if llm else "local-only"}
+            "ai": f"{config.AI_PROVIDER}/{config.LLM_MODEL}" if llm else "local-only",
+            "auto_publish": auto_pub}
 
 
 # ============================================================================ Atur Manual
@@ -655,11 +716,24 @@ def optimize_title(params: Dict) -> Dict:
                     f"Transkrip: {info['text'][:8000]}")
     if not material:
         raise ValueError("Isi judul/topik atau link YouTube")
-    return _llm(
+    # v6.8: judul/tag dioptimasi terhadap apa yang SEDANG naik minggu ini, bukan pengetahuan lama AI
+    trend = {"text": "", "topics": [], "videos": []}
+    try:
+        from . import trends
+        topic = " ".join(re.findall(r"\w+", material.split("\n")[0].replace("Judul sekarang:", ""))[:6]) or material[:60]
+        trend = trends.ai_context(topic, max_titles=10)
+    except Exception as exc:
+        logger.warning(f"Data tren untuk optimasi judul gagal: {str(exc)[:120]}")
+    out = _llm(
         f"Optimasi metadata video untuk {params.get('platform', 'YouTube')} ({params.get('language', 'Bahasa Indonesia')}).\n\n{material}\n\n"
+        + (f"DATA TREN TERBARU (pakai kata kunci/topik yang relevan dengan video ini saja):\n{trend['text']}\n\n" if trend["text"] else "")
+        +
         "Balas JSON: {\"titles\":[{\"type\":\"SEO\",\"title\":\"...\",\"why\":\"...\"},{\"type\":\"Viral\",...},{\"type\":\"CTR\",...},"
         "{\"type\":\"Balanced\",...}],\"description\":\"250-300 karakter\",\"tags\":[\"15 tag tanpa #\"],"
-        "\"hashtags\":[\"#..\"],\"thumbnail_text\":[\"3 opsi teks thumbnail maks 4 kata\"]}. Judul maks 70 karakter, tanpa clickbait menipu.")
+        "\"hashtags\":[\"#..\"],\"thumbnail_text\":[\"3 opsi teks thumbnail maks 4 kata\"]}. Judul maks 70 karakter, "
+        "memancing penasaran tapi tanpa clickbait menipu.")
+    out["trend_topics"] = trend.get("topics", [])
+    return out
 
 
 def generate_prompts(params: Dict) -> Dict:
@@ -676,19 +750,29 @@ def generate_prompts(params: Dict) -> Dict:
 
 def viral_suggestions(params: Dict) -> Dict:
     niche = (params.get("niche") or "umum").strip()
-    trending = []
+    # v6.8: data HARI INI/MINGGU INI (urut views) + topik yang naik + Google Trends, bukan pencarian relevansi lama
+    from . import trends
+    ctx_data = {"text": "", "videos": [], "topics": [], "google_trends": []}
     try:
-        trending = [v["title"] for v in sources.youtube_search(f"{niche} viral", 15)]
+        ctx_data = trends.ai_context(niche if niche != "umum" else "viral indonesia")
     except Exception as exc:
-        logger.warning(f"Pencarian tren gagal: {exc}")
+        logger.warning(f"Data tren segar gagal: {str(exc)[:120]}")
+    trending = [v["title"] for v in ctx_data["videos"]]
+    if not trending:
+        try:
+            trending = [v["title"] for v in sources.youtube_search(f"{niche} viral", 15)]
+        except Exception as exc:
+            logger.warning(f"Pencarian tren gagal: {exc}")
     return _llm(
         f"Niche: {niche}. Platform: {params.get('platform', 'TikTok & YouTube Shorts')}. Audiens: Indonesia.\n"
-        f"Judul video yang sedang ramai di niche ini (data pencarian):\n- " + "\n- ".join(trending[:15]) +
+        + (ctx_data["text"] + "\n\nUtamakan ide yang menunggangi topik yang SEDANG naik di atas (momentum). " if ctx_data["text"] else
+           "Judul video yang sedang ramai di niche ini (data pencarian):\n- " + "\n- ".join(trending[:15])) +
         f"\n\nBuat {int(params.get('count', 10))} ide konten viral. Balas JSON {{\"patterns\":[\"pola viral yang terlihat\"],"
         "\"ideas\":[{\"title\":\"..\",\"hook\":\"kalimat 2 detik pertama\",\"format\":\"talking head / faceless / listicle / ...\","
         "\"why\":\"alasan berpotensi viral\",\"difficulty\":\"mudah|sedang|sulit\",\"tool\":\"fitur studio yang cocok: "
         "Analisis AI / Content Creator / Story Studio / Motion Graphic / Split Cam\"}],\"avoid\":[\"hal yang sebaiknya dihindari\"]}",
-        max_tokens=4000) | {"trending_sample": trending[:15]}
+        max_tokens=4000) | {"trending_sample": trending[:15], "trend_topics": ctx_data["topics"],
+                            "google_trends": ctx_data["google_trends"][:10], "data_date": ctx_data.get("date", "")}
 
 
 def assistant_chat(params: Dict) -> Dict:
@@ -731,10 +815,13 @@ def _days_since(date: Optional[str]) -> float:
 
 def viral_analytics(params: Dict) -> Dict:
     import requests
+    from . import trends
     category = params.get("category", "Semua")
+    if not params.get("_auto"):
+        trends.watch_category(category)  # kategori yang dibuka ikut diperbarui otomatis
     cache_key = f"analytics:{category}"
     cached = db.kv_get(cache_key)
-    if cached and time.time() - cached.get("_ts", 0) < 3600 and not params.get("refresh"):
+    if cached and time.time() - cached.get("_ts", 0) < 3600 and not params.get("refresh") and cached.get("trending_topics") is not None:
         return cached
     videos: List[Dict] = []
     source = "yt-dlp search"
@@ -757,13 +844,22 @@ def viral_analytics(params: Dict) -> Dict:
             source = "YouTube Data API (mostPopular ID)"
         except Exception as exc:
             logger.warning(f"YouTube API gagal: {exc}")
+    # v6.8: video segar (hari ini + minggu ini, urut views) — dulu pencarian relevansi tanpa filter waktu
+    seen = {v["id"] for v in videos}
+    fresh = [v for v in trends.fresh_videos(_CAT_QUERY.get(category, category), 30) if v["id"] not in seen and not v.get("live")]
+    if fresh:
+        videos += fresh
+        source = (source + " + " if seen else "") + "YouTube hari ini & minggu ini (urut views)"
     if not videos:
         videos = sources.youtube_search(_CAT_QUERY.get(category, category), 24)
+
+    def _age(v):
+        return float(v["age_days"]) if v.get("age_days") and not v.get("upload_date") else _days_since(v.get("upload_date"))
     rpm = _RPM_IDR.get(category, 12000)
-    max_vpd = max([v.get("views", 0) / _days_since(v.get("upload_date")) for v in videos] or [1]) or 1
+    max_vpd = max([v.get("views", 0) / _age(v) for v in videos] or [1]) or 1
     for v in videos:
         views = v.get("views", 0) or 0
-        vpd = views / _days_since(v.get("upload_date"))
+        vpd = views / _age(v)
         eng = ((v.get("likes", 0) + v.get("comments", 0) * 2) / views * 100) if views and v.get("likes") is not None else None
         v["engagement"] = round(eng, 2) if eng is not None else None
         v["viral_score"] = int(min(100, round(100 * math.log10(1 + vpd) / math.log10(1 + max_vpd))))
@@ -788,8 +884,15 @@ def viral_analytics(params: Dict) -> Dict:
                     "competition": "Sangat tinggi" if avg_score > 60 else "Tinggi" if avg_score > 40 else "Sedang"},
         "best_times": schedule, "top_hashtags": sorted(tags, key=lambda k: -tags[k])[:8] or ["viral", "fyp", "shorts"],
         "note": "Skor viral = kecepatan views/hari relatif terhadap video tercepat di daftar. Pendapatan = estimasi kasar RPM Indonesia.",
+        "trending_topics": trends.topics_from_titles(videos, limit=10, exclude=_CAT_QUERY.get(category, category)),
+        "google_trends": [],
+        "auto_refresh_min": int(getattr(config, "TRENDS_REFRESH_MIN", 60)) if getattr(config, "TRENDS_AUTO_REFRESH", True) else 0,
         "_ts": time.time(),
     }
+    try:
+        result["google_trends"] = trends.google_trends(limit=12)
+    except Exception as exc:
+        logger.warning(f"Google Trends gagal: {str(exc)[:120]}")
     if sum(views) > 0:  # YouTube kadang mengembalikan hasil tanpa jumlah views — jangan di-cache
         db.kv_set(cache_key, result)
     else:
