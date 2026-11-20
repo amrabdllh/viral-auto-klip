@@ -853,6 +853,8 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
 
     opts = tools.render_options(p)
     opts["stream_layout"] = layout
+    if layout is None:
+        opts["layout"] = "off"  # preset tanpa split: jangan auto-deteksi facecam
     opts["enable_captions"] = True
     ctx_clips = process_clips(video, picked, out_dir, **opts)
 

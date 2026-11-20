@@ -133,6 +133,7 @@ def process_clips(
     edit_opts: Optional[Dict] = None,
     layout: str = "auto",
     lower_third: Optional[Dict] = None,
+    stream_layout: Optional[Dict] = None,
 ) -> List[Dict]:
     """
     Process each viral clip: extract, reframe, caption, encode.
@@ -151,17 +152,23 @@ def process_clips(
     video_info = get_video_info(video_path)
     scene_cuts = _detect_scene_cuts(video_path, clips_data)
 
+    # stream_layout eksplisit (dict) menang: campaign/live sudah menentukan kotak
+    # facecam sendiri (rect preset atau deteksi per jendela). layout="off" = tanpa split.
+    preset_layout = stream_layout if isinstance(stream_layout, dict) else None
     stream_layout = None
-    if layout in ("auto", "gaming") and target_aspect == "portrait" and not split_screen and not group_framing:
+    if preset_layout is not None:
+        stream_layout = preset_layout
+    elif layout != "off" and layout in ("auto", "gaming") and target_aspect == "portrait" \
+            and not split_screen and not group_framing:
         try:
             stream_layout = detect_stream_layout(video_path, clips_data, force=layout == "gaming")
         except Exception as exc:
             logger.warning(f"Deteksi layout facecam gagal: {exc}")
-        if stream_layout:
-            logger.info(f"  Layout gaming terdeteksi: facecam {stream_layout['cam_box']} → split wajah/gameplay")
-            # caption di sambungan facecam/gameplay (gaya klip streamer)
-            seam = int(1920 * stream_layout["cam_ratio"])
-            style["vertical_position"] = max(200, 1920 - seam - 150)
+    if stream_layout:
+        logger.info(f"  Layout gaming: facecam {stream_layout['cam_box']} → split wajah/gameplay")
+        # caption di sambungan facecam/gameplay (gaya klip streamer)
+        seam = int(1920 * float(stream_layout.get("cam_ratio", 0.38)))
+        style["vertical_position"] = max(200, 1920 - seam - 150)
 
     content_rect = None
     if not stream_layout:  # sumber berbingkai (kartu video + border hitam + branding) → crop hanya gambarnya
