@@ -408,6 +408,14 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"Transkripsi campaign gagal ({str(exc)[:160]}); caption dilewati")
         segments = []
+    if params.get("streamer_only", True) and segments:
+        # Dialog game ikut tertranskrip (audio siaran satu campuran) — buang
+        # segmen yang kosakatanya didominasi bahasa lain, caption tetap milik streamer.
+        try:
+            from core.transcriber import drop_foreign_segments
+            segments = drop_foreign_segments(segments, str(params.get("language") or config.WHISPER_LANGUAGE or ""))
+        except Exception:  # noqa: BLE001
+            pass
 
     layout = None
     if settings["layout"] == "split":

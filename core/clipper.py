@@ -841,17 +841,17 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     if not force and (share < 0.55 or big_frames > read * 0.3 or not at_edge):
         logger.info(f"Layout probe: share={share:.2f} big={big_frames} at_edge={at_edge} → bukan layout streamer")
         return None
-    # kotak facecam: ±1,9× tinggi wajah (Clipper memakai ±2×) dan rasio sama
-    # dengan panel atas (1080 × 1920·cam_ratio). Dulu 2,9× → wajah hanya 17%
-    # lebar kotak, jadi tampak kecil dan tidak di tengah setelah di-scale.
+    # kotak facecam: ±2,1× tinggi wajah (Clipper memakai ±2×) dan rasio sama
+    # dengan panel atas (1080 × 1920·cam_ratio). Wajah diposisikan sedikit di
+    # bawah tengah kotak (52%) supaya rambut/dahi tidak terpotong di panel.
     panel_ratio = 1080 / (1920 * cam_ratio)
     span_x = max(p[0] for p in best) - min(p[0] for p in best)  # streamer bergerak di dalam cam
-    ch = min(0.9, max(fh * 1.9, 0.18))
+    ch = min(0.9, max(fh * 2.1, 0.18))
     cw = ch * vh * panel_ratio / vw
     cw = max(cw, min(0.32, span_x + fw * 2.4))
     ch = cw * vw / (panel_ratio * vh)
     x = min(max(mx - cw / 2, 0.0), 1 - cw)
-    y = min(max(my + fh * 0.35 - ch / 2, 0.0), 1 - ch)
+    y = min(max(my - ch * 0.52, 0.0), 1 - ch)
     return {"cam_box": [round(x, 4), round(y, 4), round(cw, 4), round(ch, 4)], "game_box": [0.0, 0.0, 1.0, 1.0],
             "cam_ratio": cam_ratio, "face": [round(mx, 3), round(my, 3), round(fw, 3), round(fh, 3)], "share": round(share, 2)}
 
