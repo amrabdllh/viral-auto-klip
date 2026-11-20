@@ -927,6 +927,7 @@ def campaign_render_job(ctx: JobContext) -> Dict:
         # Simpan sebagai list: UI memanggil .join(), dan klip biasa juga list.
         "hashtags": [t for t in preset_tags.split() if t],
             "layout": review.get("layout"),
+            "category": review.get("category") or "",
             "title": name,
             "description": generated.get("description") or "",
             "upload_caption": generated.get("description") or "",
@@ -941,7 +942,8 @@ def campaign_render_job(ctx: JobContext) -> Dict:
             title = (title or out.stem)[:100]
             description = (generated.get("description") or "") if p.get("auto_meta", True) else ""
             discord = str(review.get("discord_tag") or "").strip()
-            parts = [description, preset_tags, f"Discord: {discord}" if discord else ""]
+            missing = [t for t in preset_tags.split() if t and t.lstrip("#") not in description]
+            parts = [description, " ".join(missing), f"Discord: {discord}" if discord else ""]
             description = " ".join(part for part in parts if part).strip()
             targets = p.get("upload_targets") or ["youtube"]
             if isinstance(targets, str):
