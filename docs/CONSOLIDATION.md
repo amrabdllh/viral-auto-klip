@@ -99,3 +99,27 @@ Campaign: menu **Klip dari video → Campaign**.
 3. Buffer HLS presisi Clipper belum dipindah.
 4. Test campaign belum dijalankan setelah dependency lengkap.
 5. `output/` Clipper: **jangan disentuh** — tetap jadi arsip hasil lama.
+
+---
+
+## Status akhir (2026-11-20)
+
+| Item | Status |
+|---|---|
+| Campaign / MotionKlip + preset + batch | selesai, teruji render 1080x1920@60 |
+| Template campaign di live (jendela + spike) | selesai |
+| Live spike presisi (buffer HLS + rolling median) | selesai, 24+13 test lolos |
+| Upload YouTube headless | selesai, butuh cookies valid |
+| Upload TikTok headless | selesai, butuh cookies valid |
+| Cookies di UI (YouTube + TikTok) | selesai |
+| Penjaga publish (anti-dobel, cek akun) | selesai |
+| Judul & deskripsi otomatis | selesai (Gemini) |
+| Standar viral `make-clip` | selesai (`core/viral_standard.py`) |
+| Test port | campaign, live_media (24), chat_spikes (13) |
+| YuNet + sendcmd face mode | belum (opsional; vak pakai MediaPipe) |
+| Repo final | **butuh keputusan user** |
+
+### Deviasi yang disengaja dari upstream
+1. Server bind `127.0.0.1` (upstream menyarankan `0.0.0.0`; app tanpa auth).
+2. Upload lewat browser headless, bukan `tiktok-uploader` (Selenium membuka jendela).
+3. Database & cookies di `data/`/`config/`, bukan di `output/`.
