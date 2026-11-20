@@ -424,10 +424,11 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
     clip = {"start": 0.0, "end": duration, "title": title or Path(video_path).stem,
             "hook_text": title, "score": 100, "subtitle_segments": segments,
             "words": [w for seg in segments for w in seg.get("words") or []]}
+    fields = {**tools.render_options(params), "stream_layout": layout, "enable_captions": True}
+    if layout is None:
+        fields["layout"] = "off"  # preset tanpa split: jangan auto-deteksi facecam
     try:
-        edited = process_clips(str(cut), [clip], out_dir, **{**tools.render_options(params),
-                                                             "stream_layout": layout,
-                                                             "enable_captions": True})
+        edited = process_clips(str(cut), [clip], out_dir, **fields)
         src = Path(edited[0]["file_path"])
     except Exception as exc:  # noqa: BLE001 - fallback ke renderer lama
         logger.warning(f"Pipeline editing gagal ({str(exc)[:160]}); memakai renderer campaign lama")
