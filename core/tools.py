@@ -190,11 +190,17 @@ def clip_quick(ctx: JobContext) -> Dict:
     from .clipper import process_clips
     from .utils import get_video_info
     p = ctx.params
-    config.MIN_VIRAL_SCORE = max(0.0, min(float(p.get("min_score", 55)), 100.0))
-    config.MIN_CLIP_DURATION = max(5, int(p.get("min_duration", 15)))
-    config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(p.get("max_duration", 60)))
-    num = max(1, min(int(p.get("num_clips", 8)), 25))
-    config.MAX_CLIPS_PER_VIDEO = num
+
+    def _auto(v) -> bool:  # isian dikosongkan / "auto" = AI yang menentukan (v6.8)
+        return v is None or str(v).strip().lower() in ("", "0", "auto", "otomatis")
+    auto_n, auto_score = _auto(p.get("num_clips")), _auto(p.get("min_score"))
+    auto_dur = _auto(p.get("min_duration")) and _auto(p.get("max_duration"))
+    # skor minimum otomatis: gerbang kandidat dilonggarkan, kualitas akhirnya disaring Editor-AI
+    config.MIN_VIRAL_SCORE = 45.0 if auto_score else max(0.0, min(float(p["min_score"]), 100.0))
+    config.MIN_CLIP_DURATION = int(config.AUTO_MIN_DURATION) if _auto(p.get("min_duration")) else max(5, int(p["min_duration"]))
+    config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(config.AUTO_MAX_DURATION) if _auto(p.get("max_duration")) else int(p["max_duration"]))
+    num = 0 if auto_n else max(1, min(int(p["num_clips"]), 40))
+    config.MAX_CLIPS_PER_VIDEO = num or int(config.AUTO_MAX_CLIPS)
     if p.get("watermark_text"):
         config.WATERMARK_TEXT = p["watermark_text"]
     llm = apply_ai_params(p) and p.get("use_llm", True)
@@ -210,25 +216,41 @@ def clip_quick(ctx: JobContext) -> Dict:
     video = resolve_source(ctx, p)
     info = get_video_info(video)
     info["title"] = _source_title(p, video)
+    if auto_n:  # batas atas sesuai panjang video: ±1 klip per 4,5 menit (video 4 jam → hingga 30 klip)
+        minutes = float(info.get("duration") or 0) / 60
+        num = int(max(config.AUTO_MIN_CLIPS, min(config.AUTO_MAX_CLIPS, math.ceil(minutes / config.AUTO_MINUTES_PER_CLIP))))
+        config.MAX_CLIPS_PER_VIDEO = num
+        ctx.log(f"Mode otomatis: video {minutes:.0f} menit → hingga {num} klip (jumlah akhir ditentukan kualitas)"
+                + (f", durasi {config.MIN_CLIP_DURATION}–{config.MAX_CLIP_DURATION} dtk" if auto_dur else ""))
     transcript, tinfo = transcribe(ctx, video, p, 18)
     # Nama channel bukan nama pembicara: di podcast ia menempel pada tamu/host yang sedang tampil.
     # Kartu nama hanya muncul bila pengguna mengisi "Nama pembicara".
     p["_lower_third"] = build_lower_third(p, transcript)
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
-    clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video)
+    clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video, auto_count=auto_n)
     if p.get("categories"):
         clips_data = [c for c in clips_data if c.get("category") in p["categories"]]
     if p.get("keyword"):
         kw = p["keyword"].lower()
         boosted = [c for c in clips_data if kw in (c.get("transcript") or c.get("text", "")).lower()]
         clips_data = boosted + [c for c in clips_data if c not in boosted]
+    else:  # v6.8: tanpa kata kunci → momen yang menyebut topik yang SEDANG naik diutamakan otomatis
+        try:
+            from . import trends
+            hits = trends.boost_trending(clips_data)
+            if hits:
+                ctx.log(f"Topik lagi naik disebut di {len(hits)} klip: {', '.join(sorted(set(hits)))[:120]}")
+        except Exception as exc:
+            logger.warning(f"Boost topik tren dilewati: {str(exc)[:120]}")
     if not clips_data:
         raise RuntimeError("Tidak ada momen yang lolos skor minimum — turunkan Min Score atau perpendek durasi")
     if p.get("hook_card") is False:
         for c in clips_data:
             c["no_hook_card"] = True
-    ctx.progress(58, "Render", f"Merender {min(len(clips_data), num)} klip (reframe wajah, caption, editing)…")
-    clips = process_clips(video, clips_data[:num], ctx.dir, **render_options(p))
+    n_render = len(clips_data) if auto_n else min(len(clips_data), num)
+    ctx.progress(58, "Render", f"Merender {n_render} klip (reframe wajah, caption, editing)"
+                 + (f" — mode otomatis, perkiraan ±{max(1, round(n_render * 4))} menit…" if auto_n else "…"))
+    clips = process_clips(video, clips_data[:n_render], ctx.dir, **render_options(p))
     brand_clips(ctx, clips, p.get("brand_kit"))
     ctx.progress(92, "Publish", "Paket upload & metadata")
     publish = _publish(ctx, clips, p)

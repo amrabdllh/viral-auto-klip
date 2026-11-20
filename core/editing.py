@@ -83,6 +83,22 @@ def is_filler(word: str) -> bool:
     return bool(c) and (c in FILLER_WORDS or bool(_FILLER_RE.fullmatch(c)))
 
 
+def auto_style(clip: Dict) -> str:
+    """v6.8: gaya editing dipilih per klip dari isinya.
+    Topik sensitif (medis/hukum/kebencian) → minimal (efek heboh terasa tidak pantas); momen lucu/mengejutkan,
+    ada tawa, atau emosi tinggi menurut Editor-AI → maksimal; selain itu dinamis."""
+    rv = clip.get("review") or {}
+    risk = str(rv.get("risk") or "none").lower()
+    if risk in ("medical", "legal", "hate"):
+        return "minimal"
+    signals = set(clip.get("fyp_signals") or [])
+    emotion = float(rv.get("emotion") or (rv.get("scores") or {}).get("emotion") or 0)
+    # efek heboh hanya untuk momen yang memang "hidup": ada tawa, emosi tinggi, atau lucu/mengejutkan DAN emosinya cukup
+    if "laughter" in signals or emotion >= 7.5 or (str(clip.get("category")) in ("humor", "shocking") and emotion >= 6.5):
+        return "maksimal"
+    return "dinamis"
+
+
 def resolve_edit_opts(overrides: Optional[Dict] = None) -> Dict:
     """Gabungkan preset (EDIT_STYLE di .env / request) + override per fitur."""
     overrides = dict(overrides or {})

@@ -245,3 +245,28 @@ Catatan: Veo 3.1 Preview **dimatikan Google 22 Okt 2026**; dokumentasi resmi men
 Cara kerja (`core/video_ai.py`): naskah AI kini juga menulis `video_prompt` (aksi + gerak kamera); pengguna memilih "Gerak adegan" (gerak kamera gratis / Gemini / Kling), sumber (gambar→video atau teks→video) dan **maks adegan video AI** (default 4: adegan pembuka + tersebar merata). Klip AI disesuaikan ke durasi narasi (dipotong, atau diperlambat ≤1,25× lalu frame akhir ditahan). Gagal apa pun → adegan itu kembali ke gerak kamera. Pemakaian (jumlah video & detik) dicatat lokal.
 
 Uji: format permintaan & pembacaan jawaban kedua provider diuji dengan respons tiruan sesuai dokumentasi (gambar→video, teks→video, polling Kling, penyesuaian durasi, fallback saat 429). **Belum diuji dengan panggilan sungguhan**: `GEMINI_API_KEY` di `.env` masih berisi teks contoh/placeholder (24 karakter, bukan format `AIza…`), jadi dianggap kosong oleh aplikasi — gambar & suara Gemini juga belum aktif karenanya; `KLING_API_KEY` belum diisi.
+
+---
+
+## Putaran 12 (v6.8): mode Otomatis untuk Analisis AI
+Masalah: jumlah klip, durasi, skor minimum, tipe video, dan gaya editing diisi manual. Untuk video panjang lebih parah:
+- AI Moment Finder hanya membaca **8 potongan transkrip** (±192 rb karakter). Transkrip ±1.200 karakter/menit → video 4 jam (±288 rb karakter, 12 potongan) **±1/3 bagian akhirnya tidak pernah dibaca AI**.
+- Jumlah klip 8 → AI hanya mengusulkan ≤8 momen per potongan dan Editor-AI hanya meninjau ±12 kandidat.
+
+Mode Otomatis (isian dikosongkan = default baru):
+| Isian | Otomatis |
+|---|---|
+| Jumlah klip | ditentukan kualitas: semua klip yang lolos rubrik Editor-AI (≥56), batas ±1 klip per 4,5 menit video (3–30), minimal 3 |
+| Durasi | 15–90 dtk; AI memilih awal/akhir alami, Editor-AI merapikan |
+| Seluruh video dibaca | batas 30 potongan; bila lebih, potongan diperbesar (tidak dibuang); diproses paralel (6) |
+| Skor minimum | gerbang kandidat 45, kualitas akhir oleh Editor-AI |
+| Tipe video | default "Deteksi otomatis" |
+| Fokus kata kunci | kosong → klip yang menyebut topik yang lagi naik (cache riset tren: semua kategori + Google Trends) mendapat +6 skor; kata umum disaring |
+| Gaya editing | "Otomatis (AI per klip)": topik medis/hukum/kebencian → Minimal; ada tawa, emosi ≥7,5, atau lucu/mengejutkan dengan emosi ≥6,5 → Maksimal; lainnya Dinamis |
+
+Uji:
+- Transkrip uji dilipatkan jadi 253 menit (tanpa biaya AI): seluruh 253 menit terbaca (14 panggilan); perilaku lama berhenti ±menit 168.
+- Analisis penuh video 42 menit (deepseek-flash): batas 10 klip, 26 momen diusulkan, 15 lolos Editor-AI, 10 terbaik diambil (rubrik 59–71), durasi alami 27–63 dtk (dulu mentok 60), 244 dtk.
+- Perbaikan setelah uji: kata umum ("Sekarang", "Ytshorts") tidak lagi dianggap topik tren; syarat gaya Maksimal diperketat (dulu 6/10 klip, termasuk emosi 4,5).
+
+Catatan biaya waktu: render ±4 menit per klip (upscale + wajah AI) → 25 klip ±1,5–2 jam; perkiraan ditampilkan di progres job.

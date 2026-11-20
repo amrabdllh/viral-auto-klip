@@ -39,7 +39,7 @@ how what why who when best top most ever all one two three vlog podcast ft feat 
 naik turun calon cuma unik tentang menarik negara jarang diketahui keluarga kompilasi asli beneran agar supaya pintar enak didengar galau united pop hits hit album santai populer anak anak2 kids kid film movie movies series serial drama komedi comedy lucu
 bahasa teknologi tech fakta facts dalam jika kalau dunia world cup investasi dana uang tips trik tutorial belajar edukasi
 sepak bola football soccer highlights highlight goal gol musik lagu song songs playlist cerita kisah story horor horror
-masa depan terbaik terbaru2 resep cara mudah cepat gratis finally making made gamer gamers pro noob challenge part1 part2 indonesian indonesians gas out fun mod mobile pc ps5 android hp seru lucu kocak gila parah keren mantap asik wow omg
+masa depan terbaik terbaru2 resep cara mudah cepat gratis ytshorts ytshort shortsyoutube youtubeshort mabar pushrank finally making made gamer gamers pro noob challenge part1 part2 indonesian indonesians gas out fun mod mobile pc ps5 android hp seru lucu kocak gila parah keren mantap asik wow omg
 youtubeshorts viralvideo viralshorts beritaterkini beritaviral shortsvideo shortvideo shortsfeed foryou foryoupage
 fypシ fypage trend trends berita news update info terkini hot breaking bangga momen detik detik
 """.split())
@@ -50,6 +50,10 @@ _ALIASES = [
     (re.compile(r"\bu\s+(1[5-9]|2[0-3])\b"), r"u\1"),  # "U 17" = "U17"
     (re.compile(r"\basian\b"), "asia"),
 ]
+# kata sehari-hari yang sering muncul di Google Trends/judul tapi bukan topik spesifik
+_COMMON = set("""sekarang hari besok kemarin malam pagi siang sore minggu bulan tahun orang rumah anak ibu bapak
+manusia hidup mati cinta uang kerja kerja sekolah kampus jalan mobil motor kota desa negara dunia berita kabar
+harga gaji promo diskon gratis cuaca hujan banjir gempa jadwal hasil skor live link nonton download aplikasi""".split())
 _LOCK = threading.Lock()
 _STARTED = False
 
@@ -170,6 +174,47 @@ def topics_from_titles(videos: List[Dict], limit: int = 12, min_channels: int = 
             break
     return [{"topic": g.upper() if len(g) <= 5 else g.title(), "channels": len(chans[g]), "views": views[g],
              "examples": vids[g]} for g in picked]
+
+
+def cached_topics(max_age_h: float = 6.0) -> List[str]:
+    """Topik naik dari cache Analitik (semua kategori, diperbarui otomatis) + Google Trends — tanpa jaringan."""
+    out: List[str] = []
+    for key in ("Semua", "Gaming", "Musik", "Komedi", "Hiburan", "Tutorial", "Olahraga", "Teknologi", "Keuangan", "Edukasi"):
+        d = db.kv_get(f"analytics:{key}") or {}
+        if time.time() - d.get("_ts", 0) <= max_age_h * 3600:
+            out += [t["topic"] for t in d.get("trending_topics") or []]
+            out += [g["topic"] for g in (d.get("google_trends") or [])[:12]]
+    gt = db.kv_get("gtrends:ID") or {}
+    if time.time() - gt.get("_ts", 0) <= max_age_h * 3600:
+        out += [g["topic"] for g in gt.get("items") or []][:20]
+    seen, uniq = set(), []
+    for t in out:
+        k = _norm(t)
+        if " " not in k and (len(k) < 4 or k in _COMMON):
+            continue  # satu kata umum ("sekarang", "orang") bukan topik
+        if len(k) >= 3 and k not in seen and k not in _STOP:
+            seen.add(k)
+            uniq.append(t)
+    return uniq
+
+
+def boost_trending(clips: List[Dict], bonus: float = 6.0) -> List[str]:
+    """Naikkan skor klip yang menyebut topik yang sedang naik (urutan klip disusun ulang). Return topik yang cocok."""
+    topics = cached_topics()
+    if not topics or not clips:
+        return []
+    hits: List[str] = []
+    for c in clips:
+        text = f" {_norm(c.get('transcript') or c.get('text') or '')} "
+        found = [t for t in topics if f" {_norm(t)} " in text]
+        if found:
+            c["score"] = round(min(100.0, float(c.get("score") or 0) + bonus), 1)
+            c["trending_topics"] = found[:3]
+            c.setdefault("fyp_signals", []).append("trending_topic")
+            c["reason"] = f"Menyebut topik yang lagi naik: {found[0]} · " + str(c.get("reason") or "")
+            hits += found[:1]
+    clips.sort(key=lambda c: -float(c.get("score") or 0))
+    return hits
 
 
 # ----------------------------------------------------------------------------- konteks untuk AI

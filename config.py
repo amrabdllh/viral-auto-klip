@@ -242,6 +242,13 @@ KLING_VIDEO_MODEL = os.getenv("KLING_VIDEO_MODEL", "kling-3.0-turbo")
 GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "gemini-omni-1.2-flash")
 VIDEO_AI_RESOLUTION = os.getenv("VIDEO_AI_RESOLUTION", "720p")
 VIDEO_AI_MAX_SCENES = int(os.getenv("VIDEO_AI_MAX_SCENES", "4"))  # batas adegan yang dihidupkan per video (biaya)
+# v6.8: mode Otomatis Analisis AI (isian dikosongkan = AI menentukan)
+AUTO_MINUTES_PER_CLIP = float(os.getenv("AUTO_MINUTES_PER_CLIP", "4.5"))  # batas atas ±1 klip per 4,5 menit konten
+AUTO_MIN_CLIPS = int(os.getenv("AUTO_MIN_CLIPS", "3"))
+AUTO_MAX_CLIPS = int(os.getenv("AUTO_MAX_CLIPS", "30"))
+AUTO_MIN_DURATION = int(os.getenv("AUTO_MIN_DURATION", "15"))
+AUTO_MAX_DURATION = int(os.getenv("AUTO_MAX_DURATION", "90"))
+AUTO_MIN_RUBRIC = float(os.getenv("AUTO_MIN_RUBRIC", "56"))  # saringan kualitas Editor-AI saat jumlah klip otomatis
 TRENDS_AUTO_REFRESH = os.getenv("TRENDS_AUTO_REFRESH", "1").lower() in ("1", "true", "yes")  # riset tren otomatis
 TRENDS_REFRESH_MIN = int(os.getenv("TRENDS_REFRESH_MIN", "60"))  # interval pembaruan (menit)
 AUTO_TEMPO = os.getenv("AUTO_TEMPO", "1").lower() in ("1", "true", "yes")  # percepat halus pembicara lambat
@@ -260,7 +267,8 @@ AI_MOMENT_BONUS = float(os.getenv("AI_MOMENT_BONUS", "6"))  # bonus peringkat un
 AI_RERANK_WORKERS = int(os.getenv("AI_RERANK_WORKERS", "6"))  # panggilan rerank LLM paralel
 AI_MOMENT_FINDER = os.getenv("AI_MOMENT_FINDER", "1").lower() in ("1", "true", "yes")
 AI_MOMENT_CHUNK_CHARS = int(os.getenv("AI_MOMENT_CHUNK_CHARS", "24000"))  # ukuran potongan transkrip per panggilan
-AI_MOMENT_MAX_CHUNKS = int(os.getenv("AI_MOMENT_MAX_CHUNKS", "8"))        # batas panggilan per video
+AI_MOMENT_MAX_CHUNKS = int(os.getenv("AI_MOMENT_MAX_CHUNKS", "30"))       # batas panggilan per video; bila lebih,
+# potongan diperbesar (v6.8: dulu potongan sisanya DIBUANG → ±1/3 akhir video 4 jam tidak pernah dibaca AI)
 # AI menulis hook, judul, caption upload & hashtag untuk tiap klip final
 AI_CLIP_PACKAGING = os.getenv("AI_CLIP_PACKAGING", "1").lower() in ("1", "true", "yes")
 

@@ -131,6 +131,7 @@ def analyze_viral_potential(
     face_data: Optional[List] = None,
     use_llm: bool = True,
     video_path: str = "",
+    auto_count: bool = False,
 ) -> List[Dict]:
     """Skor setiap kandidat momen dan kembalikan klip berpotensi viral.
 
@@ -143,13 +144,13 @@ def analyze_viral_potential(
         from . import audio_signals
         AUDIO = audio_signals.analyze(path, transcript_segments)
     try:
-        return _analyze_viral_potential(transcript_segments, video_info, face_data, use_llm)
+        return _analyze_viral_potential(transcript_segments, video_info, face_data, use_llm, auto_count)
     finally:
         AUDIO = None
 
 
 def _analyze_viral_potential(transcript_segments: List[Dict], video_info: Dict, face_data: Optional[List],
-                             use_llm: bool) -> List[Dict]:
+                             use_llm: bool, auto_count: bool = False) -> List[Dict]:
     global LLM_RATE_LIMITED
     LLM_RATE_LIMITED = False
     logger.info("🔍 Starting viral potential analysis...")
@@ -226,6 +227,8 @@ def _analyze_viral_potential(transcript_segments: List[Dict], video_info: Dict, 
             clips = review_clips(clips, transcript_segments, config.MAX_CLIPS_PER_VIDEO, str(video_info.get("title") or ""))
         except Exception as exc:
             logger.warning(f"Editor-AI dilewati: {str(exc)[:200]}")
+    if auto_count:  # mode Otomatis: jumlah akhir ditentukan kualitas
+        clips = _auto_quality_gate(clips)
     clips = clips[:config.MAX_CLIPS_PER_VIDEO]
 
     detected_niche = detect_niche(" ".join(c.get("transcript", c.get("text", "")) for c in clips))
@@ -239,6 +242,25 @@ def _analyze_viral_potential(transcript_segments: List[Dict], video_info: Dict, 
 
     logger.success(f"✅ Found {len(clips)} high-viral-potential clips (min score {config.MIN_VIRAL_SCORE}) | Niche: {detected_niche}")
     return clips
+
+
+def _auto_quality_gate(clips: List[Dict]) -> List[Dict]:
+    """Mode Otomatis: jumlah klip ditentukan KUALITAS — semua yang lolos rubrik Editor-AI diambil (dibatasi
+    panjang video lewat MAX_CLIPS_PER_VIDEO), minimal AUTO_MIN_CLIPS teratas agar tidak pernah kosong."""
+    good = []
+    for c in clips:
+        rv = c.get("review") or {}
+        if rv.get("status") == "reviewed":
+            if float(rv.get("rubric") or 0) >= config.AUTO_MIN_RUBRIC:
+                good.append(c)
+        elif float(c.get("score") or 0) >= 65:  # tidak sempat ditinjau → hanya yang skornya tinggi
+            good.append(c)
+    floor = min(len(clips), int(config.AUTO_MIN_CLIPS))
+    if len(good) < floor:
+        good = good + [c for c in clips if c not in good][:floor - len(good)]
+    logger.info(f"🎯 Mode otomatis: {len(good)} klip lolos saringan kualitas (rubrik ≥ {config.AUTO_MIN_RUBRIC:.0f}) "
+                f"dari {len(clips)} kandidat, batas {config.MAX_CLIPS_PER_VIDEO}")
+    return good
 
 
 def _build_clip_payload(seg: Dict, score_data: Dict) -> Dict:
@@ -454,16 +476,25 @@ def _ai_moment_candidates(transcript: List[Dict], video_duration: float) -> List
     if not transcript:
         return []
     lines = [f"[{s['start']:.1f}-{s['end']:.1f}] {s['text'].strip()}" for s in transcript if s.get("text", "").strip()]
-    chunks, current, size = [], [], 0
-    for line in lines:
-        if current and size + len(line) > config.AI_MOMENT_CHUNK_CHARS:
-            chunks.append(current)
-            current = current[-3:]  # sedikit overlap konteks antar potongan
-            size = sum(len(x) for x in current)
-        current.append(line)
-        size += len(line) + 1
-    if current:
-        chunks.append(current)
+
+    def _chunk(limit_chars: int) -> List[List[str]]:
+        out, current, size = [], [], 0
+        for line in lines:
+            if current and size + len(line) > limit_chars:
+                out.append(current)
+                current = current[-3:]  # sedikit overlap konteks antar potongan
+                size = sum(len(x) for x in current)
+            current.append(line)
+            size += len(line) + 1
+        if current:
+            out.append(current)
+        return out
+    chunk_chars = int(config.AI_MOMENT_CHUNK_CHARS)
+    chunks = _chunk(chunk_chars)
+    # v6.8: video sangat panjang → potongan diperbesar (maks 2,5×) agar SELURUH video tetap dibaca
+    while len(chunks) > config.AI_MOMENT_MAX_CHUNKS and chunk_chars < config.AI_MOMENT_CHUNK_CHARS * 2.5:
+        chunk_chars = int(chunk_chars * 1.25)
+        chunks = _chunk(chunk_chars)
 
     def _span(chunk: List[str]) -> tuple:
         nums: List[float] = []
@@ -527,7 +558,7 @@ def _ai_moment_candidates(transcript: List[Dict], video_duration: float) -> List
     # Potongan transkrip dikirim PARALEL (dulu berurutan: tiap potongan ±1–2 menit, podcast 42 menit = 3 potongan)
     results: List[Dict] = []
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(3, len(chunks))) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, min(int(getattr(config, "AI_RERANK_WORKERS", 6)), len(chunks)))) as pool:
         answers = list(pool.map(lambda ic: _ask(*ic), enumerate(chunks, 1)))
     for data in answers:
         for moment in (data or {}).get("moments") or (data or {}).get("items") or []:

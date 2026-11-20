@@ -12,7 +12,8 @@ const ASPECT_CLIP = [{ v: "Vertical", l: "9:16 vertikal (crop wajah)" }, { v: "F
 const FIT = [{ v: "blur", l: "Utuh + latar blur" }, { v: "cover", l: "Crop penuh" }, { v: "pad", l: "Letterbox hitam" }];
 const VIDEO_MODES = [{ v: "single", l: "1 pembicara" }, { v: "podcast", l: "Podcast / 2 orang" }, { v: "group", l: "Grup 3+ orang" }, { v: "auto", l: "Deteksi otomatis" }];
 const WHISPER_DEVICES = [{ v: "", l: "Ikut Pengaturan" }, { v: "elevenlabs", l: "ElevenLabs Scribe (paling akurat)" }, { v: "auto", l: "Whisper di GPU (gratis)" }, { v: "cpu", l: "Whisper di CPU (lambat)" }, { v: "groq", l: "Groq Whisper (cloud)" }];
-const EDIT_STYLES = [{ v: "", l: "Ikut Pengaturan" }, { v: "minimal", l: "Minimal" }, { v: "dinamis", l: "Dinamis" }, { v: "maksimal", l: "Maksimal" }];
+const EDIT_STYLES = [{ v: "", l: "Ikut Pengaturan" }, { v: "auto", l: "Otomatis (AI per klip)" }, { v: "minimal", l: "Minimal" }, { v: "dinamis", l: "Dinamis" }, { v: "maksimal", l: "Maksimal" }];
+const CLIP_COUNTS = [{ v: "", l: "Otomatis (AI, sesuai kualitas)" }, ...[3, 5, 8, 10, 15, 20, 25, 30, 40].map((n) => ({ v: n, l: `${n} klip` }))];
 const captionSelect = (v = "viral") => UI.select("caption_style", "Gaya caption", CAPTION_STYLES(), v);
 const CAPTION_LABELS = { viral: "Viral (kuning tebal)", modern: "Modern", tiktok_bold: "TikTok Bold", karaoke: "Karaoke", neon: "Neon",
   gradient: "Gradasi", minimal: "Minimal", emoji: "Emoji", hormozi: "Hormozi", mrbeast: "MrBeast", clean: "Bersih", bold: "Tebal" };
@@ -146,12 +147,12 @@ PAGES.analisis = { render(view, q) {
   view.innerHTML = toolPage({ id: "analisis", needs: ["llm", "ffmpeg"],
     desc: "AI membaca seluruh transkrip, memilih momen paling viral, lalu merender klip vertikal dengan reframe wajah, caption animasi, dan editing dinamis.",
     main: UI.panel({ id: "f", body: UI.section("Sumber video", `<div id="src"></div>`) +
-      UI.section("Klip", `<div class="fields">${UI.num("num_clips", "Jumlah klip", { value: 8, min: 1, max: 25 })}${UI.num("min_duration", "Durasi minimum", { value: 15, min: 5, max: 120, hint: "detik" })}
-        ${UI.num("max_duration", "Durasi maksimum", { value: 60, min: 10, max: 180, hint: "detik" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
-        ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "single")}${UI.select("language", "Bahasa video", LANGS, "id")}</div>`) +
-      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Opsional — klip yang menyebut kata ini diutamakan." })}</div>
+      UI.section("Klip", `<div class="fields">${UI.select("num_clips", "Jumlah klip", CLIP_COUNTS, "", { numeric: true, hint: "Otomatis: semua momen yang lolos penilaian Editor-AI, maks ±1 klip per 4,5 menit video." })}${UI.num("min_duration", "Durasi minimum", { value: "", min: 5, max: 120, hint: "detik · kosong = otomatis (AI, mulai 15)" })}
+        ${UI.num("max_duration", "Durasi maksimum", { value: "", min: 10, max: 180, hint: "detik · kosong = otomatis (AI, hingga 90)" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
+        ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "auto")}${UI.select("language", "Bahasa video", LANGS, "id")}</div>`) +
+      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "auto")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Kosong = otomatis: klip yang menyebut topik yang lagi naik diutamakan." })}</div>
         <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
-      UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 55, min: 0, max: 100 })}${UI.tri("jump_cuts", "Potong jeda")}${UI.tri("dynamic_zoom", "Zoom dinamis")}${UI.tri("progress_bar", "Progress bar")}
+      UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: "", min: 0, max: 100, hint: "Kosong = otomatis (saringan kualitas Editor-AI)" })}${UI.tri("jump_cuts", "Potong jeda")}${UI.tri("dynamic_zoom", "Zoom dinamis")}${UI.tri("progress_bar", "Progress bar")}
         ${UI.tri("sfx", "SFX transisi")}${UI.tri("end_cta", "Ajakan di akhir")}${UI.select("color_grade", "Warna", [{ v: "", l: "Ikut preset" }, "none", "natural", "vibrant", "cinematic"], "")}
         ${UI.tri("cold_open", "Cold open + rewind")}${UI.tri("caption_fx", "Caption animasi + emoji")}${UI.tri("sound_design", "Sound design")}
         ${UI.tri("speaker_cam", "Kamera ikut pembicara")}${UI.tri("broll", "B-roll otomatis")}${UI.tri("shake", "Layar goyang")}
