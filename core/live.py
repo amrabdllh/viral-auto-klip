@@ -943,6 +943,7 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
     if not preset_path.is_absolute():
         preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
     preset = campaign.load_preset(preset_path)
+    preset_tags = [t for t in str(preset.get("hashtags") or "").split() if t]
     overrides = {k: p[k] for k in ("subtitle_provider", "intro_voice", "layout", "subtitle_position") if p.get(k)}
     settings = campaign.campaign_settings(preset, overrides)
 
@@ -995,6 +996,9 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
         row = dict(clip)
         row["file_path"] = str(final)
         row["campaign"] = True
+        # Hashtag preset campaign jadi default; field Hashtag manual tetap menang.
+        if preset_tags and not p.get("hashtags_override"):
+            row["hashtags"] = preset_tags
         start = float(row.get("start") or (picked[index]["start"] if index < len(picked) else 0))
         end = float(row.get("end") or (picked[index]["end"] if index < len(picked) else 0))
         row["start"], row["end"] = start, end
