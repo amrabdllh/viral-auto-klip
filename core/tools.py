@@ -918,7 +918,9 @@ def campaign_render_job(ctx: JobContext) -> Dict:
             thumb = None
         asset = ctx.asset("clip", out, name=out.stem, meta={
             "source": "campaign", "thumbnail": str(thumb) if thumb else "",
-            "duration": ffx.probe(str(out))["duration"], "hashtags": review.get("hashtags", ""),
+            "duration": ffx.probe(str(out))["duration"],
+        # Simpan sebagai list: UI memanggil .join(), dan klip biasa juga list.
+        "hashtags": [t for t in str(review.get("hashtags") or "").split() if t],
             "layout": review.get("layout"),
         })
         clips.append({"file_path": str(out), "thumbnail": str(thumb) if thumb else "",

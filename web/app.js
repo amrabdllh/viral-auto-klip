@@ -505,7 +505,9 @@ function mediaCard(c, { selectable = false } = {}) {
   const meta = c.meta || {};
   const path = c.file_path || c.file || c.path;
   const title = c.ai_title || meta.ai_title || c.title || meta.title || c.hook_text || c.name || baseName(path);
-  const caption = [c.upload_caption || meta.upload_caption || meta.description || "", (c.hashtags || meta.hashtags || []).join(" ")].join(" ").trim();
+  const rawTags = c.hashtags ?? meta.hashtags ?? [];
+  const tags = (Array.isArray(rawTags) ? rawTags : String(rawTags).split(/\s+/)).filter(Boolean);
+  const caption = [c.upload_caption || meta.upload_caption || meta.description || "", tags.join(" ")].join(" ").trim();
   const thumb = c.thumbnail || meta.thumbnail;
   const score = c.score ?? meta.score;
   const dur = c.duration ?? meta.duration;
