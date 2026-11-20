@@ -192,7 +192,9 @@ PAGES.live = { render(view, q) {
         ${UI.num("pre_sec", "Detik sebelum momen", { value: 25, min: 5, max: 120 })}
         ${UI.num("post_sec", "Detik sesudah momen", { value: 20, min: 5, max: 120 })}
         ${UI.num("min_lift", "Lonjakan chat minimum", { value: 3, min: 1, max: 20, hint: "× baseline" })}
-        ${UI.num("max_spikes", "Maks spike", { value: 0, min: 0, max: 999, hint: "0 = tanpa batas" })}</div>
+        ${UI.num("max_spikes", "Maks spike", { value: 0, min: 0, max: 999, hint: "0 = tanpa batas" })}
+        ${UI.field("Preset campaign", `<select name="preset" id="livePreset"><option value="">(memuat…)</option></select>`, { hint: "Dipakai kalau template MotionKlip diaktifkan" })}</div>
+        <div class="switches">${UI.toggle("campaign", "Render spike pakai template MotionKlip", { checked: false, sub: "Banner + judul + subtitle + outro dari preset" })}</div>
         <div class="fields">${UI.tri("speaker_cam", "Kamera ikut pembicara")}${UI.tri("broll", "B-roll otomatis")}${UI.tri("shake", "Layar goyang")}
         ${UI.tri("freeze", "Freeze frame")}${UI.tri("lower_third", "Kartu nama")}${UI.tri("censor", "Sensor kata kasar")}
         ${UI.text("speaker_names", "Nama pembicara", { placeholder: "Kosong = nama channel" })}</div>`),
@@ -203,6 +205,16 @@ PAGES.live = { render(view, q) {
       "Klip muncul di bawah satu per satu. Tekan \u201cSelesai rekam\u201d kapan saja — sisa rekaman tetap dijadikan klip."],
       UI.banner("info", "Rekaman jalan di background. Job lain tetap bisa dipakai, dan halaman ini boleh ditutup — pantau dari <a href='#jobs'>Antrean Job</a>.")) });
   if (q.job) attachJob($("#job"), q.job, {});
+  api("/campaign/presets").then((r) => {
+    const sel = $("#livePreset");
+    if (!sel) return;
+    const list = r.presets || [];
+    sel.innerHTML = list.map((p) => p.error
+      ? `<option value="${esc(p.file)}" disabled>${esc(p.file)} — ${esc(p.error)}</option>`
+      : `<option value="${esc(p.file)}">${esc(p.file)} · ${esc(p.layout)}</option>`).join("")
+      || `<option value="">Tidak ada preset</option>`;
+    if (r.default) sel.value = r.default;
+  }).catch(() => {});
   $("#go").onclick = (e) => {
     const p = dropEmpty(formValues($("#f")), ["whisper_device", "edit_style", "layout", "ai_provider", "ai_model", "speaker_names"]);
     if (!/^https?:\/\//.test(p.url || "")) return toast("Tempel link siaran YouTube dulu", true);
@@ -212,7 +224,9 @@ PAGES.live = { render(view, q) {
         pre_sec: p.pre_sec ?? 25, post_sec: p.post_sec ?? 20,
         min_lift: p.min_lift ?? 3, max_spikes: p.max_spikes ?? 0,
         poll_interval: 4, max_hours: p.max_hours ?? 6,
+        campaign: !!p.campaign, preset: p.preset || undefined,
       };
+      if (!spike.campaign) delete spike.preset;
       return runJob($("#job"), "live_spike", spike, { title: "Klip Live · spike", btn: e.currentTarget });
     }
     delete p.live_mode;
