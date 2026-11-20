@@ -27,6 +27,7 @@ function creatorPage(mode) {
     const draftKey = `draft:${mode}`;
     const fresh = () => ({ step: 1, story: null, video: null, params: { mode, source_type: "topik", source: "", category: "", tone: M.tone, focus: "topik", duration: 60,
       language: "Bahasa Indonesia", ending: "kesimpulan kuat", visual_style: M.style, visual_mode: "ai_image", character: "", character_images: [], image_provider: "",
+      video_engine: "camera", video_ai_source: "image", video_ai_max: 4,
       preset: mode === "motion" ? "jurnalisme" : "", aspect: "9:16" } });
     const st = store.get(draftKey, null) || fresh();
     const pre = STATE.prefill[mode];
@@ -61,6 +62,10 @@ function creatorPage(mode) {
           UI.more("Visual & tokoh", `<div class="fields">${UI.select("visual_mode", "Sumber visual", VISUAL_MODES, p.visual_mode)}
             ${UI.select("image_provider", "Generator gambar", [{ v: "", l: "Otomatis" }, ...Object.entries(imgCaps).map(([k, v]) => ({ v: k, l: v.label + (v.ready ? "" : " · butuh key"), disabled: !v.ready }))], p.image_provider)}
             ${UI.select("aspect", "Rasio", ["9:16", "1:1", "16:9"], p.aspect)}</div>
+            <div class="fields">${UI.select("video_engine", "Gerak adegan", [{ v: "camera", l: "Gerak kamera (gratis)" },
+              ...Object.entries(STATE.status?.media?.video || {}).map(([k, v]) => ({ v: k, l: "Video AI · " + v.label + (v.ready ? "" : " · butuh key"), disabled: !v.ready }))], p.video_engine || "camera")}
+              ${UI.select("video_ai_source", "Video AI dari", [{ v: "image", l: "Gambar adegan → video (tokoh konsisten)" }, { v: "text", l: "Teks langsung → video" }], p.video_ai_source || "image")}
+              ${UI.num("video_ai_max", "Maks adegan video AI", { value: p.video_ai_max ?? 4, min: 0, max: 20, hint: "Berbayar per detik di akun provider · sisanya gerak kamera" })}</div>
             ${UI.text("character", "Tokoh utama", { value: p.character, placeholder: "mis. pria 30-an, rambut ikal, kemeja batik biru", hint: "Opsional — deskripsi agar wajah konsisten di tiap adegan." })}
             <div class="row"><div id="charUp"></div><span class="small muted" id="charList">${p.character_images.length ? p.character_images.length + " foto tokoh" : "Foto tokoh dipakai Gemini sebagai referensi wajah."}</span></div>
             ${STATE.status?.media?.stock ? "" : UI.banner("info", "Footage stok butuh PEXELS_API_KEY atau PIXABAY_API_KEY di <a href='#settings'>Pengaturan</a>.")}`),

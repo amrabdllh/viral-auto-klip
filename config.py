@@ -235,6 +235,15 @@ AI_MAX_CANDIDATES = int(os.getenv("AI_MAX_CANDIDATES", "24"))  # cap AI calls pe
 # AI membaca SELURUH transkrip (bertimestamp) lalu mengusulkan momen terbaik sendiri —
 # bukan hanya menilai ulang potongan hasil sliding-window.
 AI_UPSCALE = os.getenv("AI_UPSCALE", "1").lower() in ("1", "true", "yes")  # Real-ESRGAN: PyTorch CUDA (tools/models) atau ncnn (tools/realesrgan)
+# v6.8: video AI generatif (Content Creator / Story Studio / Motion Graphic)
+KLING_API_KEY = _secret("KLING_API_KEY")
+KLING_BASE_URL = os.getenv("KLING_BASE_URL", "https://api-singapore.klingai.com")
+KLING_VIDEO_MODEL = os.getenv("KLING_VIDEO_MODEL", "kling-3.0-turbo")
+GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "gemini-omni-1.2-flash")
+VIDEO_AI_RESOLUTION = os.getenv("VIDEO_AI_RESOLUTION", "720p")
+VIDEO_AI_MAX_SCENES = int(os.getenv("VIDEO_AI_MAX_SCENES", "4"))  # batas adegan yang dihidupkan per video (biaya)
+TRENDS_AUTO_REFRESH = os.getenv("TRENDS_AUTO_REFRESH", "1").lower() in ("1", "true", "yes")  # riset tren otomatis
+TRENDS_REFRESH_MIN = int(os.getenv("TRENDS_REFRESH_MIN", "60"))  # interval pembaruan (menit)
 AUTO_TEMPO = os.getenv("AUTO_TEMPO", "1").lower() in ("1", "true", "yes")  # percepat halus pembicara lambat
 AUTO_TEMPO_TARGET_WPS = float(os.getenv("AUTO_TEMPO_TARGET_WPS", "3.15"))  # kata/detik yang dituju
 AUTO_TEMPO_MAX = float(os.getenv("AUTO_TEMPO_MAX", "1.08"))  # batas atas (lebih dari ±1,1× terdengar dipercepat)

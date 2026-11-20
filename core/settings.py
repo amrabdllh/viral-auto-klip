@@ -47,6 +47,8 @@ SCHEMA: List[Dict] = [
     {"key": "PEXELS_API_KEY", "group": "API key", "label": "Pexels", "type": "secret", "help": "Footage & foto stok gratis. Key di pexels.com/api"},
     {"key": "PIXABAY_API_KEY", "group": "API key", "label": "Pixabay", "type": "secret", "help": "Footage & foto stok gratis. Key di pixabay.com/api/docs"},
     {"key": "YOUTUBE_API_KEY", "group": "API key", "label": "YouTube Data API", "type": "secret", "help": "Opsional, untuk Analitik Viral. Tanpa key memakai pencarian yt-dlp"},
+    {"key": "KLING_API_KEY", "group": "API key", "label": "Kling AI (video)", "type": "secret",
+     "help": "Video AI gambar→video / teks→video (Kling 3.0). API Key dari konsol developer Kling (bukan AK/SK lama)"},
     # --- Media AI (v6)
     {"key": "TTS_PROVIDER", "group": "Suara & gambar AI", "label": "Mesin suara", "type": "enum", "options": ["elevenlabs", "edge", "openai", "gemini"],
      "labels": {"elevenlabs": "ElevenLabs (paling natural)", "edge": "Edge TTS (gratis, tanpa key)", "openai": "OpenAI", "gemini": "Gemini"}},

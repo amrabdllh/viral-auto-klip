@@ -655,11 +655,24 @@ def optimize_title(params: Dict) -> Dict:
                     f"Transkrip: {info['text'][:8000]}")
     if not material:
         raise ValueError("Isi judul/topik atau link YouTube")
-    return _llm(
+    # v6.8: judul/tag dioptimasi terhadap apa yang SEDANG naik minggu ini, bukan pengetahuan lama AI
+    trend = {"text": "", "topics": [], "videos": []}
+    try:
+        from . import trends
+        topic = " ".join(re.findall(r"\w+", material.split("\n")[0].replace("Judul sekarang:", ""))[:6]) or material[:60]
+        trend = trends.ai_context(topic, max_titles=10)
+    except Exception as exc:
+        logger.warning(f"Data tren untuk optimasi judul gagal: {str(exc)[:120]}")
+    out = _llm(
         f"Optimasi metadata video untuk {params.get('platform', 'YouTube')} ({params.get('language', 'Bahasa Indonesia')}).\n\n{material}\n\n"
+        + (f"DATA TREN TERBARU (pakai kata kunci/topik yang relevan dengan video ini saja):\n{trend['text']}\n\n" if trend["text"] else "")
+        +
         "Balas JSON: {\"titles\":[{\"type\":\"SEO\",\"title\":\"...\",\"why\":\"...\"},{\"type\":\"Viral\",...},{\"type\":\"CTR\",...},"
         "{\"type\":\"Balanced\",...}],\"description\":\"250-300 karakter\",\"tags\":[\"15 tag tanpa #\"],"
-        "\"hashtags\":[\"#..\"],\"thumbnail_text\":[\"3 opsi teks thumbnail maks 4 kata\"]}. Judul maks 70 karakter, tanpa clickbait menipu.")
+        "\"hashtags\":[\"#..\"],\"thumbnail_text\":[\"3 opsi teks thumbnail maks 4 kata\"]}. Judul maks 70 karakter, "
+        "memancing penasaran tapi tanpa clickbait menipu.")
+    out["trend_topics"] = trend.get("topics", [])
+    return out
 
 
 def generate_prompts(params: Dict) -> Dict:
@@ -676,19 +689,29 @@ def generate_prompts(params: Dict) -> Dict:
 
 def viral_suggestions(params: Dict) -> Dict:
     niche = (params.get("niche") or "umum").strip()
-    trending = []
+    # v6.8: data HARI INI/MINGGU INI (urut views) + topik yang naik + Google Trends, bukan pencarian relevansi lama
+    from . import trends
+    ctx_data = {"text": "", "videos": [], "topics": [], "google_trends": []}
     try:
-        trending = [v["title"] for v in sources.youtube_search(f"{niche} viral", 15)]
+        ctx_data = trends.ai_context(niche if niche != "umum" else "viral indonesia")
     except Exception as exc:
-        logger.warning(f"Pencarian tren gagal: {exc}")
+        logger.warning(f"Data tren segar gagal: {str(exc)[:120]}")
+    trending = [v["title"] for v in ctx_data["videos"]]
+    if not trending:
+        try:
+            trending = [v["title"] for v in sources.youtube_search(f"{niche} viral", 15)]
+        except Exception as exc:
+            logger.warning(f"Pencarian tren gagal: {exc}")
     return _llm(
         f"Niche: {niche}. Platform: {params.get('platform', 'TikTok & YouTube Shorts')}. Audiens: Indonesia.\n"
-        f"Judul video yang sedang ramai di niche ini (data pencarian):\n- " + "\n- ".join(trending[:15]) +
+        + (ctx_data["text"] + "\n\nUtamakan ide yang menunggangi topik yang SEDANG naik di atas (momentum). " if ctx_data["text"] else
+           "Judul video yang sedang ramai di niche ini (data pencarian):\n- " + "\n- ".join(trending[:15])) +
         f"\n\nBuat {int(params.get('count', 10))} ide konten viral. Balas JSON {{\"patterns\":[\"pola viral yang terlihat\"],"
         "\"ideas\":[{\"title\":\"..\",\"hook\":\"kalimat 2 detik pertama\",\"format\":\"talking head / faceless / listicle / ...\","
         "\"why\":\"alasan berpotensi viral\",\"difficulty\":\"mudah|sedang|sulit\",\"tool\":\"fitur studio yang cocok: "
         "Analisis AI / Content Creator / Story Studio / Motion Graphic / Split Cam\"}],\"avoid\":[\"hal yang sebaiknya dihindari\"]}",
-        max_tokens=4000) | {"trending_sample": trending[:15]}
+        max_tokens=4000) | {"trending_sample": trending[:15], "trend_topics": ctx_data["topics"],
+                            "google_trends": ctx_data["google_trends"][:10], "data_date": ctx_data.get("date", "")}
 
 
 def assistant_chat(params: Dict) -> Dict:
@@ -731,10 +754,13 @@ def _days_since(date: Optional[str]) -> float:
 
 def viral_analytics(params: Dict) -> Dict:
     import requests
+    from . import trends
     category = params.get("category", "Semua")
+    if not params.get("_auto"):
+        trends.watch_category(category)  # kategori yang dibuka ikut diperbarui otomatis
     cache_key = f"analytics:{category}"
     cached = db.kv_get(cache_key)
-    if cached and time.time() - cached.get("_ts", 0) < 3600 and not params.get("refresh"):
+    if cached and time.time() - cached.get("_ts", 0) < 3600 and not params.get("refresh") and cached.get("trending_topics") is not None:
         return cached
     videos: List[Dict] = []
     source = "yt-dlp search"
@@ -757,13 +783,22 @@ def viral_analytics(params: Dict) -> Dict:
             source = "YouTube Data API (mostPopular ID)"
         except Exception as exc:
             logger.warning(f"YouTube API gagal: {exc}")
+    # v6.8: video segar (hari ini + minggu ini, urut views) — dulu pencarian relevansi tanpa filter waktu
+    seen = {v["id"] for v in videos}
+    fresh = [v for v in trends.fresh_videos(_CAT_QUERY.get(category, category), 30) if v["id"] not in seen and not v.get("live")]
+    if fresh:
+        videos += fresh
+        source = (source + " + " if seen else "") + "YouTube hari ini & minggu ini (urut views)"
     if not videos:
         videos = sources.youtube_search(_CAT_QUERY.get(category, category), 24)
+
+    def _age(v):
+        return float(v["age_days"]) if v.get("age_days") and not v.get("upload_date") else _days_since(v.get("upload_date"))
     rpm = _RPM_IDR.get(category, 12000)
-    max_vpd = max([v.get("views", 0) / _days_since(v.get("upload_date")) for v in videos] or [1]) or 1
+    max_vpd = max([v.get("views", 0) / _age(v) for v in videos] or [1]) or 1
     for v in videos:
         views = v.get("views", 0) or 0
-        vpd = views / _days_since(v.get("upload_date"))
+        vpd = views / _age(v)
         eng = ((v.get("likes", 0) + v.get("comments", 0) * 2) / views * 100) if views and v.get("likes") is not None else None
         v["engagement"] = round(eng, 2) if eng is not None else None
         v["viral_score"] = int(min(100, round(100 * math.log10(1 + vpd) / math.log10(1 + max_vpd))))
@@ -788,8 +823,15 @@ def viral_analytics(params: Dict) -> Dict:
                     "competition": "Sangat tinggi" if avg_score > 60 else "Tinggi" if avg_score > 40 else "Sedang"},
         "best_times": schedule, "top_hashtags": sorted(tags, key=lambda k: -tags[k])[:8] or ["viral", "fyp", "shorts"],
         "note": "Skor viral = kecepatan views/hari relatif terhadap video tercepat di daftar. Pendapatan = estimasi kasar RPM Indonesia.",
+        "trending_topics": trends.topics_from_titles(videos, limit=10, exclude=_CAT_QUERY.get(category, category)),
+        "google_trends": [],
+        "auto_refresh_min": int(getattr(config, "TRENDS_REFRESH_MIN", 60)) if getattr(config, "TRENDS_AUTO_REFRESH", True) else 0,
         "_ts": time.time(),
     }
+    try:
+        result["google_trends"] = trends.google_trends(limit=12)
+    except Exception as exc:
+        logger.warning(f"Google Trends gagal: {str(exc)[:120]}")
     if sum(views) > 0:  # YouTube kadang mengembalikan hasil tanpa jumlah views — jangan di-cache
         db.kv_set(cache_key, result)
     else:

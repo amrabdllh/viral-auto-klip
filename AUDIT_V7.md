@@ -207,3 +207,41 @@ Belum diuji: penutup pada Content Creator/Highlight secara langsung (memakai fun
 | Durasi di metadata | `end - start` (tidak menghitung cold open/freeze/tempo) | durasi nyata file akhir |
 
 Uji: klip 2470–2493 dirender penuh: jump cut 0,6 dtk, tempo 1,06×, 15 kata ditekan dengan pop besar, headline & caption terpisah; ±4 menit per klip (sama seperti sebelumnya, tempo +±10 dtk).
+
+---
+
+## Putaran 10 (v6.8): riset tren pakai data terbaru + update otomatis
+Masalah (ditemukan karena GTA VI yang sedang booming tidak muncul):
+- Analitik Viral tanpa `YOUTUBE_API_KEY` memakai pencarian YouTube **urut relevansi tanpa filter waktu** dengan kata kunci tetap ("viral indonesia"), sehingga video lama ikut tampil dan topik spesifik tidak terlihat.
+- Cache 1 jam, **tidak ada pembaruan otomatis**.
+- Saran Viral AI memakai 15 judul hasil pencarian yang sama; Optimasi Judul **murni pengetahuan AI** (tertinggal berbulan-bulan).
+
+Perbaikan (`core/trends.py`, semua gratis tanpa API key):
+| Komponen | Isi |
+|---|---|
+| Video segar | filter resmi YouTube "hari ini" + "minggu ini" diurutkan views (±2 dtk per pencarian) |
+| Topik yang naik | n-gram judul yang muncul di ≥2 channel berbeda, dibobot views; alias ("Grand Theft Auto VI" = "GTA VI" = "GTA 6"); kata umum disaring |
+| Google Trends | RSS pencarian real-time Indonesia (cache 30 menit) |
+| Konteks AI | Saran Viral & Optimasi Judul menerima tanggal hari ini + topik naik + judul tercepat + Google Trends, dengan instruksi bahwa data terbaru mengalahkan pengetahuan lama AI |
+| Auto-update | thread latar menyegarkan "Semua" + kategori yang dibuka 24 jam terakhir tiap 60 menit (`TRENDS_REFRESH_MIN`) |
+| UI | panel "Topik yang lagi naik minggu ini" (klik → Saran Viral terisi), "Pencarian Google yang melonjak", "diperbarui X menit lalu · otomatis tiap 60 menit"; Saran Viral & Optimasi Judul menampilkan data tren yang dipakai |
+
+Uji: Analitik Gaming → topik naik **GTA 6 (5 channel)**, Roblox, Bus Simulator; video GTA VI di peringkat atas. Saran Viral "gaming" (data 20 Nov 2026) → "Jam Pertama GTA 6 di Indonesia — Ada yang Bikin Kaget", "Berapa Sih Modal Main GTA 6 di Indonesia?", "Aku Bikin Vice City di Minecraft". Auto-update tercatat 20 dtk setelah server menyala.
+
+Batas: TikTok tidak menyediakan data tren publik tanpa login, jadi tren TikTok belum masuk. Umur video dari pencarian cepat diperkirakan dari filter (hari ini ≈0,5 hari, minggu ini ≈3,5 hari).
+
+---
+
+## Putaran 11 (v6.8): video AI generatif — IDE > SCRIPT > AI > IMAGE > VIDEO bergerak
+Sebelumnya Content Creator/Story Studio menghasilkan "gambar diam + gerak kamera". Sekarang adegan bisa dihidupkan:
+| | Gemini Omni Flash (`gemini-omni-1.2-flash`) | Kling 3.0 Turbo |
+|---|---|---|
+| Key | `GEMINI_API_KEY` | `KLING_API_KEY` (API Key standar baru; AK/SK lama ditolak vendor) |
+| Gambar→video | gambar adegan = bingkai pertama (tokoh tetap konsisten) | `first_frame` |
+| Teks→video | ya | ya |
+| Durasi / rasio | 3–15 dtk, 9:16 / 16:9 | 3–15 dtk, 9:16 / 16:9 / 1:1 |
+Catatan: Veo 3.1 Preview **dimatikan Google 22 Okt 2026**; dokumentasi resmi menyarankan Gemini Omni Flash.
+
+Cara kerja (`core/video_ai.py`): naskah AI kini juga menulis `video_prompt` (aksi + gerak kamera); pengguna memilih "Gerak adegan" (gerak kamera gratis / Gemini / Kling), sumber (gambar→video atau teks→video) dan **maks adegan video AI** (default 4: adegan pembuka + tersebar merata). Klip AI disesuaikan ke durasi narasi (dipotong, atau diperlambat ≤1,25× lalu frame akhir ditahan). Gagal apa pun → adegan itu kembali ke gerak kamera. Pemakaian (jumlah video & detik) dicatat lokal.
+
+Uji: format permintaan & pembacaan jawaban kedua provider diuji dengan respons tiruan sesuai dokumentasi (gambar→video, teks→video, polling Kling, penyesuaian durasi, fallback saat 429). **Belum diuji dengan panggilan sungguhan**: `GEMINI_API_KEY` di `.env` masih berisi teks contoh/placeholder (24 karakter, bukan format `AIza…`), jadi dianggap kosong oleh aplikasi — gambar & suara Gemini juga belum aktif karenanya; `KLING_API_KEY` belum diisi.

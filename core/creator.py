@@ -117,6 +117,7 @@ Balas HANYA JSON dengan bentuk:
       "on_screen_text": "teks singkat di layar (maks 6 kata) atau kosong",
       "image_prompt": "prompt gambar dalam BAHASA INGGRIS, deskriptif: subjek, aksi, latar, komposisi, cahaya",
       "stock_query": "2-4 kata bahasa Inggris untuk mencari footage stok",
+      "video_prompt": "BAHASA INGGRIS, untuk AI video: aksi/gerakan yang terjadi di adegan (siapa melakukan apa, ekspresi) + gerak kamera, 1-2 kalimat",
       "motion": "zoom_in | zoom_out | pan_left | pan_right | pan_up | pan_down",
       "sfx": "efek suara singkat bahasa Inggris atau kosong"
     }
@@ -369,9 +370,34 @@ def apply_brand(ctx_path: str, out: str, force: Optional[bool] = None) -> str:
     return out
 
 
+def _ai_video_scene(ctx: JobContext, params: Dict, scene: Dict, idx: int, dur: float, w: int, h: int,
+                    out: Path, image: Optional[str]) -> Optional[str]:
+    """v6.8: hidupkan adegan dengan video AI (Gemini Omni Flash / Kling). None bila gagal → gerak kamera."""
+    from . import video_ai
+    engine = params.get("video_engine", "camera")
+    prompt = scene.get("video_prompt") or scene.get("image_prompt") or scene["narration"]
+    if not image:  # teks→video: gaya visual & tokoh ikut di prompt
+        prompt = style_prompt(params, prompt)
+    raw = ctx.dir / f"aivideo_{idx:02d}.mp4"
+    try:
+        res = video_ai.generate(prompt, str(raw), engine, image=image, duration=dur + 0.3,
+                                aspect="9:16" if h >= w else "16:9")
+        video_ai.fit_to_scene(str(raw), str(out), dur, w, h)
+        ctx.log(f"Adegan {idx + 1}: video AI {video_ai.PROVIDERS[engine]['label']} "
+                f"({'gambar→video' if image else 'teks→video'}, {res['seconds']} dtk)")
+        return str(out)
+    except Exception as exc:
+        ctx.log(f"Adegan {idx + 1}: video AI gagal → gerak kamera ({str(exc)[:160]})")
+        return None
+
+
 def _scene_visual(ctx: JobContext, params: Dict, scene: Dict, idx: int, dur: float, w: int, h: int) -> str:
     visual_mode = params.get("visual_mode", "ai_image")
     out = ctx.dir / f"scene_{idx:02d}.mp4"
+    if scene.get("_ai_video") and params.get("video_ai_source", "image") == "text":
+        done = _ai_video_scene(ctx, params, scene, idx, dur, w, h, out, image=None)
+        if done:
+            return done
     use_stock = visual_mode == "stock" or (visual_mode == "mixed" and idx % 3 == 2)
     if use_stock and media_ai.stock_available():
         query = scene.get("stock_query") or scene.get("on_screen_text") or params.get("category", "")
@@ -410,6 +436,10 @@ def _scene_visual(ctx: JobContext, params: Dict, scene: Dict, idx: int, dur: flo
                 params["_last_real_image"] = img
     else:
         params["_last_real_image"] = img  # gambar pratinjau / upload pengguna
+    if scene.get("_ai_video") and params.get("video_ai_source", "image") != "text" and not str(img).endswith(".svg"):
+        done = _ai_video_scene(ctx, params, scene, idx, dur, w, h, out, image=img)
+        if done:
+            return done
     ffx.image_to_clip(img, str(out), dur, w, h, motion=scene.get("motion", "zoom_in"))
     return str(out)
 
@@ -438,7 +468,18 @@ def render_job(ctx: JobContext) -> Dict:
         voice_files.append(res["path"])
     ctx.log(f"TTS: {res['provider']} / {res.get('voice') or 'suara default'}")
 
-    # 2. Visual per adegan
+    # 2. Visual per adegan (v6.8: sebagian adegan dihidupkan video AI bila dipilih)
+    engine = p.get("video_engine", "camera")
+    if engine != "camera":
+        from . import video_ai
+        if video_ai.available(engine):
+            k = max(0, min(n, int(p.get("video_ai_max") or getattr(config, "VIDEO_AI_MAX_SCENES", 4))))
+            picks = set(range(n)) if k >= n else ({0} | {round(j * (n - 1) / max(k - 1, 1)) for j in range(k)} if k else set())
+            for i in sorted(picks)[:k]:
+                scenes[i]["_ai_video"] = True
+            ctx.log(f"Video AI {video_ai.PROVIDERS[engine]['label']}: {len(picks)} dari {n} adegan dihidupkan")
+        else:
+            ctx.log(f"Video AI dilewati: API key {video_ai.PROVIDERS.get(engine, {}).get('key', engine)} belum diisi → gerak kamera")
     scene_clips = []
     for i, s in enumerate(scenes):
         ctx.progress(35 + int(35 * i / n), "Visual", f"Membuat visual adegan {i + 1}/{n}")

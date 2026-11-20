@@ -540,7 +540,13 @@ PAGES.analytics = { render(view) {
     try {
       const d = await api(`/api/analytics?category=${encodeURIComponent(cat)}&refresh=${refresh}`);
       const s = d.summary;
-      $("#out").innerHTML = `<div class="cols-4">${UI.stat("Rata-rata views", fmtNum(s.avg_views))}${UI.stat("Est. pendapatan / video", fmtIDR(s.est_revenue_idr), "estimasi kasar")}
+      const ago = d._ts ? Math.max(0, Math.round((Date.now() / 1000 - d._ts) / 60)) : null;
+      const fresh = `<p class="tiny muted" style="margin:0">Data ${ago == null ? "" : ago < 1 ? "baru saja diperbarui" : `diperbarui ${ago} menit lalu`}${d.auto_refresh_min ? ` · otomatis tiap ${d.auto_refresh_min} menit` : ""} · sumber: ${esc(d.source)}</p>`;
+      const topics = (d.trending_topics || []).length ? UI.panel({ title: "Topik yang lagi naik minggu ini", sub: "Muncul berulang di video terbaru dari banyak channel — klik untuk cari ide",
+        body: `<div class="row">${d.trending_topics.map((t) => `<button type="button" class="pill accent" data-topic="${esc(t.topic)}" title="${esc((t.examples || []).join(" · "))}" style="cursor:pointer;border:0">${esc(t.topic)} · ${t.channels} channel</button>`).join("")}</div>` }) : "";
+      const gt = (d.google_trends || []).length ? UI.panel({ title: "Pencarian Google yang melonjak (Indonesia)", sub: "Real-time dari Google Trends",
+        body: `<div class="row">${d.google_trends.slice(0, 12).map((g) => `<button type="button" class="pill" data-topic="${esc(g.topic)}" title="${esc((g.news || []).join(" · "))}" style="cursor:pointer;border:0">${esc(g.topic)} <span class="muted">${esc(g.traffic)}</span></button>`).join("")}</div>` }) : "";
+      $("#out").innerHTML = fresh + (topics || gt ? `<div class="cols-2">${topics}${gt}</div>` : "") + `<div class="cols-4">${UI.stat("Rata-rata views", fmtNum(s.avg_views))}${UI.stat("Est. pendapatan / video", fmtIDR(s.est_revenue_idr), "estimasi kasar")}
         ${UI.stat("Skor viral rata-rata", `${s.viral_score}<small>/100</small>`)}${UI.stat("Persaingan", esc(s.competition))}</div>
         <div class="cols-2">${UI.panel({ title: "Waktu upload terbaik", body: `<dl class="kv" style="grid-template-columns:auto 1fr">${Object.entries(d.best_times).map(([pf, t]) => `<dt>${esc(pf)}</dt><dd><div class="row" style="justify-content:flex-end;gap:6px">${t.map((x) => UI.pill(x, "teal")).join("")}</div></dd>`).join("")}</dl>` })}
           ${UI.panel({ title: "Hashtag teratas", body: `<div class="row">${d.top_hashtags.map((h) => UI.pill("#" + h, "accent")).join("")}</div><p class="tiny muted">${esc(d.note)} Sumber: ${esc(d.source)}.</p>` })}</div>
@@ -552,23 +558,31 @@ PAGES.analytics = { render(view) {
             <td class="r">${UI.btn("Buat klip", { size: "sm", href: `#analisis?url=${encodeURIComponent(v.url)}` })}</td></tr>`).join("")}</tbody></table></div>` })}`;
     } catch (e) { $("#out").innerHTML = UI.banner("bad", esc(e.message)); }
   }
+  $("#out").addEventListener("click", (ev) => {  // topik → langsung cari ide konten di Saran Viral AI
+    const b = ev.target.closest("[data-topic]"); if (!b) return;
+    STATE.prefill.ideas = { niche: b.dataset.topic }; location.hash = "#ideas";
+  });
   $("#rf").onclick = () => load(true);
   load(false);
 } };
 
 /* ================================================================== SARAN VIRAL */
 PAGES.ideas = { render(view) {
-  view.innerHTML = `<div class="page">${pageHead("Saran Viral AI", "AI membaca judul yang sedang ramai di niche-mu lalu memberi pola viral dan ide konten siap eksekusi.")}${keyBanner(["llm"])}
+  view.innerHTML = `<div class="page">${pageHead("Saran Viral AI", "AI membaca video yang naik HARI INI & MINGGU INI di niche-mu, topik yang sedang booming, dan Google Trends, lalu memberi ide konten siap eksekusi.")}${keyBanner(["llm"])}
     ${UI.panel({ id: "f", body: `<div class="fields" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr) 120px">${UI.text("niche", "Niche", { placeholder: "mis. keuangan anak muda, horor, resep murah" })}
       ${UI.select("platform", "Platform", ["TikTok & YouTube Shorts", "TikTok", "YouTube Shorts", "Instagram Reels"], "TikTok & YouTube Shorts")}${UI.num("count", "Jumlah ide", { value: 10, min: 3, max: 20 })}</div>`,
       foot: footAction("Cari ide", "bulb") })}<div id="out" class="stack lg"></div></div>`;
+  if (STATE.prefill.ideas) { $('#f [name="niche"]').value = STATE.prefill.ideas.niche || ""; delete STATE.prefill.ideas; }
   $("#go").onclick = (e) => {
     const p = formValues($("#f")); if (!p.niche.trim()) return toast("Isi niche dulu", true);
     busy(e.currentTarget, async () => {
-      $("#out").innerHTML = UI.panel({ body: UI.empty("bulb", "AI sedang menganalisis tren…", "Butuh 10–40 detik.") });
+      $("#out").innerHTML = UI.panel({ body: UI.empty("bulb", "Mengambil tren hari ini & minggu ini, lalu AI menganalisis…", "Butuh 15–45 detik.") });
       try {
         const d = await api("/api/tools/viral-ideas", { body: { params: p } });
-        $("#out").innerHTML = (d.patterns?.length ? UI.panel({ title: "Pola viral yang terlihat", body: `<ul class="ink2" style="display:grid;gap:6px">${d.patterns.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` }) : "") +
+        const trendInfo = (d.trend_topics?.length || d.google_trends?.length) ? UI.panel({ title: "Data tren yang dipakai AI", sub: d.data_date ? `Diambil ${esc(d.data_date)}` : "",
+          body: `${d.trend_topics?.length ? `<div class="row">${d.trend_topics.map((t) => UI.pill(`${t.topic} · ${t.channels} channel`, "accent")).join("")}</div>` : ""}
+            ${d.google_trends?.length ? `<p class="tiny muted" style="margin:8px 0 4px">Pencarian Google yang melonjak</p><div class="row">${d.google_trends.slice(0, 8).map((g) => UI.pill(g.topic)).join("")}</div>` : ""}` }) : "";
+        $("#out").innerHTML = trendInfo + (d.patterns?.length ? UI.panel({ title: "Pola viral yang terlihat", body: `<ul class="ink2" style="display:grid;gap:6px">${d.patterns.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` }) : "") +
           `<div class="cols-2">${(d.ideas || []).map((i, n) => UI.panel({ title: i.title, sub: [i.format, i.difficulty].filter(Boolean).map(esc).join(" · "),
             body: `<p><b class="small">Hook</b><br><span class="ink2">${esc(i.hook)}</span></p><p class="small muted">${esc(i.why)}</p>`,
             foot: `${i.tool ? UI.pill(i.tool, "teal") : ""}<span class="spacer"></span>${UI.btn("Buat di Content Creator", { size: "sm", ico: "wand", attrs: `data-i="${n}"` })}` })).join("")}</div>` +
@@ -601,7 +615,8 @@ PAGES.title = { render(view) {
             body: `<h3 style="font-size:16px">${esc(t.title)}</h3><p class="small muted">${esc(t.why || "")}</p>` })).join("")}</div>
           ${UI.panel({ title: "Deskripsi", head: UI.btn("Salin", { ico: "copy", size: "sm", kind: "ghost", attrs: `data-copy="${esc(d.description)}"` }), body: `<p class="ink2">${esc(d.description)}</p>` })}
           ${UI.panel({ title: `Tag (${(d.tags || []).length})`, head: UI.btn("Salin", { ico: "copy", size: "sm", kind: "ghost", attrs: `data-copy="${esc(tags)}"` }), body: `<div class="row">${(d.tags || []).map((t) => UI.pill(t)).join("")}</div>${d.hashtags?.length ? `<div class="row">${d.hashtags.map((t) => UI.pill(t, "teal")).join("")}</div>` : ""}` })}
-          ${d.thumbnail_text?.length ? UI.panel({ title: "Teks thumbnail", body: `<div class="row">${d.thumbnail_text.map((t) => UI.pill(t, "accent")).join("")}</div>` }) : ""}</div>`;
+          ${d.thumbnail_text?.length ? UI.panel({ title: "Teks thumbnail", body: `<div class="row">${d.thumbnail_text.map((t) => UI.pill(t, "accent")).join("")}</div>` }) : ""}
+          ${d.trend_topics?.length ? UI.panel({ title: "Topik terkait yang lagi naik", sub: "Dari video minggu ini — dipakai AI untuk kata kunci", body: `<div class="row">${d.trend_topics.map((t) => UI.pill(`${t.topic} · ${t.channels} channel`, "teal")).join("")}</div>` }) : ""}</div>`;
         bindCards(out);
       } catch (err) { out.innerHTML = UI.banner("bad", esc(err.message)); }
     });
@@ -853,7 +868,8 @@ PAGES.settings = { render(view) {
     ${UI.banner("info", "Bingung? Klik <b>Setel otomatis</b> — sistem membaca API key yang terpasang lalu memilih provider, model, suara, dan mesin transkripsi terbaik. Setelah itu cukup tempel link di Beranda.")}
     <div class="layout"><div class="stack lg"><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
     <aside>${st ? UI.panel({ title: "Kemampuan aktif", body: `<div class="stack">${[["LLM", st.ai.providers.map((p) => pill(p.configured, p.provider))], ["Suara", Object.entries(st.media.tts).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
-        ["Gambar", Object.entries(st.media.image).map(([k, v]) => pill(v.ready, PRETTY[k] || k))], ["Lainnya", [pill(st.media.elevenlabs, "ElevenLabs"), pill(st.media.stock, "Stok"), pill(st.media.youtube_api, "YouTube API"), pill(st.ffmpeg, "FFmpeg")]]]
+        ["Gambar", Object.entries(st.media.image).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
+        ["Video AI", Object.entries(st.media.video || {}).map(([k, v]) => pill(v.ready, v.label))], ["Lainnya", [pill(st.media.elevenlabs, "ElevenLabs"), pill(st.media.stock, "Stok"), pill(st.media.youtube_api, "YouTube API"), pill(st.ffmpeg, "FFmpeg")]]]
         .map(([k, list]) => `<div class="stack" style="gap:6px"><span class="section-title">${k}</span><div class="row" style="gap:6px">${list.join("")}</div></div>`).join("")}</div>` }) : ""}
       ${st ? UI.panel({ title: "Tes provider AI", body: `${UI.field("Provider", `<select id="tp">${UI.options(st.ai.providers.map((p) => p.provider), st.ai.provider)}</select>`)}${UI.field("Model", `<select id="tm">${UI.options(aiModelOptions(st.ai.provider), "")}</select>`)}
         <div class="row">${UI.btn("Tes koneksi", { size: "sm", id: "tbtn" })}${UI.btn("Deteksi model", { ico: "refresh", size: "sm", id: "dbtn" })}</div><div id="aiRes" class="small"></div>` }) : ""}</aside></div>
