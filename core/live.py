@@ -246,6 +246,11 @@ class Recorder:
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inp(v_url)]
         if a_url:
             cmd += [*inp(a_url), "-map", "0:v:0", "-map", "1:a:0"]
+            # Video dan audio dari rendition HLS terpisah bisa punya titik mulai
+            # berbeda beberapa detik. Tanpa -copyts FFmpeg menormalkan masing-masing
+            # ke 0 -> audio bergeser dari video (klip tidak sinkron).
+            # Hanya dipakai di jalur dua-input; satu input tidak terpengaruh.
+            cmd += ["-copyts"]
         else:
             cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
         cmd += ["-c", "copy", "-f", "segment", "-segment_time", str(SEGMENT_SEC), "-reset_timestamps", "1",
