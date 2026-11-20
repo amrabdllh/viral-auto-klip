@@ -233,6 +233,28 @@ class Recorder:
             backlog = min(MAX_BACKLOG_SEC, max(4.0, time.time() - last + 6)) if last else 30.0
         self.refresh()
 
+    @staticmethod
+    def _audio_offset(v_url: str, a_url: str, headers: Dict, n: int) -> float:
+        """Selisih titik mulai video vs audio untuk jendela `-live_start_index -n`.
+
+        Positif = audio harus digeser maju. 0 bila playlist tidak terbaca.
+        """
+        try:
+            v_pdt, v_durs = _playlist_timing(v_url, headers)
+            a_pdt, a_durs = _playlist_timing(a_url, headers)
+            if not (v_pdt and a_pdt):
+                return 0.0
+
+            def start(pdt: float, durs: List[float]) -> float:
+                idx = max(0, len(durs) - n)
+                return pdt + sum(durs[:idx])
+
+            delta = start(v_pdt, v_durs) - start(a_pdt, a_durs)
+            # Selisih > 5 menit hampir pasti salah baca, jangan diterapkan.
+            return delta if abs(delta) <= 300 else 0.0
+        except Exception:
+            return 0.0
+
     def _run_ffmpeg(self, v_url: str, a_url: Optional[str], headers: Dict, backlog: float) -> None:
         n = max(3, int(round(backlog)))
         run_no = len(self.runs)
@@ -245,12 +267,17 @@ class Recorder:
             return args + ["-i", u]
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inp(v_url)]
         if a_url:
+            # Video dan audio datang dari rendition HLS terpisah. Kalau kedua
+            # playlist mulai di detik berbeda, FFmpeg menormalkan masing-masing
+            # ke 0 -> audio bergeser. Offset-nya dihitung eksplisit dari PDT
+            # playlist, lalu audio digeser dengan -itsoffset.
+            # (Jangan pakai -copyts: timestamp absolut membuat segmen pertama
+            #  menjadi raksasa dan akuntansi durasi ikut rusak.)
+            offset = self._audio_offset(v_url, a_url, headers, n)
+            if abs(offset) > 0.05:
+                self.log(f"Offset audio {offset:+.2f} dtk dikoreksi")
+                cmd += ["-itsoffset", f"{offset:.3f}"]
             cmd += [*inp(a_url), "-map", "0:v:0", "-map", "1:a:0"]
-            # Video dan audio dari rendition HLS terpisah bisa punya titik mulai
-            # berbeda beberapa detik. Tanpa -copyts FFmpeg menormalkan masing-masing
-            # ke 0 -> audio bergeser dari video (klip tidak sinkron).
-            # Hanya dipakai di jalur dua-input; satu input tidak terpengaruh.
-            cmd += ["-copyts"]
         else:
             cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
         cmd += ["-c", "copy", "-f", "segment", "-segment_time", str(SEGMENT_SEC), "-reset_timestamps", "1",
