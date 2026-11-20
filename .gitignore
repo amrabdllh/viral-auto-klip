@@ -63,6 +63,9 @@ tools/ffmpeg/
 
 # Kredensial lokal (client_secret, token, cookies)
 config/
+cookies.txt
+*cookies*.txt
+*cookies*.json
 
 # Python cache
 __pycache__/

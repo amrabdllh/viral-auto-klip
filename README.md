@@ -60,7 +60,7 @@ ffmpeg: pakai `tools/ffmpeg` bila ada, kalau tidak dari PATH.
 Tanpa paket ini aplikasi tetap jalan; hanya fitur tersebut yang memberi pesan "belum terpasang".
 
 
-> **Baru di v6:** studio konten lengkap di **http://localhost:8000/app**: Analisis AI, Atur Manual, Split Cam, Highlight Bola, Konten Tempel, Content Creator / Story Studio / Motion Graphic, TTS & clone suara, musik/SFX, Editor, Merge, Loop, WA Story, Analitik Viral, Optimasi Judul, Transcript, Auto Upload terjadwal, dan Brand Kit. Detail: [CHANGELOG_V6.md](CHANGELOG_V6.md). UI lama: `/legacy`.
+> **Baru di v6:** studio konten lengkap di **http://localhost:8000/app**: Analisis AI, Atur Manual, Split Cam, Highlight Bola, Konten Tempel, Content Creator / Story Studio / Motion Graphic, TTS & clone suara, musik/SFX, Editor, Merge, Loop, WA Story, Analitik Viral, Optimasi Judul, Transcript, Auto Upload terjadwal, dan Brand Kit. UI lama: `/legacy`.
 
 **AI-Powered Viral Video Clipper — Inspired by Klipers.pro & OpusClip**
 
@@ -80,7 +80,7 @@ Tanpa paket ini aplikasi tetap jalan; hanya fitur tersebut yang memberi pesan "b
 | ⬆️ **Upload tanpa render ulang** | `python cli.py --upload-from output/klip_xxx --upload-youtube --upload-tiktok` + tombol upload di UI |
 | 🔍 **Deteksi model** | Tombol "Deteksi" mengambil daftar model yang tersedia untuk API key kamu (semua provider) |
 | ✨ **Pro editing** | Jump cut (buang jeda & "eh/em"), zoom dinamis + punch-in, caption kata-aktif, color grade, progress bar, whoosh SFX, thumbnail pintar + cover B, CTA akhir — preset Minimal / Dinamis / Maksimal |
-| 🐛 Bug fix | Semua temuan audit diperbaiki — lihat [CHANGELOG_V4.md](CHANGELOG_V4.md) |
+| 🐛 Bug fix | Semua temuan audit diperbaiki |
 
 ### Pilih provider AI
 
@@ -142,7 +142,7 @@ Paling mudah: buka **http://localhost:8000/app#settings**, tempel API key, klik 
 | 📤 **Publisher Module** | `core/publisher.py`: paket publish per platform, rencana posting, jam upload terbaik, varian caption A/B test |
 | ⬆️ **Auto-Upload YouTube** | Upload otomatis ke YouTube Shorts via YouTube Data API v3 (OAuth) — `python cli.py --upload-youtube` |
 | 🎵 **TikTok Auto-Upload** | Lewat `tiktok-uploader` bila terpasang; fallback panduan manual |
-| 🐛 **Semua bug v2 diperbaiki** | Lihat [CHANGELOG_V3.md](CHANGELOG_V3.md) |
+| 🐛 **Semua bug v2 diperbaiki** | — |
 
 ---
 
@@ -433,7 +433,6 @@ viral-auto-klip/
 ├── .env.example                 ← Template environment variables v3
 ├── viral_auto_klip_v2_real.html ← UI alternatif (HTML, v3-fixed)
 ├── start.bat                    ← One click setup Windows v3
-├── CHANGELOG_V3.md              ← Riwayat perbaikan & upgrade v3
 ├── core/
 │   ├── ai_providers.py          ← NEW v4: 10 provider AI, fallback berantai, login Google
 │   ├── analyzer.py              ← AI moment finder + scoring + rerank + AI packaging
