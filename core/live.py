@@ -789,6 +789,19 @@ def live_clip(ctx: JobContext) -> Dict:
             "chat": chat.count() if chat else 0}
 
 
+def _gameplay_from_cam(cam: List[float]) -> List[float]:
+    """Area gameplay = frame dikurangi sisi tempat facecam berada."""
+    x, y, w, h = cam
+    cx, cy = x + w / 2, y + h / 2
+    if cx > 0.55:            # cam di kanan
+        return [0.0, 0.0, round(max(0.2, x), 4), 1.0]
+    if cx < 0.45:            # cam di kiri
+        return [round(min(0.8, x + w), 4), 0.0, round(max(0.2, 1.0 - (x + w)), 4), 1.0]
+    if cy > 0.5:             # cam di bawah
+        return [0.0, 0.0, 1.0, round(max(0.2, y), 4)]
+    return [0.0, round(min(0.8, y + h), 4), 1.0, round(max(0.2, 1.0 - (y + h)), 4)]
+
+
 def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
                             p: Dict, wall0: float) -> List[Dict]:
     """Render momen jendela live memakai template MotionKlip (preset campaign).
@@ -804,6 +817,22 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
     overrides = {k: p[k] for k in ("subtitle_provider", "intro_voice", "layout") if p.get(k)}
     # Live butuh cepat: narasi judul hanya kalau diminta eksplisit.
     overrides.setdefault("intro_voice", "none")
+
+    # Kotak facecam di preset bisa meleset kalau streamer mengubah ukuran/posisi
+    # cam. Di live, deteksi per window dan pakai kotak itu; gameplay dipotong
+    # agar area cam tidak muncul dua kali.
+    if p.get("auto_facecam", True):
+        try:
+            from .clipper import detect_stream_layout
+
+            det = detect_stream_layout(video, picked)
+            if det:
+                cam = det["cam_box"]
+                overrides["facecam_rect"] = cam
+                overrides["gameplay_rect"] = _gameplay_from_cam(cam)
+                logger.info(f"Campaign live: facecam terdeteksi {cam} → gameplay {overrides['gameplay_rect']}")
+        except Exception as exc:  # noqa: BLE001 - deteksi opsional
+            logger.warning(f"Deteksi facecam campaign dilewati: {str(exc)[:160]}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     clips: List[Dict] = []
