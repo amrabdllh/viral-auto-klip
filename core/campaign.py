@@ -454,7 +454,9 @@ def _gameplay_rect_from_cam(cam: List[float]) -> List[float]:
     x, y, w, h = cam
     cx, cy = x + w / 2, y + h / 2
     if cx > 0.55:
-        return [0.0, 0.0, round(max(0.2, x), 4), 1.0]
+        # Clipper memakai lebar 0.79 walau cam mulai di 0.775 — sisakan hampir
+        # seluruh frame, jangan potong selebar kotak cam.
+        return [0.0, 0.0, round(max(0.55, min(0.79, x)), 4), 1.0]
     if cx < 0.45:
         return [round(min(0.8, x + w), 4), 0.0, round(max(0.2, 1.0 - (x + w)), 4), 1.0]
     if cy > 0.5:

@@ -411,9 +411,19 @@ def split_cam(src: str, out: str, cam: Tuple[float, float, float, float], game: 
                 f"{int(vw * x)}:{int(vh * y)}")
 
     top, bottom = ("c", "g") if cam_top else ("g", "c")
+    # Panel gameplay: frame utuh (contain) di atas latar blur — sama seperti
+    # renderer campaign Clipper. Dulu 'increase' (cover) memotong sisi kiri/kanan
+    # sehingga menu/UI game dan area penting hilang.
+    bg_w = max(2, W // 4)
+    bg_h = max(2, (game_h // 8) * 2)
     fc = (f"[0:v]split[c0][g0];"
           f"[c0]{crop(cam)},scale={W}:{cam_h}:force_original_aspect_ratio=increase,crop={W}:{cam_h}[c];"
-          f"[g0]{crop(game)},scale={W}:{game_h}:force_original_aspect_ratio=increase,crop={W}:{game_h}[g];"
+          f"[g0]{crop(game)},split=2[gf][gb];"
+          f"[gf]scale={W}:{game_h}:force_original_aspect_ratio=decrease:force_divisible_by=2:"
+          f"reset_sar=1:flags=lanczos[gfit];"
+          f"[gb]scale={bg_w}:{bg_h}:force_original_aspect_ratio=increase:force_divisible_by=2:"
+          f"reset_sar=1,crop={bg_w}:{bg_h},gblur=sigma=10,scale={W}:{game_h}[gbg];"
+          f"[gbg][gfit]overlay=x=(W-w)/2:y=0[g];"
           f"[{top}][{bottom}]vstack=inputs=2,setsar=1,format=yuv420p[v]")
     args = []
     if start:

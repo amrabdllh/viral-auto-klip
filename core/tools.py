@@ -913,26 +913,33 @@ def campaign_render_job(ctx: JobContext) -> Dict:
             ffx.extract_frame(str(out), 1.0, str(thumb), 540)
         except Exception:  # noqa: BLE001 - thumbnail opsional
             thumb = None
-        asset = ctx.asset("clip", out, name=out.stem, meta={
+        preset_tags = str(review.get("hashtags") or "").strip()
+        # Judul & deskripsi dibuat di sini (bukan hanya saat auto-upload) supaya
+        # tombol upload manual di Library juga punya metadata — sama seperti klip biasa.
+        generated: Dict = {}
+        if p.get("auto_meta", True):
+            generated = _auto_upload_meta(review.get("transcript_text") or "", preset_tags)
+        title = str(item["title"] or generated.get("title") or "")
+        name = title[:100] or out.stem
+        asset = ctx.asset("clip", out, name=name, meta={
             "source": "campaign", "thumbnail": str(thumb) if thumb else "",
             "duration": ffx.probe(str(out))["duration"],
         # Simpan sebagai list: UI memanggil .join(), dan klip biasa juga list.
-        "hashtags": [t for t in str(review.get("hashtags") or "").split() if t],
+        "hashtags": [t for t in preset_tags.split() if t],
             "layout": review.get("layout"),
+            "title": name,
+            "description": generated.get("description") or "",
+            "upload_caption": generated.get("description") or "",
         })
         clips.append({"file_path": str(out), "thumbnail": str(thumb) if thumb else "",
-                      "asset_id": asset["id"], "title": out.stem})
+                      "asset_id": asset["id"], "title": name,
+                      "ai_title": generated.get("title") or "",
+                      "upload_caption": generated.get("description") or ""})
 
         # ---- Auto-publish per klip (YouTube headless, opsional TikTok juga).
         if p.get("auto_upload"):
-            title = str(item["title"] or "")
-            description = ""
-            preset_tags = str(review.get("hashtags") or "").strip()
-            if p.get("auto_meta"):
-                generated = _auto_upload_meta(review.get("transcript_text") or "", preset_tags)
-                title = title or generated.get("title") or ""
-                description = generated.get("description") or ""
             title = (title or out.stem)[:100]
+            description = (generated.get("description") or "") if p.get("auto_meta", True) else ""
             discord = str(review.get("discord_tag") or "").strip()
             parts = [description, preset_tags, f"Discord: {discord}" if discord else ""]
             description = " ".join(part for part in parts if part).strip()
