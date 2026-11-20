@@ -175,6 +175,9 @@ def process_clips(
         else:
             seam = int(1920 * float(stream_layout.get("cam_ratio", 0.38)))
             style["vertical_position"] = max(200, 1920 - seam - 150)
+        if stream_layout.get("caption_font_size"):
+            style["font_size"] = max(40, min(110, int(stream_layout["caption_font_size"])))
+            logger.info(f"  Caption font: {style['font_size']}px")
 
     content_rect = None
     if not stream_layout:  # sumber berbingkai (kartu video + border hitam + branding) → crop hanya gambarnya
@@ -593,8 +596,10 @@ def _process_single_clip(
         lt_items = _lower_third_items(opts.get("lower_third") or {}, speaker_plan, clip_duration,
                                       t_min=max(cold_shift + 0.4, 2.9 if config.ENABLE_BROLL and not clip_info.get("no_hook_card") else 0.6))
         if edit.get("lower_third") and lt_items:
+            # Split/campaign: kartu nama di area gameplay, di atas subtitle dan
+            # banner (0.86 dulu menabrak banner MotionKlip di y=1584).
             f, files = editing.lower_third_filters(lt_items, clip_dir, _drawtext_font(), _escape_ffmpeg_filter_path,
-                                                   y_frac=0.86 if layout else 0.58)
+                                                   y_frac=0.74 if layout else 0.58)
             overlays += f
             overlay_files += files
         polish = dict(width=out_w, height=out_h, duration=clip_duration, ass_path=ass_for_burn, grade=edit["color_grade"],
