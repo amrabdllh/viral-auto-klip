@@ -302,3 +302,17 @@ Skor = 35% skor awal (kata kunci + penilaian momen AI) + 65% rubrik Editor-AI (r
 
 ### Upload otomatis (`core/autopublish.py`)
 Centang "Upload otomatis ke jam FYP terbaik" di Analisis AI → klip langsung masuk antrean penjadwal (upload sendiri saat jamnya): jendela jam ramai per niche & platform (niche dari isi klip, gaming untuk live gaming, atau dipilih pengguna), akhir pekan pagi digeser +1 jam, menit diacak, klip skor tertinggi di jam paling ramai, maks `AUTO_PUBLISH_PER_DAY` (3) per platform per hari, jarak ≥ `AUTO_PUBLISH_MIN_GAP_H` (2,5 jam), tidak bentrok dengan jadwal yang ada. Judul/caption/hashtag dari Editor-AI + `GLOBAL_HASHTAGS` (Pengaturan) + hashtag per job; hashtag global juga dipakai jadwal manual. Hanya platform yang benar-benar tersambung (YouTube perlu login). Uji (antrean tiruan, tanpa upload sungguhan): 7 klip × 2 platform → maks 3/hari, jarak minimum 2,9 jam, slot hari yang sama dipakai bila jendela masih terbuka. Catatan: platform tidak membuka data "jam FYP" real-time; jendela memakai pola waktu ramai per niche.
+
+---
+
+## Putaran 14 (v6.8): jam upload yang belajar dari channel sendiri
+Sebelumnya: tabel jam per niche & platform, hari hanya dihitung untuk pagi akhir pekan (+1 jam), tidak belajar. Studi publik saling bertentangan (Buffer, 7,1 jt posting: TikTok terbaik Sabtu & Minggu 09.00; Sprout Social: Selasa–Kamis 14–18; SocialPilot: Shorts terbaik Jumat 16–19) dan semuanya menyarankan analitik channel sendiri.
+
+`core/slot_learning.py`:
+1. **Jam jangkar** stabil tiap hari (2 jendela teratas per niche/platform, +1 cadangan), menit hanya bervariasi 5–25.
+2. **Penyesuaian hari**: Jumat & Sabtu malam +1 jam, Minggu malam −30 menit, pagi akhir pekan +1 jam.
+3. **Belajar**: penjadwal latar tiap 30 menit mengukur views 24 jam–7 hari tiap upload yang berhasil (YouTube: Data API bila `YOUTUBE_API_KEY`, atau yt-dlp dari URL Shorts; TikTok: profil `TIKTOK_PROFILE` dicocokkan ±20 menit). Setelah ≥8 upload terukur, jam dengan ≥3 sampel dan median ≥1,15× median channel jadi slot "terbukti"; jam <0,8× tidak dipakai; ±20% slot "eksplorasi" mencoba jam lain.
+4. Halaman Jadwal Upload: panel "Jam upload otomatis" (jam hari ini + label jangkar/terbukti/eksplorasi, progres data, jam terbaik).
+
+Uji simulasi (tanpa antrean/DB asli): tanpa data → Senin–Kamis ±19:10 & 22:20, Jumat–Sabtu ±20:15 & 23:15, Minggu ±18:45 & 21:45; dengan data buatan (jam 13 = 1,97×, jam 19 = 0,51×) → hari kerja pindah ke ±13:35 (terbukti) dan jam 19 tidak dipakai; pengukuran: 2 upload ≥24 jam tercatat (YouTube 5.321, TikTok 8.800), yang baru 3 jam dilewati, tidak diukur dua kali.
+Batas: YouTube Analytics "kapan penonton online" tidak tersedia lewat API publik, jadi pembelajaran memakai views 24 jam hasil upload sendiri; views TikTok butuh profil publik.

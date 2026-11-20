@@ -79,11 +79,19 @@ def tick() -> int:
 
 
 def _loop() -> None:
+    last_measure = 0.0
     while True:
         try:
             tick()
         except Exception:
             logger.exception("Scheduler tick gagal")
+        if time.time() - last_measure > 30 * 60:  # v6.8: ukur views 24 jam → jam upload belajar dari hasil
+            last_measure = time.time()
+            try:
+                from .slot_learning import measure_due
+                measure_due()
+            except Exception as exc:
+                logger.warning(f"Pengukuran jam upload gagal: {str(exc)[:160]}")
         time.sleep(max(10, int(getattr(config, "SCHEDULER_INTERVAL", 30))))
 
 

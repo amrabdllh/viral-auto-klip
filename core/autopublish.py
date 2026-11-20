@@ -68,30 +68,28 @@ def _windows(niche: str, platform: str) -> List[Tuple[int, int]]:
     return out or [(19, 21), (12, 14)]
 
 
-def _slots(niche: str, platform: str, n: int, start: float, taken: List[float], per_day: int, gap_h: float) -> List[float]:
-    """n waktu upload: urut kronologis, jendela paling ramai lebih dulu tiap hari."""
+def _slots(niche: str, platform: str, n: int, start: float, taken: List[float], per_day: int,
+           gap_h: float) -> List[Tuple[float, str]]:
+    """n waktu upload (kronologis) + alasannya. Jam jangkar stabil tiap hari, disesuaikan per hari, dan bergeser ke jam
+    yang terbukti ramai untuk channel ini (core/slot_learning)."""
+    from .slot_learning import plan_hours
     rnd = random.Random(f"{niche}{platform}{int(start // 3600)}")
     wins = _windows(niche, platform)
-    out: List[float] = []
+    anchors, extra = [float(a) for a, _ in wins[:2]], [float(a) for a, _ in wins[2:]]
+    out: List[Tuple[float, str]] = []
     day = datetime.fromtimestamp(start).replace(hour=0, minute=0, second=0, microsecond=0)
     for _ in range(60):  # maks ±2 bulan ke depan
-        weekend = day.weekday() >= 5
-        today = []
-        for a, b in wins:
-            a2 = a + (1 if weekend and a < 12 else 0)  # akhir pekan: orang bangun lebih siang
-            span = max(1, b - a2) * 60
-            t = (day + timedelta(hours=a2, minutes=rnd.randint(5, max(6, span - 20)))).timestamp()
-            w_end = (day + timedelta(hours=b)).timestamp()
-            if t <= start < w_end - 20 * 60:  # jendela masih terbuka → pakai sisa jendela hari ini
-                t = start + rnd.randint(10, 25) * 60
-            today.append(t)
         count = sum(1 for x in taken if datetime.fromtimestamp(x).date() == day.date())
-        for ts in today:  # urutan = jendela terbaik dulu
+        for h, why in plan_hours(anchors, extra, platform, day, per_day, rnd):
             if len(out) >= n or count >= per_day:
                 break
-            if ts <= start or any(abs(ts - x) < gap_h * 3600 for x in taken + out):
+            # menit sedikit bervariasi (5–25) agar tidak terlihat bot, tapi jam tetap konsisten tiap hari
+            ts = (day + timedelta(hours=h, minutes=rnd.randint(5, 25))).timestamp()
+            if ts <= start < ts + 100 * 60:  # jendela jam ini masih berjalan → pakai sisanya hari ini
+                ts = start + rnd.randint(10, 25) * 60
+            if ts <= start or any(abs(ts - x) < gap_h * 3600 for x in taken + [o[0] for o in out]):
                 continue
-            out.append(ts)
+            out.append((ts, why))
             count += 1
         if len(out) >= n:
             break
@@ -136,11 +134,11 @@ def schedule_clips(clips: List[Dict], platforms: Optional[List[str]] = None, nic
         for niche, group in by_niche.items():
             slots = _slots(niche, pf, len(group), start, taken, per_day, gap)
             # klip terbaik → slot paling awal di jam paling ramai
-            for c, ts in zip(group, slots):
+            for c, (ts, why) in zip(group, slots):
                 cp = copy_for(c, extra_tags)
                 item = db.add_schedule(c["file_path"], cp["title"], cp["description"], [pf], ts)
                 taken.append(ts)
-                out.append({**item, "niche": niche, "score": c.get("score")})
+                out.append({**item, "niche": niche, "score": c.get("score"), "slot": why})
     out.sort(key=lambda s: s["run_at"])
     logger.info(f"Upload otomatis: {len(out)} jadwal ke {', '.join(pfs)}")
     return {"scheduled": out, "skipped": ""}

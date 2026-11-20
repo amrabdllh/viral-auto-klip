@@ -291,7 +291,7 @@ def clip_quick(ctx: JobContext) -> Dict:
             ctx.log(f"Upload otomatis dilewati: {auto_pub['skipped']}")
         for s in auto_pub["scheduled"]:
             ctx.log(f"Dijadwalkan {datetime.fromtimestamp(s['run_at']).strftime('%a %d %b %H:%M')} → "
-                    f"{', '.join(s['platforms'])} ({s['niche']}): {s['title'][:60]}")
+                    f"{', '.join(s['platforms'])} ({s['niche']}, jam {s.get('slot', 'jangkar')}): {s['title'][:60]}")
     return {"_message": f"{len(clips)} klip viral siap" + (f" · {len(auto_pub['scheduled'])} dijadwalkan otomatis"
                                                             if auto_pub and auto_pub["scheduled"] else ""),
             "clips": clips, "total_clips": len(clips),

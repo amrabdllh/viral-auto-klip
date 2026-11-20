@@ -577,6 +577,28 @@ def platforms():
     return scheduler.platform_status()
 
 
+@router.get("/upload-insights")
+def upload_insights(niche: str = "general"):
+    """v6.8: jam upload hari ini per platform (jangkar/terbukti/eksplorasi) + apa yang sudah dipelajari."""
+    import random
+    from datetime import datetime
+    from core import autopublish, slot_learning
+    now = datetime.now()
+    out = {}
+    for pf in scheduler.PLATFORMS:
+        wins = autopublish._windows(niche, pf)
+        plan = slot_learning.plan_hours([float(a) for a, _ in wins[:2]], [float(a) for a, _ in wins[2:]], pf, now, 3,
+                                        random.Random(0))
+        ins = slot_learning.insights(pf)
+        best = sorted(((d, h, s) for (d, h), s in ins["hours"].items() if s["n"] >= slot_learning.MIN_SAMPLES_HOUR),
+                      key=lambda x: -x[2]["score"])[:5]
+        out[pf] = {"today": [{"time": f"{int(h):02d}:{int(round((h % 1) * 60)):02d}", "why": why} for h, why in sorted(plan[:4])],
+                   "measured": ins["total"], "needed": slot_learning.MIN_SAMPLES_TOTAL, "learning": ins["ready"],
+                   "best": [{"daytype": d, "hour": h, "score": s["score"], "n": s["n"]} for d, h, s in best],
+                   "median_views": ins["median"]}
+    return {"platforms": out, "day": now.strftime("%A"), "tiktok_profile": bool(getattr(config, "TIKTOK_PROFILE", ""))}
+
+
 @router.get("/schedules")
 def list_schedules():
     return db.list_schedules()

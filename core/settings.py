@@ -49,6 +49,8 @@ SCHEMA: List[Dict] = [
     {"key": "YOUTUBE_API_KEY", "group": "API key", "label": "YouTube Data API", "type": "secret", "help": "Opsional, untuk Analitik Viral. Tanpa key memakai pencarian yt-dlp"},
     {"key": "GLOBAL_HASHTAGS", "group": "Upload otomatis", "label": "Hashtag tambahan untuk semua upload", "type": "str",
      "help": "Ditambahkan ke caption setiap upload (otomatis maupun manual), mis. #namachannel #fyp"},
+    {"key": "TIKTOK_PROFILE", "group": "Upload otomatis", "label": "Username TikTok (untuk belajar jam terbaik)", "type": "str",
+     "help": "Mis. @namakamu — views 24 jam tiap upload dibaca dari profil publik untuk menemukan jam paling ramai channel-mu"},
     {"key": "AUTO_PUBLISH_PER_DAY", "group": "Upload otomatis", "label": "Maks upload otomatis per hari (per platform)", "type": "int", "min": 1, "max": 8},
     {"key": "AUTO_PUBLISH_MIN_GAP_H", "group": "Upload otomatis", "label": "Jarak minimal antar upload (jam)", "type": "float", "min": 0.5, "max": 12},
     {"key": "KLING_API_KEY", "group": "API key", "label": "Kling AI (video)", "type": "secret",

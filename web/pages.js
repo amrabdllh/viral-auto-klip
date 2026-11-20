@@ -727,12 +727,24 @@ PAGES.upload = { render(view) {
   view.innerHTML = `<div class="page">${pageHead("Jadwal Upload", "Jadwalkan klip ke YouTube Shorts & TikTok. Server mengunggah otomatis saat jadwal tiba (laptop harus menyala).",
     UI.btn("Jadwalkan klip", { ico: "plus", id: "addOne" }) + UI.btn("Smart Cadence", { ico: "calendar", kind: "primary", id: "addBulk" }))}
     <div class="cols-2" id="pf"></div>
+    <div id="ins"></div>
     ${UI.panel({ head: `<div class="row nw">${UI.btn("", { ico: "left", size: "sm", title: "Bulan sebelumnya", id: "prev" })}<h2 id="mon" style="min-width:150px;text-align:center"></h2>${UI.btn("", { ico: "right", size: "sm", title: "Bulan berikutnya", id: "next" })}${UI.btn("Hari ini", { size: "sm", kind: "ghost", id: "today" })}</div><span class="spacer"></span><div class="row" id="counts"></div>`,
       bodyCls: "flush", body: `<div class="cal" id="cal"></div>` })}
     ${UI.panel({ title: "Daftar jadwal", bodyCls: "flush", body: `<div class="table-wrap"><table><thead><tr><th>Klip</th><th>Platform</th><th>Waktu</th><th>Status</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>` })}</div>`;
   const pf = STATE.status?.platforms || {};
   $("#pf").innerHTML = Object.entries(pf).map(([, v]) => UI.panel({ title: v.label, head: v.ready ? UI.pill("Terhubung", "ok") : UI.pill("Belum diset", "warn"),
     body: v.ready ? `<p class="small muted">Siap mengunggah.</p>` : `<p class="small ink2">${esc(v.hint)}</p>${UI.btn("Buka Pengaturan", { size: "sm", href: "#settings", ico: "sliders" })}` })).join("");
+  // v6.8: jam upload otomatis hari ini + yang sudah dipelajari dari views 24 jam
+  const WHY = { jangkar: ["Jangkar", "teal"], terbukti: ["Terbukti ramai", "ok"], eksplorasi: ["Coba jam baru", "accent"] };
+  const DT = { weekday: "hari kerja", weekend: "akhir pekan" };
+  api("/api/upload-insights").then((d) => {
+    $("#ins").innerHTML = UI.panel({ title: "Jam upload otomatis", sub: "Jam jangkar stabil, disesuaikan per hari, lalu bergeser ke jam yang terbukti ramai untuk channel-mu",
+      body: `<div class="cols-2">${Object.entries(d.platforms).map(([k, v]) => `<div><b class="small">${k === "youtube" ? "YouTube Shorts" : "TikTok"}</b>
+        <div class="row" style="margin:6px 0">${v.today.map((t) => UI.pill(`${t.time} · ${WHY[t.why]?.[0] || t.why}`, WHY[t.why]?.[1] || "")).join("")}</div>
+        <p class="tiny muted" style="margin:0">${v.learning ? `Belajar aktif dari ${v.measured} upload (median ${fmtNum(v.median_views)} views 24 jam).` : `Mengumpulkan data: ${v.measured}/${v.needed} upload terukur.`}
+        ${v.best.length ? " Jam terbaik: " + v.best.map((b) => `${String(b.hour).padStart(2, "0")}:00 ${DT[b.daytype]} (${b.score}×)`).join(", ") : ""}
+        ${k === "tiktok" && !d.tiktok_profile ? " Isi <a href='#settings'>Username TikTok</a> agar views TikTok bisa diukur." : ""}</p></div>`).join("")}</div>` });
+  }).catch(() => {});
   let cursor = new Date(); cursor.setDate(1);
   let items = [];
   const STL = { pending: "Menunggu", uploading: "Mengunggah", done: "Berhasil", failed: "Gagal", paused: "Dijeda" };

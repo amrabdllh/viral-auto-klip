@@ -253,6 +253,7 @@ AUTO_FARM_MIN_RUBRIC = float(os.getenv("AUTO_FARM_MIN_RUBRIC", "46"))  # mode fa
 AUTO_FARM_MINUTES_PER_CLIP = float(os.getenv("AUTO_FARM_MINUTES_PER_CLIP", "3"))
 AUTO_FARM_MAX_CLIPS = int(os.getenv("AUTO_FARM_MAX_CLIPS", "40"))  # saringan kualitas Editor-AI saat jumlah klip otomatis
 # v6.8: upload otomatis ke jam FYP terbaik
+TIKTOK_PROFILE = os.getenv("TIKTOK_PROFILE", "")  # @username TikTok — untuk mengukur views 24 jam per jam upload
 GLOBAL_HASHTAGS = os.getenv("GLOBAL_HASHTAGS", "")  # mis. "#veruclipper #fyp" — ditambahkan ke SEMUA upload
 AUTO_PUBLISH_PER_DAY = int(os.getenv("AUTO_PUBLISH_PER_DAY", "3"))  # maks upload otomatis per platform per hari
 AUTO_PUBLISH_MIN_GAP_H = float(os.getenv("AUTO_PUBLISH_MIN_GAP_H", "2.5"))  # jarak minimal antar upload (jam)
