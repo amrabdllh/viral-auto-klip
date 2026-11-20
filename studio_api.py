@@ -655,6 +655,7 @@ class BulkScheduleRequest(BaseModel):
     start_at: float = 0
     per_day: int = 3
     hours: List[int] = []
+    gap_min: int = 0          # jeda antar upload dalam menit; 0 = sebar otomatis per hari
 
 
 def _asset_copy(asset: Dict) -> Dict:
@@ -707,8 +708,14 @@ def bulk_schedule(req: BulkScheduleRequest):
     assets = [a for a in (db.get_asset(i) for i in req.asset_ids) if a and Path(a["path"]).exists()]
     if not assets:
         raise HTTPException(400, "Tidak ada klip valid")
-    slots = scheduler.smart_cadence([a["path"] for a in assets], req.start_at or time.time(), max(1, min(req.per_day, 6)),
-                                    req.hours or None)
+    start = req.start_at or time.time()
+    if req.gap_min and req.gap_min > 0:
+        # Jeda tetap: upload berurutan tiap N menit.
+        gap = max(1, min(int(req.gap_min), 24 * 60)) * 60
+        slots = [start + i * gap for i in range(len(assets))]
+    else:
+        slots = scheduler.smart_cadence([a["path"] for a in assets], start, max(1, min(req.per_day, 6)),
+                                        req.hours or None)
     platforms = [p for p in req.platforms if p in scheduler.PLATFORMS] or ["youtube"]
     _require_ready(platforms)
     out = []

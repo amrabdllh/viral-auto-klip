@@ -646,17 +646,19 @@ function scheduleModal({ asset_id, file_path, onSaved } = {}) {
 
 function bulkScheduleModal(assetIds, onSaved) {
   if (!assetIds.length) return toast("Pilih klip dulu", true);
-  modal({ title: `Smart Cadence · ${assetIds.length} klip`, sub: "Klip disebar otomatis ke beberapa slot per hari di jam ramai.",
+  modal({ title: `Upload batch · ${assetIds.length} klip`, sub: "Semua klip diunggah otomatis; atur jarak antar upload supaya tidak spam.",
     body: `<div class="fields two">${UI.field("Mulai dari", `<input type="datetime-local" data-at value="${localInputValue(Date.now() / 1000)}">`)}
-      ${UI.field("Slot per hari", `<select data-pd>${UI.options([1, 2, 3, 4, 5], 3)}</select>`)}</div>
-      ${UI.field("Jam posting", `<input type="text" data-hours placeholder="12, 18, 20">`, { hint: "Pisahkan dengan koma. Kosong = 12, 18, 20." })}
+      ${UI.field("Jeda antar upload (menit)", `<input type="number" data-gap min="0" max="1440" value="30">`, { hint: "0 = sebar otomatis per hari (Smart Cadence)" })}
+      ${UI.field("Slot per hari", `<select data-pd>${UI.options([1, 2, 3, 4, 5], 3)}</select>`, { hint: "Dipakai hanya kalau jeda = 0" })}
+      ${UI.field("Jam posting", `<input type="text" data-hours placeholder="12, 18, 20">`, { hint: "Dipakai hanya kalau jeda = 0" })}</div>
       ${UI.field("Platform", platformToggles())}`,
     foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Jadwalkan", { kind: "primary", attrs: "data-save" }) }, (m) => {
     $("[data-save]", m).onclick = (e) => busy(e.currentTarget, async () => {
       try {
         const hours = $("[data-hours]", m).value.split(",").map((x) => parseInt(x, 10)).filter((x) => x >= 0 && x < 24);
-        const r = await api("/api/schedules/bulk", { body: { asset_ids: assetIds, per_day: +$("[data-pd]", m).value, hours, start_at: new Date($("[data-at]", m).value).getTime() / 1000, platforms: pickedPlatforms(m) } });
-        toast(`${r.length} klip dijadwalkan`); closeModal(); onSaved && onSaved();
+        const gap = Math.max(0, parseInt($("[data-gap]", m).value || "0", 10));
+        const r = await api("/api/schedules/bulk", { body: { asset_ids: assetIds, per_day: +$("[data-pd]", m).value, hours, gap_min: gap, start_at: new Date($("[data-at]", m).value).getTime() / 1000, platforms: pickedPlatforms(m) } });
+        toast(`${r.length} klip dijadwalkan${gap ? ` tiap ${gap} menit` : ""}`); closeModal(); onSaved && onSaved();
       } catch (err) { fail(err); }
     });
   });
