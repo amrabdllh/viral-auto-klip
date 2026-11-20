@@ -819,10 +819,17 @@ def live_window(ctx: JobContext) -> Dict:
     # rerank per kandidat = 1 panggilan LLM masing-masing (bisa 24× ±20 dtk). AI Moment Finder (yang sudah
     # membaca sinyal live) cukup; rerank dibatasi agar satu jendela selesai sebelum jendela berikutnya.
     config.AI_RERANK_LIMIT = int(p.get("rerank_limit", 4))
+    # Mode live: Editor-AI tidak diberi hak veto. Di VOD menolak klip lemah itu
+    # bagus, tapi di jendela live ia menolak SEMUA kandidat (rubrik 13-27) dan
+    # jendela jadi kosong — Clipper lama tidak punya gerbang ini sehingga selalu
+    # dapat klip. Utamakan recall; penilaian tetap dipakai untuk memilih urutan.
+    _review_before = config.AI_EDITOR_REVIEW
+    config.AI_EDITOR_REVIEW = False
     try:
         clips_data = analyzer.analyze_viral_potential(transcript, info, use_llm=llm)
         clips_data = tools.enforce_clip_duration(clips_data, max_available=dur)
     finally:
+        config.AI_EDITOR_REVIEW = _review_before
         analyzer.SIGNAL_HINTS = []
         config.AI_RERANK_LIMIT = None
 
