@@ -490,9 +490,11 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
             channel = str(params.get("channel") or "").strip()
             if not channel and params.get("url"):
                 channel = str(tools.source_channel(str(params["url"])) or "").strip()
-            params["_lower_third"] = tools.build_lower_third(
-                params, segments, default_name=channel or title or Path(video_path).stem,
-                subtitle=str(params.get("lower_third_subtitle") or ""))
+            speaker = channel or str(title or "").strip()
+            if speaker:  # tanpa channel/judul, jangan tampilkan nama file upload
+                params["_lower_third"] = tools.build_lower_third(
+                    params, segments, default_name=speaker,
+                    subtitle=str(params.get("lower_third_subtitle") or ""))
         except Exception:  # noqa: BLE001
             pass
 
@@ -530,7 +532,7 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
         "output": str(final), "layout": settings["layout"], "fps": CAMPAIGN_FPS,
         "duration": round(duration, 3), "subtitle_provider": settings["subtitle_provider"],
         "intro_voice": "none", "hashtags": preset.get("hashtags", ""),
-        "discord_tag": preset.get("discord_tag", ""),
+        "discord_tag": preset.get("discord_tag", ""), "category": category,
         "transcript_text": " ".join(str(seg.get("text") or "").strip() for seg in segments).strip()[:8000],
     }
 
