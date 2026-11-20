@@ -420,12 +420,13 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
     layout = None
     if settings["layout"] == "split":
         cam, game = settings["facecam_rect"], settings["gameplay_rect"]
-        try:
-            det = detect_stream_layout(str(cut))
-            if det:
-                cam, game = det["cam_box"], _gameplay_rect_from_cam(det["cam_box"])
-        except Exception:  # noqa: BLE001
-            pass
+        if not cam:
+            try:
+                det = detect_stream_layout(str(cut))
+                if det:
+                    cam, game = det["cam_box"], _gameplay_rect_from_cam(det["cam_box"])
+            except Exception:  # noqa: BLE001
+                pass
         layout = {"cam_box": list(cam), "game_box": list(game),
                   "cam_ratio": settings["facecam_height"] / 1920.0}
 

@@ -845,10 +845,12 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     # dengan panel atas (1080 × 1920·cam_ratio). Wajah diposisikan sedikit di
     # bawah tengah kotak (52%) supaya rambut/dahi tidak terpotong di panel.
     panel_ratio = 1080 / (1920 * cam_ratio)
-    span_x = max(p[0] for p in best) - min(p[0] for p in best)  # streamer bergerak di dalam cam
-    ch = min(0.9, max(fh * 2.1, 0.18))
+    # Kotak facecam: ukuran proporsional panel atas (~0.22–0.25 lebar, seperti Clipper).
+    # Jangan memaksa cw membesar ke 0.32+ karena bila facecam di pinggir layar (x mentok 1.0),
+    # pelebaran kotak hanya menambah latar kosong di sebelah kiri dan mendorong wajah ke kanan.
+    ch = min(0.60, max(fh * 2.0, 0.24))
     cw = ch * vh * panel_ratio / vw
-    cw = max(cw, min(0.32, span_x + fw * 2.4))
+    cw = max(0.20, min(0.26, cw))
     ch = cw * vw / (panel_ratio * vh)
     x = min(max(mx - cw / 2, 0.0), 1 - cw)
     y = min(max(my - ch * 0.52, 0.0), 1 - ch)
