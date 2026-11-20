@@ -63,3 +63,8 @@ tools/ffmpeg/
 
 # Kredensial lokal (client_secret, token, cookies)
 config/
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
