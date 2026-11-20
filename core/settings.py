@@ -21,7 +21,7 @@ ENV_PATH = config.BASE_DIR / ".env"
 EXAMPLE_PATH = config.BASE_DIR / ".env.example"
 _LOCK = threading.Lock()
 
-_PROVIDERS = ["Groq", "OpenAI", "Anthropic", "Gemini", "Antigravity", "DeepSeek", "Mistral", "OpenRouter", "Ollama", "Magpie", "Custom"]
+_PROVIDERS = ["Groq", "OpenAI", "Anthropic", "Gemini", "Antigravity", "DeepSeek", "Mistral", "OpenRouter", "Ollama", "Custom"]
 
 # key, grup, label, tipe, opsi/rentang, bantuan
 SCHEMA: List[Dict] = [
@@ -107,6 +107,10 @@ SCHEMA: List[Dict] = [
     {"key": "ENABLE_PUBLISH_PACKAGE", "group": "Upload", "label": "Buat paket upload per platform", "type": "bool"},
     {"key": "YOUTUBE_PRIVACY", "group": "Upload", "label": "Privasi upload YouTube", "type": "enum", "options": ["public", "unlisted", "private"],
      "labels": {"public": "Publik", "unlisted": "Tidak publik (unlisted)", "private": "Pribadi"}},
+    {"key": "YOUTUBE_UPLOAD_METHOD", "group": "Upload", "label": "Metode upload YouTube", "type": "enum",
+     "options": ["auto", "api", "browser"],
+     "labels": {"auto": "Otomatis (API bila client_secret ada)", "api": "YouTube Data API (resmi)", "browser": "Browser headless (cookie)"},
+     "help": "Browser headless = otomatisasi tidak resmi; bisa berhenti bekerja atau memicu batasan akun jika tampilan YouTube Studio berubah."},
     {"key": "YOUTUBE_CLIENT_SECRET_FILE", "group": "Upload", "label": "File client_secret.json YouTube", "type": "path"},
     {"key": "TIKTOK_COOKIES_FILE", "group": "Upload", "label": "File cookies.txt TikTok", "type": "path"},
     {"key": "YTDLP_COOKIES", "group": "Upload", "label": "Cookies untuk download (yt-dlp)", "type": "path", "help": "Opsional, untuk video yang butuh login"},
@@ -118,10 +122,6 @@ SCHEMA: List[Dict] = [
     {"key": "CUSTOM_AI_API_KEY", "group": "Lanjutan", "label": "Custom AI: API key", "type": "secret"},
     {"key": "CUSTOM_AI_MODEL", "group": "Lanjutan", "label": "Custom AI: nama model", "type": "str"},
     {"key": "OLLAMA_BASE_URL", "group": "Lanjutan", "label": "Alamat Ollama", "type": "url"},
-    {"key": "MAGPIE_BASE_URL", "group": "Lanjutan", "label": "Alamat Magpie (gateway lokal)", "type": "url",
-     "help": "Default http://127.0.0.1:3425/v1 — Claude/GPT lewat Magpie."},
-    {"key": "MAGPIE_MODEL", "group": "Lanjutan", "label": "Model Magpie default", "type": "str",
-     "help": "Contoh: https-newapi-deepwisdom-ai/claude-haiku-5-5"},
     {"key": "ANTHROPIC_BASE_URL", "group": "Lanjutan", "label": "Alamat API Anthropic", "type": "url", "help": "Biarkan default kecuali memakai proxy"},
     {"key": "GOOGLE_AI_PROJECT_ID", "group": "Lanjutan", "label": "Google project ID (Antigravity)", "type": "str", "help": "Opsional. Default diambil dari client_secret.json"},
 ]

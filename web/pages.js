@@ -998,6 +998,7 @@ PAGES.settings = { render(view) {
   view.innerHTML = `<div class="page">${pageHead("Pengaturan", "Disimpan ke file .env di laptopmu dan langsung aktif tanpa restart. API key tidak pernah ditampilkan utuh.",
       UI.btn("Setel otomatis (terbaik)", { ico: "sparkles", kind: "primary", size: "sm", id: "autoCfg" }))}
     ${UI.banner("info", "Bingung? Klik <b>Setel otomatis</b> — sistem membaca API key yang terpasang lalu memilih provider, model, suara, dan mesin transkripsi terbaik. Setelah itu cukup tempel link di Beranda.")}
+    ${UI.banner("warn", "Upload lewat <b>browser headless</b> adalah otomatisasi tidak resmi. Gunakan <b>YouTube Data API</b> bila client_secret tersedia. Browser bisa berhenti bekerja atau memicu batasan akun jika tampilan YouTube Studio/TikTok berubah.")}
     <div class="layout"><div class="stack lg"><div id="ytbox"></div><div id="ttbox"></div><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
     <aside>${st ? UI.panel({ title: "Kemampuan aktif", body: `<div class="stack">${[["LLM", st.ai.providers.map((p) => pill(p.configured, p.provider))], ["Suara", Object.entries(st.media.tts).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
         ["Gambar", Object.entries(st.media.image).map(([k, v]) => pill(v.ready, PRETTY[k] || k))], ["Lainnya", [pill(st.media.elevenlabs, "ElevenLabs"), pill(st.media.stock, "Stok"), pill(st.media.youtube_api, "YouTube API"), pill(st.ffmpeg, "FFmpeg")]]]

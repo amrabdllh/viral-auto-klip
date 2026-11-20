@@ -175,13 +175,18 @@ def cleanup_orphan_recorders() -> int:
             pid = int(pid_file.read_text(encoding="utf-8").strip())
         except (OSError, ValueError):
             continue
+        # PID bisa dipakai ulang setelah restart. Jangan bunuh berdasarkan nama proses saja:
+        # cocokkan command line dengan folder job pemilik PID.
+        job_dir = pid_file.parents[1] if len(pid_file.parents) > 1 else pid_file.parent
+        job_token = job_dir.name.lower()
+        expected = "ffmpeg.exe" if pid_file.name == "ffmpeg.pid" else "python.exe"
         try:
-            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                                 capture_output=True, text=True, timeout=10).stdout.lower()
+            out = subprocess.run(
+                ["wmic", "process", "where", f"processid={pid}", "get", "name,commandline", "/format:list"],
+                capture_output=True, text=True, timeout=10).stdout.lower()
         except Exception:
             out = ""
-        is_ours = "ffmpeg.exe" in out or "python.exe" in out
-        if is_ours:
+        if expected in out and job_token in out:
             try:
                 subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=10)
                 killed += 1
@@ -1067,14 +1072,15 @@ def live_window(ctx: JobContext) -> Dict:
     # rerank per kandidat = 1 panggilan LLM masing-masing (bisa 24× ±20 dtk). AI Moment Finder (yang sudah
     # membaca sinyal live) cukup; rerank dibatasi agar satu jendela selesai sebelum jendela berikutnya.
     config.AI_RERANK_LIMIT = int(p.get("rerank_limit", 4))
-    # Mode live: Editor-AI tidak diberi hak veto. Di VOD menolak klip lemah itu
-    # bagus, tapi di jendela live ia menolak SEMUA kandidat (rubrik 13-27) dan
-    # jendela jadi kosong — Clipper lama tidak punya gerbang ini sehingga selalu
-    # dapat klip. Utamakan recall; penilaian tetap dipakai untuk memilih urutan.
+    # Mode live: Editor-AI tetap diberi hak veto; kalau satu jendela jadi kosong,
+    # ulangi sekali tanpa veto (fallback Clipper-style) supaya tetap dapat klip.
     _review_before = config.AI_EDITOR_REVIEW
-    config.AI_EDITOR_REVIEW = False
+    config.AI_EDITOR_REVIEW = True
     try:
         clips_data = analyzer.analyze_viral_potential(transcript, info, use_llm=llm)
+        if not clips_data:
+            config.AI_EDITOR_REVIEW = False
+            clips_data = analyzer.analyze_viral_potential(transcript, info, use_llm=llm)
         clips_data = tools.enforce_clip_duration(clips_data, max_available=dur)
     finally:
         config.AI_EDITOR_REVIEW = _review_before

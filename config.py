@@ -120,11 +120,6 @@ GEMINI_API_KEY = _secret("GEMINI_API_KEY")
 OPENROUTER_API_KEY = _secret("OPENROUTER_API_KEY")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-# Magpie: gateway lokal OpenAI-compatible (Claude/GPT via newapi).
-MAGPIE_BASE_URL = os.getenv("MAGPIE_BASE_URL", "http://127.0.0.1:3425/v1")
-MAGPIE_API_KEY = _secret("MAGPIE_API_KEY") or "magpie"
-MAGPIE_MODEL = os.getenv("MAGPIE_MODEL", "https-newapi-deepwisdom-ai/claude-haiku-5-5")
-
 # Top-tier providers (v4 AI upgrade — semua dipakai lewat core/ai_providers.py)
 ANTHROPIC_API_KEY = _secret("ANTHROPIC_API_KEY")
 ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
@@ -220,19 +215,12 @@ AI_PROVIDER_MODELS = {
         "llama3.1:8b",
         "gemma3:4b",
     ],
-    "Magpie": [
-        MAGPIE_MODEL,
-        "auto/claude-sonnet-5-5",
-        "auto/claude-opus-5-5",
-        "https-newapi-deepwisdom-ai/claude-sonnet-5-5",
-        "https-newapi-deepwisdom-ai/claude-opus-5-5",
-    ],
     "Custom": [],
 }
 
 ALL_AI_PROVIDERS = [
     "Groq", "OpenAI", "Anthropic", "Gemini", "Antigravity",
-    "DeepSeek", "Mistral", "OpenRouter", "Ollama", "Magpie", "Custom",
+    "DeepSeek", "Mistral", "OpenRouter", "Ollama", "Custom",
 ]
 
 AI_PROVIDER = os.getenv("AI_PROVIDER", "Groq")
@@ -469,6 +457,8 @@ ENABLE_PUBLISH_PACKAGE = os.getenv("ENABLE_PUBLISH_PACKAGE", "1").lower() in ("1
 PUBLISH_DIR_NAME = "publish"
 YOUTUBE_CLIENT_SECRET_FILE = os.getenv("YOUTUBE_CLIENT_SECRET_FILE", "")
 YOUTUBE_PRIVACY = os.getenv("YOUTUBE_PRIVACY", "public")  # public | unlisted | private
+# auto = API bila client_secret tersedia, selain itu browser headless (bila cookies ada).
+YOUTUBE_UPLOAD_METHOD = os.getenv("YOUTUBE_UPLOAD_METHOD", "auto").strip().lower()
 YOUTUBE_CATEGORY_ID = os.getenv("YOUTUBE_CATEGORY_ID", "22")  # 22 = People & Blogs
 YOUTUBE_OAUTH_TOKEN_FILE = ".yt_upload_token.json"  # tersimpan di BASE_DIR (jangan di-commit!)
 CAMPAIGN_DEFAULT_PRESET = os.getenv("CAMPAIGN_DEFAULT_PRESET", "motion-klip-gtavi-split.json")

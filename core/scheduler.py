@@ -61,10 +61,18 @@ def upload_now(item: Dict) -> Dict:
     for platform in item.get("platforms") or []:
         try:
             if platform == "youtube":
-                if youtube_browser.cookie_status().get("configured"):
+                method = str(getattr(config, "YOUTUBE_UPLOAD_METHOD", "auto") or "auto").lower()
+                browser_ready = bool(youtube_browser.cookie_status().get("configured"))
+                secret = str(config.YOUTUBE_CLIENT_SECRET_FILE or "")
+                secret_path = Path(secret) if secret else None
+                if secret_path is not None and not secret_path.is_absolute():
+                    secret_path = config.BASE_DIR / secret_path
+                api_ready = bool(secret_path and secret_path.exists())
+                use_browser = method == "browser" or (method == "auto" and not api_ready and browser_ready)
+                if use_browser:
                     res = youtube_browser.upload_video(path, title=title, description=description,
-                                                       tags=tags, privacy="private")
-                    report["youtube"] = {"status": "done", **res}
+                                                       tags=tags, privacy=str(config.YOUTUBE_PRIVACY or "private"))
+                    report["youtube"] = {"status": "done", "method": "browser", **res}
                 else:
                     report["youtube"] = upload_to_youtube(path, title=title,
                                                           description=description, tags=tags)

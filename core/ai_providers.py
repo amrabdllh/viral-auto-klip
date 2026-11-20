@@ -37,8 +37,6 @@ PROVIDER_INFO: Dict[str, Dict] = {
     "Mistral": {"kind": "openai_compat", "key_attr": "MISTRAL_API_KEY", "base_attr": "MISTRAL_BASE_URL", "label": "Mistral AI"},
     "OpenRouter": {"kind": "openai_compat", "key_attr": "OPENROUTER_API_KEY", "base_url": "https://openrouter.ai/api/v1", "label": "OpenRouter (ratusan model)"},
     "Ollama": {"kind": "ollama", "key_attr": None, "label": "Ollama (lokal, gratis)"},
-    "Magpie": {"kind": "openai_compat", "key_attr": "MAGPIE_API_KEY", "base_attr": "MAGPIE_BASE_URL",
-               "label": "Magpie (gateway lokal — Claude/GPT)"},
     "Custom": {"kind": "openai_compat", "key_attr": "CUSTOM_AI_API_KEY", "base_attr": "CUSTOM_AI_BASE_URL", "label": "Custom AI (base URL + API key sendiri)"},
 }
 
@@ -158,19 +156,6 @@ def set_credentials(provider: str, api_key: str = "", base_url: str = "", model:
 _OLLAMA_CHECK = {"t": 0.0, "ok": False}
 
 
-def _port_open(base_url: str, default_port: int = 80, timeout: float = 0.4) -> bool:
-    try:
-        from urllib.parse import urlparse
-        import socket
-        u = urlparse(base_url or "")
-        host = u.hostname or "127.0.0.1"
-        port = u.port or default_port
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
 def _ollama_running() -> bool:
     """Ollama dianggap siap hanya bila servernya menjawab (dicek maks sekali per menit)."""
     import time
@@ -194,9 +179,6 @@ def is_configured(provider: str) -> bool:
         return bool(conn and conn.get("api_key") and conn.get("base_url") and conn.get("models"))
     if kind == "ollama":
         return bool(config.OLLAMA_BASE_URL) and _ollama_running()
-    if provider == "Magpie":
-        # Gateway lokal: dianggap siap kalau port-nya menjawab (tanpa HTTP call).
-        return _port_open(config.MAGPIE_BASE_URL, default_port=3425)
     if kind == "gemini_oauth":
         # FIX: dulu dianggap siap hanya karena path client_secret terisi; sekarang harus sudah login.
         return google_login_status()["logged_in"]
