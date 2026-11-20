@@ -175,17 +175,20 @@ PAGES.analisis = { render(view, q) {
 /* ================================================================== KLIP LIVE */
 const BACKLOG = [{ v: 0, l: "Mulai sekarang" }, { v: 10, l: "10 menit terakhir" }, { v: 20, l: "20 menit terakhir" }, { v: 30, l: "30 menit terakhir" }, { v: 58, l: "1 jam terakhir (maksimal)" }];
 const WINDOWS = [{ v: 5, l: "Tiap 5 menit (klip lebih cepat)" }, { v: 10, l: "Tiap 10 menit" }, { v: 15, l: "Tiap 15 menit (konteks lebih panjang)" }];
+// Panjang klip = min/max durasi yang dikirim ke analyzer. "Sedang" adalah
+// default baru: klip 15 dtk terasa terlalu pendek untuk konten GTA.
+const CLIP_LENGTHS = [{ v: "short", l: "Pendek · 15–30 dtk" }, { v: "medium", l: "Sedang · 25–50 dtk" }, { v: "long", l: "Panjang · 30–90 dtk (ala Clipper)" }];
 PAGES.live = { render(view, q) {
   view.innerHTML = toolPage({ id: "live", needs: ["llm", "ffmpeg"],
     desc: "Buat klip dari siaran YouTube yang masih berlangsung. Siaran direkam terus, dan tiap beberapa menit AI memilih momen terbaik dengan bantuan lonjakan chat penonton.",
     main: UI.panel({ id: "f", body: UI.section("Siaran", `<div class="fields">${UI.text("url", "Link siaran live", { type: "url", placeholder: "https://www.youtube.com/watch?v=…", value: q.url || "", cls: "span-all" })}
         ${UI.select("live_mode", "Mode", [{ v: "window", l: "Jendela berkala (default)" }, { v: "spike", l: "Spike presisi (momen ramai chat)" }], "window", { hint: "Spike = potong tepat momen-25 dtk s.d. momen+20 dtk" })}
         ${UI.select("backlog_min", "Mulai rekam dari", BACKLOG, 20, { numeric: true, hint: "YouTube menyimpan ±1 jam siaran ke belakang." })}${UI.select("window_min", "Buat klip", WINDOWS, 10, { numeric: true })}
-        ${UI.num("clips_per_window", "Maks klip per jendela", { value: 3, min: 1, max: 8 })}${UI.select("language", "Bahasa siaran", LANGS, "id")}</div>`) +
+        ${UI.num("clips_per_window", "Maks klip per jendela", { value: 3, min: 1, max: 8 })}${UI.select("clip_length", "Panjang klip", CLIP_LENGTHS, "medium", { hint: "Panjang tiap klip yang dicari AI." })}${UI.select("language", "Bahasa siaran", LANGS, "id")}</div>`) +
       UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}</div>
         <div class="switches">${UI.toggle("use_chat", "Baca chat live", { sub: "Lonjakan chat & Super Chat jadi petunjuk momen seru" })}${UI.toggle("cold_open", "Cold open + rewind")}${UI.toggle("sound_design", "Sound design")}${UI.toggle("caption_fx", "Caption animasi + emoji")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
-      UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 45, min: 0, max: 100 })}${UI.num("min_duration", "Durasi minimum", { value: 15, min: 5, max: 120, hint: "detik" })}
-        ${UI.num("max_duration", "Durasi maksimum", { value: 60, min: 10, max: 180, hint: "detik" })}${UI.num("max_hours", "Rekam paling lama", { value: 6, min: 1, max: 12, hint: "jam" })}
+      UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 45, min: 0, max: 100 })}
+        ${UI.num("max_hours", "Rekam paling lama", { value: 6, min: 1, max: 12, hint: "jam" })}
         ${UI.select("layout", "Layout", [{ v: "", l: "Otomatis (facecam → split)" }, { v: "gaming", l: "Selalu split facecam + gameplay" }, { v: "face", l: "Ikuti wajah (crop 9:16)" }], "")}
         ${UI.select("whisper_device", "Mesin transkripsi", WHISPER_DEVICES, "")}${aiSelects()}</div>
         <div class="fields"><span class="section-title span-all">Mode spike presisi</span>
@@ -217,6 +220,10 @@ PAGES.live = { render(view, q) {
   }).catch(() => {});
   $("#go").onclick = (e) => {
     const p = dropEmpty(formValues($("#f")), ["whisper_device", "edit_style", "layout", "ai_provider", "ai_model", "speaker_names"]);
+    const LEN = { short: [15, 30], medium: [25, 50], long: [30, 90] }[p.clip_length] || [25, 50];
+    delete p.clip_length;
+    p.min_duration = LEN[0];
+    p.max_duration = LEN[1];
     if (!/^https?:\/\//.test(p.url || "")) return toast("Tempel link siaran YouTube dulu", true);
     if (p.live_mode === "spike") {
       const spike = {

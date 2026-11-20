@@ -1006,8 +1006,8 @@ def live_window(ctx: JobContext) -> Dict:
     if not Path(video).exists():
         raise FileNotFoundError("File jendela rekaman sudah terhapus")
     config.MIN_VIRAL_SCORE = max(0.0, min(float(p.get("min_score", 45)), 100.0))
-    config.MIN_CLIP_DURATION = max(5, int(p.get("min_duration", 15)))
-    config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(p.get("max_duration", 60)))
+    config.MIN_CLIP_DURATION = max(5, int(p.get("min_duration", 25)))
+    config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(p.get("max_duration", 50)))
     num = max(1, min(int(p.get("num_clips", 3)), 10))
     config.MAX_CLIPS_PER_VIDEO = num + 3  # cadangan: sebagian bisa gugur karena tumpang tindih jendela lain
     if p.get("watermark_text"):
@@ -1016,6 +1016,12 @@ def live_window(ctx: JobContext) -> Dict:
     info = get_video_info(video)
     dur = float(info.get("duration") or p.get("duration") or 0)
     transcript, tinfo = tools.transcribe(ctx, video, p, 10)
+    if p.get("streamer_only", True):
+        from .transcriber import drop_foreign_segments
+        before = len(transcript)
+        transcript = drop_foreign_segments(transcript, str(p.get("language") or config.WHISPER_LANGUAGE or ""))
+        if before > len(transcript):
+            ctx.log(f"Subtitle streamer saja: {before - len(transcript)} segmen dialog game/bahasa lain dibuang")
     p["_lower_third"] = tools.build_lower_third(p, transcript, default_name=p.get("channel", ""), subtitle="Live di YouTube")
 
     ctx.progress(35, "Sinyal live", "Membaca lonjakan chat & suara streamer")
