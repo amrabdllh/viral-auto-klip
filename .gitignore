@@ -58,3 +58,7 @@ data/
 # Real-ESRGAN biner (diunduh manual, rilis resmi xinntao/Real-ESRGAN v0.2.5.0)
 tools/realesrgan/
 tools/models/
+
+# Cookies sesi login (TikTok upload / yt-dlp) — rahasia, jangan di-commit
+cookies*.txt
+*cookies*.txt
