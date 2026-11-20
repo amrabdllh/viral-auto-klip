@@ -819,7 +819,7 @@ PAGES.settings = { render(view) {
         <div class="row">${UI.btn("Tes koneksi", { size: "sm", id: "tbtn" })}${UI.btn("Deteksi model", { ico: "refresh", size: "sm", id: "dbtn" })}</div><div id="aiRes" class="small"></div>` }) : ""}</aside></div>
     <div style="position:sticky;bottom:16px;display:flex;justify-content:flex-end;margin-top:4px">${UI.btn("Simpan pengaturan", { ico: "check", kind: "primary", size: "lg", id: "save" })}</div></div>`;
   if (st) {
-    $("#tbtn").onclick = (e) => busy(e.currentTarget, async () => { try { const r = await api("/test-ai", { body: { provider: $("#tp").value, model: $("#tm").value } }); $("#aiRes").innerHTML = `${UI.pill(r.valid ? "OK" : "Gagal", r.valid ? "ok" : "bad")} <span class="ink2">${esc(r.message)}</span>`; } catch (err) { $("#aiRes").textContent = err.message; } });
+    $("#tbtn").onclick = (e) => busy(e.currentTarget, async () => { $("#aiRes").innerHTML = `<span class="ink2">Menguji ${esc($("#tp").value)} / ${esc($("#tm").value || "model default")}… (maks ±45 dtk)</span>`; try { const r = await api("/test-ai", { body: { provider: $("#tp").value, model: $("#tm").value } }); $("#aiRes").innerHTML = `${UI.pill(r.valid ? "OK" : "Gagal", r.valid ? "ok" : "bad")} <span class="ink2">${esc(r.message)}</span>`; } catch (err) { $("#aiRes").textContent = err.message; } });
     $("#tp").onchange = () => { $("#tm").innerHTML = UI.options(aiModelOptions($("#tp").value), ""); $("#aiRes").textContent = ""; };
     $("#dbtn").onclick = (e) => busy(e.currentTarget, async () => {
       try {
