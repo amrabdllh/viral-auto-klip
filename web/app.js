@@ -74,6 +74,7 @@ const NAV = [
   { id: "live", label: "Klip Live", ico: "live", desc: "Klip saat streamer masih live", isNew: true },
   { id: "manual", label: "Atur Manual", ico: "scissors", desc: "Pilih momen sendiri" },
   { id: "splitcam", label: "Split Cam", ico: "splitcam", desc: "Facecam + gameplay" },
+  { id: "campaign", label: "Campaign", ico: "film", desc: "MotionKlip + banner + outro", isNew: true },
   { id: "bola", label: "Highlight Bola", ico: "ball", desc: "Momen gol otomatis", isNew: true },
   { id: "tempel", label: "Konten Tempel", ico: "layers", desc: "Tempel teks & gambar" },
   { group: "Studio AI" },

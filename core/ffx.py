@@ -17,8 +17,11 @@ from loguru import logger
 import config
 
 _LOCAL_BIN = config.BASE_DIR / "ffmpeg" / "bin"
-if shutil.which("ffmpeg") is None and (_LOCAL_BIN / "ffmpeg.exe").exists():
-    os.environ["PATH"] = str(_LOCAL_BIN) + os.pathsep + os.environ.get("PATH", "")
+_BUNDLED_BIN = config.BASE_DIR / "tools" / "ffmpeg"
+# Pakai ffmpeg bawaan repo bila ada, supaya tidak bergantung pada PATH sistem.
+for _candidate in (_LOCAL_BIN, _BUNDLED_BIN):
+    if shutil.which("ffmpeg") is None and (_candidate / "ffmpeg.exe").exists():
+        os.environ["PATH"] = str(_candidate) + os.pathsep + os.environ.get("PATH", "")
 
 W, H = 1080, 1920
 
@@ -27,9 +30,10 @@ class FFmpegError(RuntimeError):
     pass
 
 
-def run(args: Sequence[str], timeout: int = 3600) -> subprocess.CompletedProcess:
+def run(args: Sequence[str], timeout: int = 3600, cwd: Optional[str] = None) -> subprocess.CompletedProcess:
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *map(str, args)]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=timeout, cwd=cwd)
     if proc.returncode != 0:
         raise FFmpegError((proc.stderr or "ffmpeg gagal")[-1500:])
     return proc
@@ -64,6 +68,39 @@ def probe(path: str) -> Dict:
         "has_audio": audio is not None,
         "size": int(data.get("format", {}).get("size") or 0),
     }
+
+
+def display_size(path: str) -> Tuple[int, int]:
+    """(w, h) setelah rotasi diterapkan — dipakai untuk menata crop & caption.
+
+    probe() melaporkan ukuran coded. Video ponsel bertag rotation=90 di-decode
+    transpos, jadi crop yang dihitung dari ukuran coded akan salah.
+    """
+    info = probe(path)
+    width, height = info["width"], info["height"]
+    rotation = None
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream_side_data=rotation:stream_tags=rotate",
+             "-of", "json", str(path)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if proc.returncode == 0:
+            stream = (json.loads(proc.stdout or "{}").get("streams") or [{}])[0]
+            for side in stream.get("side_data_list") or []:
+                if "rotation" in side:
+                    rotation = float(side["rotation"])
+                    break
+            if rotation is None:
+                tag = (stream.get("tags") or {}).get("rotate")
+                if tag is not None:
+                    rotation = float(tag)
+    except (ValueError, KeyError, IndexError, TypeError):
+        pass
+    if rotation is not None and abs(round(rotation)) % 180 == 90:
+        return height, width
+    return width, height
 
 
 def venc(crf: int = 20) -> List[str]:

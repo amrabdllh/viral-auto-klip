@@ -797,5 +797,61 @@ def viral_analytics(params: Dict) -> Dict:
     return result
 
 
+# ============================================================================ Campaign (MotionKlip)
+
+@handler("campaign_render", background=True)
+def campaign_render_job(ctx: JobContext) -> Dict:
+    """Export satu cut MotionKlip (split/full + banner + judul + subtitle + outro).
+
+    Didaftarkan sebagai `background=True`: render 60 fps bisa puluhan menit dan
+    tidak boleh memblokir antrian job lain.
+    """
+    from . import campaign
+
+    p = ctx.params
+    video = resolve_source(ctx, p)
+    preset = p.get("preset") or "motion-klip-gtavi-split.json"
+    preset_path = Path(preset)
+    if not preset_path.is_absolute() and not preset_path.exists():
+        preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
+    overrides = {k: p[k] for k in (
+        "layout", "facecam_rect", "gameplay_rect", "subtitle_provider",
+        "highlight", "intro_voice",
+    ) if k in p and p[k] not in (None, "")}
+
+    ctx.progress(5, "Campaign", "Menyiapkan preset & aset…")
+    end = p.get("end")
+    review = campaign.render_campaign(
+        video, preset_path,
+        start=float(p.get("start") or 0),
+        end=float(end) if end not in (None, "") else None,
+        output_dir=ctx.dir,
+        title=str(p.get("title") or ""),
+        overrides=overrides,
+        caption_font=str(p.get("caption_font") or config.DEFAULT_FONT),
+        model=p.get("whisper_model") or None,
+    )
+
+    ctx.progress(92, "Thumbnail", "Mengambil frame sampul…")
+    out = Path(review["output"])
+    thumb = out.with_suffix(".jpg")
+    try:
+        ffx.extract_frame(str(out), 1.0, str(thumb), 540)
+    except Exception:  # noqa: BLE001 - thumbnail opsional
+        thumb = None
+    asset = ctx.asset("clip", out, name=out.stem, meta={
+        "source": "campaign", "thumbnail": str(thumb) if thumb else "",
+        "duration": ffx.probe(str(out))["duration"], "hashtags": review.get("hashtags", ""),
+        "layout": review.get("layout"),
+    })
+    return {
+        "_message": f"Campaign {review['layout']} siap: {out.name}",
+        "clips": [{"file_path": str(out), "thumbnail": str(thumb) if thumb else "",
+                   "asset_id": asset["id"], "title": out.stem}],
+        "total_clips": 1,
+        "campaign": review,
+    }
+
+
 # Mode Live (v6.4): daftarkan handler live_clip & live_window
 from . import live  # noqa: E402,F401

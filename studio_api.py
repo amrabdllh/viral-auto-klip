@@ -73,6 +73,34 @@ def catalog():
             "color_grades": ["none", "natural", "vibrant", "cinematic"], "job_kinds": sorted(jobs.HANDLERS)}
 
 
+@router.get("/campaign/presets")
+def campaign_presets():
+    """Daftar preset MotionKlip di presets/, lengkap dengan ringkasan isinya."""
+    from core import campaign
+
+    folder = Path(config.BASE_DIR) / "presets"
+    out: List[Dict[str, Any]] = []
+    if folder.is_dir():
+        for path in sorted(folder.glob("*.json")):
+            try:
+                preset = campaign.load_preset(path)
+            except Exception as exc:  # noqa: BLE001 - preset rusak jangan mematikan halaman
+                out.append({"file": path.name, "error": str(exc)[:200]})
+                continue
+            out.append({
+                "file": path.name,
+                "layout": preset["layout"],
+                "subtitle_provider": preset.get("subtitle_provider") or "none",
+                "intro_voice": preset.get("intro_voice") or "none",
+                "fps": preset.get("fps"),
+                "hashtags": preset.get("hashtags", ""),
+                "discord_tag": preset.get("discord_tag", ""),
+                "watermark": Path(preset["watermark"]).name,
+                "outro": Path(preset["outro"]).name,
+            })
+    return {"presets": out, "folder": str(folder)}
+
+
 @router.get("/tts/voices")
 def tts_voices(provider: str = "edge"):
     voices = _wrap(media_ai.list_voices, provider)
