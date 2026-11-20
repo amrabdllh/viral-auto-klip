@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory() as td:
         "words": [{"word": "halo", "start": 0.10, "end": 0.50},
                   {"word": "dunia", "start": 0.60, "end": 1.00}],
     }]
-    n = campaign.write_campaign_captions(segments, 0, 2.0, ass, title="tes judul", intro_seconds=0)
+    n = campaign.write_campaign_captions(segments, 0, 2.0, ass, title="tes judul", intro_seconds=2.5)
     text = ass.read_text(encoding="utf-8")
     check("campaign ass has events", n >= 3, n)
     check("ass has title style and event", "CampaignTitle" in text and "TES JUDUL" in text)
