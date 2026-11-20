@@ -14,7 +14,7 @@ Parameter job:
     present             detik sebelum momen (default 25)
     post_sec            detik sesudah momen (default 20)
     reaction_delay      koreksi jeda penonton (default 3)
-    min_lift            rasio lonjakan minimum (default 3.0)
+    min_reaction        kekuatan hint minimum (reaction/lift, default 3.0)
     max_spikes          0 = tanpa batas
     poll_interval       detik antar-poll (default 4)
     campaign            True = render lewat campaign_render (butuh preset)
@@ -65,7 +65,8 @@ def live_spike(ctx: JobContext) -> Dict:
     pre = float(p.get("pre_sec", 25))
     post = float(p.get("post_sec", 20))
     reaction = float(p.get("reaction_delay", 3))
-    min_lift = float(p.get("min_lift", 3.0))
+    # Ambang kekuatan hint: reaction (isi chat) atau lift (laju).
+    min_lift = float(p.get("min_reaction", p.get("min_lift", 3.0)))
     max_spikes = int(p.get("max_spikes", 0))
     poll_interval = max(1.0, float(p.get("poll_interval", 4)))
     if not all(math.isfinite(v) and v >= 0 for v in (pre, post, reaction)):
@@ -115,6 +116,9 @@ def live_spike(ctx: JobContext) -> Dict:
                         abs_t = now - 90 + float(h.get("t") or 0)
                         if float(h.get("strength") or 0) < min_lift:
                             continue
+                        if h.get("reason") == "content":
+                            ctx.log(f"Spike isi: {h.get('count')} pesan, repetisi {h.get('repetition')}, "
+                                    f"hype {h.get('hype')}")
                         if now - abs_t > FRESH_SEC:
                             continue
                         if any(abs(abs_t - prev) < SEEN_GAP for prev in seen_ts):
