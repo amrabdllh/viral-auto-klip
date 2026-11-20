@@ -31,20 +31,23 @@ _NVENC_LOCK = threading.Lock()
 def _video_encode_args(crf: int = 20, fast: bool = False) -> List[str]:
     """Argumen encoder video untuk RTX 3060.
 
-    v6.7 (kualitas tinggi, ukuran wajar):
-    - Semua encode dibatasi CQ/CRF 18–20. CQ 14 lama menghasilkan bitrate ~10x sumber
-      (10 menit bisa 5–6 GB) tanpa manfaat visual yang sepadan.
-    - File antara (fast=True): NVENC p1 + CQ 18–20.
+    v6.7 (kualitas maksimal):
+    - File antara (fast=True): NVENC p1 tapi kualitas sangat tinggi (cq 14) agar tiap generasi encode tidak
+      menambah blok — dulu cq 19 per generasi, padahal klip melewati 4-6 encode berturut-turut.
     - Hasil akhir: preset p7 (paling lambat/terbaik), tune hq, VBR + lookahead 32, AQ spasial & temporal,
       3 B-frame sebagai referensi, multipass penuh. GPU 3060 masih jauh dari penuh dengan ini.
+    - ENCODE_CQ (opsional): override CQ/CRF, mis. 18–20 untuk file lebih kecil. 0 = ikut codebase.
     """
-    crf = max(18, min(20, int(crf)))
+    cq_override = int(getattr(config, "ENCODE_CQ", 0) or 0)
+    if cq_override:
+        crf = max(1, min(51, cq_override))
     if config.USE_NVENC and _has_nvenc():
         if fast:
-            return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", str(crf), "-b:v", "0", "-pix_fmt", "yuv420p"]
+            return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", str(cq_override or 14), "-b:v", "0", "-pix_fmt", "yuv420p"]
+        cq = cq_override or max(14, min(28, crf - 1))
         return [
             "-c:v", "h264_nvenc", "-preset", config.NVENC_PRESET, "-tune", "hq", "-profile:v", "high",
-            "-rc", "vbr", "-cq", str(crf), "-b:v", "0", "-maxrate", "40M", "-bufsize", "80M",
+            "-rc", "vbr", "-cq", str(cq), "-b:v", "0", "-maxrate", "40M", "-bufsize", "80M",
             "-rc-lookahead", "32", "-spatial-aq", "1", "-temporal-aq", "1", "-aq-strength", "8",
             "-bf", "3", "-b_ref_mode", "middle", "-multipass", "fullres",
             "-pix_fmt", "yuv420p",

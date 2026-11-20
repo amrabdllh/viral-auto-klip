@@ -11,6 +11,7 @@ const LANGS = [{ v: "", l: "Deteksi otomatis" }, { v: "id", l: "Indonesia" }, { 
 const ASPECT_CLIP = [{ v: "Vertical", l: "9:16 vertikal (crop wajah)" }, { v: "Fit", l: "9:16 utuh + latar blur" }, { v: "Wide", l: "16:9 lebar" }];
 const FIT = [{ v: "blur", l: "Utuh + latar blur" }, { v: "cover", l: "Crop penuh" }, { v: "pad", l: "Letterbox hitam" }];
 const VIDEO_MODES = [{ v: "single", l: "1 pembicara" }, { v: "podcast", l: "Podcast / 2 orang" }, { v: "group", l: "Grup 3+ orang" }, { v: "auto", l: "Deteksi otomatis" }];
+const SOURCE_QUALITY = [{ v: "", l: "Ikut pengaturan" }, { v: "1080", l: "1080p60" }, { v: "1440", l: "1440p60" }, { v: "0", l: "Tertinggi" }];
 const WHISPER_DEVICES = [{ v: "", l: "Ikut Pengaturan" }, { v: "elevenlabs", l: "ElevenLabs Scribe (paling akurat)" }, { v: "auto", l: "Whisper di GPU (gratis)" }, { v: "cpu", l: "Whisper di CPU (lambat)" }, { v: "groq", l: "Groq Whisper (cloud)" }];
 const EDIT_STYLES = [{ v: "", l: "Ikut Pengaturan" }, { v: "minimal", l: "Minimal" }, { v: "dinamis", l: "Dinamis" }, { v: "maksimal", l: "Maksimal" }];
 const captionSelect = (v = "viral") => UI.select("caption_style", "Gaya caption", CAPTION_STYLES(), v);
@@ -148,7 +149,7 @@ PAGES.analisis = { render(view, q) {
     main: UI.panel({ id: "f", body: UI.section("Sumber video", `<div id="src"></div>`) +
       UI.section("Klip", `<div class="fields">${UI.num("num_clips", "Jumlah klip", { value: 8, min: 1, max: 25 })}${UI.num("min_duration", "Durasi minimum", { value: 15, min: 5, max: 120, hint: "detik" })}
         ${UI.num("max_duration", "Durasi maksimum", { value: 60, min: 10, max: 180, hint: "detik" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
-        ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "single")}${UI.select("language", "Bahasa video", LANGS, "id")}</div>`) +
+        ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "single")}${UI.select("language", "Bahasa video", LANGS, "id")}${UI.select("source_max_height", "Kualitas sumber", SOURCE_QUALITY, "")}</div>`) +
       UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Opsional — klip yang menyebut kata ini diutamakan." })}</div>
         <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}
           ${UI.toggle("campaign", "Render pakai template MotionKlip", { checked: false, sub: "Hasil hanya campaign: banner + judul + subtitle + outro" })}</div>
@@ -206,6 +207,7 @@ PAGES.live = { render(view, q) {
         <div class="switches">${UI.toggle("use_chat", "Baca chat live", { sub: "Lonjakan chat & Super Chat jadi petunjuk momen seru" })}${UI.toggle("cold_open", "Cold open + rewind")}${UI.toggle("sound_design", "Sound design")}${UI.toggle("caption_fx", "Caption animasi + emoji")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
       UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 45, min: 0, max: 100 })}
         ${UI.num("max_hours", "Rekam paling lama", { value: 6, min: 1, max: 12, hint: "jam" })}
+        ${UI.select("max_height", "Kualitas rekaman", [{ v: "1080", l: "1080p60" }, { v: "1440", l: "1440p60" }], "1080")}
         ${UI.select("layout", "Layout", [{ v: "", l: "Otomatis (facecam → split)" }, { v: "gaming", l: "Selalu split facecam + gameplay" }, { v: "face", l: "Ikuti wajah (crop 9:16)" }], "")}
         ${UI.select("whisper_device", "Mesin transkripsi", WHISPER_DEVICES, "")}${aiSelects()}</div>
         <div class="fields"><span class="section-title span-all">Mode spike presisi</span>
@@ -1179,7 +1181,7 @@ PAGES.campaign = { render(view) {
         ${UI.select("subtitle_provider", "Subtitle", [{ v: "", l: "Ikut preset" }, { v: "none", l: "Tanpa subtitle" }, { v: "whisper", l: "Whisper lokal" }, { v: "elevenlabs", l: "ElevenLabs Scribe" }], "")}
         ${UI.select("intro_voice", "Suara judul", [{ v: "", l: "Ikut preset" }, { v: "none", l: "Tanpa narasi" }, { v: "auto", l: "Auto (ElevenLabs → lokal)" }, { v: "edge", l: "Edge TTS (gratis)" }, { v: "elevenlabs", l: "ElevenLabs" }], "")}
         ${UI.tri("highlight", "Highlight kata")}
-        ${UI.select("upload_privacy", "Visibilitas upload", [{ v: "private", l: "Private" }, { v: "unlisted", l: "Unlisted" }, { v: "public", l: "Public" }], "private")}</div>
+        ${UI.select("upload_privacy", "Visibilitas upload", [{ v: "private", l: "Private" }, { v: "unlisted", l: "Unlisted" }, { v: "public", l: "Public" }], "private")}${UI.select("source_max_height", "Kualitas sumber", SOURCE_QUALITY, "")}</div>
         <div class="switches">${UI.toggle("auto_upload", "Upload setelah render", { checked: false, sub: "Headless — tidak ada jendela yang muncul" })}
           ${UI.toggle("auto_meta", "Buat judul & deskripsi otomatis", { checked: true, sub: "Dari transkrip klip, dipakai saat upload" })}</div>
         <div class="switches">${UI.toggle("up_youtube", "Ke YouTube", { checked: true })}${UI.toggle("up_tiktok", "Ke TikTok", { checked: false })}</div>`,

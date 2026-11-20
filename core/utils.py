@@ -117,6 +117,7 @@ def download_video(
     cookies_file: str = "",
     progress_cb: Optional[Callable[[float, float, Optional[float]], None]] = None,
     cache_dir: Optional[Path] = None,
+    max_height: Optional[int] = None,
 ) -> str:
     """Download video using yt-dlp. 
     Saves to 'mentahan/' folder inside project (easy to find + auto cleanup).
@@ -135,6 +136,16 @@ def download_video(
     if cache_dir is not None:
         cache_dir = P(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
+    # Kualitas sumber: None/0 = tertinggi, angka = batas tinggi (1080/1440/2160).
+    if max_height is None:
+        max_height = getattr(config, "DOWNLOAD_MAX_HEIGHT", 1080)
+    try:
+        max_height = int(max_height)
+    except (TypeError, ValueError):
+        max_height = 1080
+    if max_height <= 0:
+        max_height = None
+    res_pref = [f"res:{max_height}"] if max_height else ["res"]
     
     # FIX v4: dulu dipaksa player_client android,web,ios -> YouTube hanya memberi format 18 (360p),
     # hasil klip 9:16 jadi sangat buram (crop ~200px di-upscale 5x). Default yt-dlp memberi hingga 4K.
@@ -145,8 +156,8 @@ def download_video(
         "noprogress": True,  # progres dikirim lewat progress_hooks ke UI, bukan ke log konsol
         "merge_output_format": "mp4",
         "windowsfilenames": True,
-        # sumber 1080p60 (cukup untuk output 1080x1920; lebih kecil & cepat dari 1440p)
-        "format_sort": ["res:1080", "fps:60", "vcodec:h264", "acodec:m4a"],
+        # Kualitas sumber mengikuti pilihan user (default 1080p60).
+        "format_sort": [*res_pref, "fps:60", "vcodec:h264", "acodec:m4a"],
         # Fragmen DASH diunduh paralel: default 1 koneksi adalah penyebab utama download lambat.
         "concurrent_fragment_downloads": 8,
         "http_chunk_size": 10 * 1024 * 1024,
@@ -200,7 +211,8 @@ def download_video(
         )
 
     video_id = str(info.get("id") or "")
-    cached = _find_cached_source(cache_dir, video_id) if (cache_dir is not None and video_id) else None
+    cache_key = f"{video_id}_{max_height or 'max'}" if video_id else ""
+    cached = _find_cached_source(cache_dir, cache_key) if (cache_dir is not None and cache_key) else None
     if cached is not None:
         logger.info(f"Menggunakan sumber dari cache: {cached}")
         return str(cached)
@@ -211,14 +223,14 @@ def download_video(
     for label, clients in ordered:
         ydl_opts = dict(base_opts)
         ydl_opts["format"] = "bv*+ba/b"
-        if cache_dir is not None and video_id:
-            ydl_opts["outtmpl"] = str(cache_dir / f"{video_id}.%(ext)s")
+        if cache_dir is not None and cache_key:
+            ydl_opts["outtmpl"] = str(cache_dir / f"{cache_key}.%(ext)s")
         else:
             ydl_opts["outtmpl"] = str(output_path / "%(title).60s.%(ext)s")
         if clients:
             ydl_opts["extractor_args"] = {"youtube": {"player_client": clients}}
         try:
-            logger.info(f"Downloading video with yt-dlp (client={label}, 1080p60)")
+            logger.info(f"Downloading video with yt-dlp (client={label}, {max_height or 'highest'}p)")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 downloaded = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(downloaded)
@@ -240,8 +252,8 @@ def download_video(
             continue
 
     if filename:
-        if cache_dir is not None and video_id:
-            cached = _find_cached_source(cache_dir, video_id)
+        if cache_dir is not None and cache_key:
+            cached = _find_cached_source(cache_dir, cache_key)
             if cached is not None:
                 filename = str(cached)
         height = int(get_video_info(filename).get("height") or 0)

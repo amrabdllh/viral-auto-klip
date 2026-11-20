@@ -61,6 +61,10 @@ GROQ_WHISPER_AUDIO_BITRATE = os.getenv("GROQ_WHISPER_AUDIO_BITRATE", "64k")
 # Optional cookies.txt path for YouTube videos that require login/bot verification.
 # Relative paths are resolved from the project root, e.g. YTDLP_COOKIES=cookies.txt
 YTDLP_COOKIES = os.getenv("YTDLP_COOKIES", "").strip()
+# Kualitas maksimum download sumber: 1080/1440/2160, 0 = tertinggi.
+DOWNLOAD_MAX_HEIGHT = int(os.getenv("DOWNLOAD_MAX_HEIGHT", "1080") or "1080")
+# Override CQ/CRF encoder. 0 = ikut codebase (CQ 14 untuk file antara, crf-1 untuk final).
+ENCODE_CQ = int(os.getenv("ENCODE_CQ", "0") or "0")
 
 # ==================== VIRAL SCORING ====================
 MIN_CLIP_DURATION = 15  # seconds

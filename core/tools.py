@@ -56,8 +56,13 @@ def resolve_source(ctx: JobContext, params: Dict, key: str = "") -> str:
         ctx.progress(4 + int(max(0.0, min(pct, 100.0)) * 0.14), "Download",
                      f"{pct:.0f}% · {mb:.1f} MB/s · {eta_txt}")
 
+    raw_height = params.get("source_max_height")
+    try:
+        max_height = int(raw_height) if raw_height not in (None, "") else None
+    except (TypeError, ValueError):
+        max_height = None
     video = download_video(url, src_dir, cookies_from_browser=params.get("cookies_browser", ""),
-                           progress_cb=on_progress, cache_dir=SOURCE_CACHE_DIR)
+                           progress_cb=on_progress, cache_dir=SOURCE_CACHE_DIR, max_height=max_height)
     ctx.log(f"Sumber: {Path(video).name}")
     return video
 
