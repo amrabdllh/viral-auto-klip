@@ -48,6 +48,17 @@ jangan di-bind ke `0.0.0.0`.
 
 ffmpeg: pakai `tools/ffmpeg` bila ada, kalau tidak dari PATH.
 
+### Dependensi opsional (di-import lazy, tidak wajib untuk start)
+
+| Paket | Dibutuhkan untuk |
+|---|---|
+| `google-api-python-client` + `google-auth-httplib2` | upload YouTube lewat **API** (jalur browser tidak butuh) |
+| `tiktok-uploader` | upload TikTok lewat API (jalur browser tidak butuh) |
+| `pypdf` | membaca PDF di Transcript / Content Creator |
+| `torch` | upscale Real-ESRGAN / face restore (dipasang `start.bat` bila ada GPU) |
+
+Tanpa paket ini aplikasi tetap jalan; hanya fitur tersebut yang memberi pesan "belum terpasang".
+
 
 > **Baru di v6:** studio konten lengkap di **http://localhost:8000/app**: Analisis AI, Atur Manual, Split Cam, Highlight Bola, Konten Tempel, Content Creator / Story Studio / Motion Graphic, TTS & clone suara, musik/SFX, Editor, Merge, Loop, WA Story, Analitik Viral, Optimasi Judul, Transcript, Auto Upload terjadwal, dan Brand Kit. Detail: [CHANGELOG_V6.md](CHANGELOG_V6.md). UI lama: `/legacy`.
 

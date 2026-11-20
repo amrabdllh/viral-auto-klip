@@ -56,6 +56,11 @@ def _wrap(fn, *args):
 @router.get("/status")
 def status():
     current = jobs.CURRENT.get("id")
+    if not current:
+        # Job BACKGROUND (campaign/live/upload) tidak mengisi CURRENT, jadi status
+        # dulu bilang null padahal ada job berjalan. Ambil yang running dari DB.
+        running = [j for j in db.list_jobs(limit=20) if j.get("status") == "running"]
+        current = running[0]["id"] if running else None
     return {
         "version": "6.8",
         "ffmpeg": ffx.available(),

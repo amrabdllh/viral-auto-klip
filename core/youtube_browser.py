@@ -47,7 +47,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 PRIVACY_MAP = {"public": "PUBLIC", "unlisted": "UNLISTED", "private": "PRIVATE"}
 
 
-class YouTubeUploadError(RuntimeError):
+class YouTubeUploadError(ValueError):
     """Upload gagal — pesan sudah ramah untuk ditampilkan di UI."""
 
 

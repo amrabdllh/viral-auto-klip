@@ -60,3 +60,6 @@ tools/realesrgan/
 tools/models/
 # ffmpeg bawaan (300 MB, tidak untuk GitHub — salin dari Clipper/tools/ffmpeg)
 tools/ffmpeg/
+
+# Kredensial lokal (client_secret, token, cookies)
+config/

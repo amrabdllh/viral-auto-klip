@@ -45,7 +45,7 @@ POST_SELECTORS = (
 )
 
 
-class TikTokUploadError(RuntimeError):
+class TikTokUploadError(ValueError):
     """Upload gagal — pesan sudah ramah untuk UI."""
 
 
