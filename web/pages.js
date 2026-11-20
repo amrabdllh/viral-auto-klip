@@ -845,13 +845,58 @@ PAGES.brand = { render(view) {
 
 /* ================================================================== SETTINGS */
 const PRETTY = { edge: "Edge", openai: "OpenAI", gemini: "Gemini", elevenlabs: "ElevenLabs", pollinations: "Pollinations", card: "Kartu teks" };
+/* ---------- YouTube: kredensial cookies + upload headless (tanpa popup) ---------- */
+function mountYouTube() {
+  const box = document.getElementById("ytbox");
+  if (!box) return;
+  const when = (t) => (t ? new Date(t * 1000).toLocaleString("id-ID") : "—");
+  const paint = (s) => {
+    box.innerHTML = UI.panel({
+      title: "YouTube — upload lewat browser",
+      sub: "Tidak memakai kuota API (API hanya ~6 upload/hari). Sepenuhnya headless: tidak ada jendela atau popup yang muncul saat dipakai.",
+      body: `<div class="row" style="gap:8px;flex-wrap:wrap">
+          ${UI.pill(s.configured ? "Cookies aktif" : "Belum diatur", s.configured ? "ok" : "")}
+          <span class="tiny muted">${s.count || 0} cookie · disimpan ${when(s.saved_at)} · kedaluwarsa ${when(s.expires_at)}</span>
+        </div>
+        ${UI.field("Tempel cookies", `<textarea id="ytText" rows="5" spellcheck="false" placeholder="JSON hasil export extension, atau isi cookies.txt (format Netscape)"></textarea>`,
+          { hint: "Export cookies untuk youtube.com dari browser yang sudah login, lalu tempel di sini. Aplikasi tidak pernah membuka jendela login." })}
+        <div class="row" style="gap:8px">${UI.btn("Simpan cookies", { kind: "primary", size: "sm", id: "ytSave" })}
+          ${UI.btn("Tes sesi", { size: "sm", id: "ytTest" })}${UI.btn("Hapus", { size: "sm", id: "ytClear" })}</div>
+        <div id="ytRes" class="small muted"></div>`,
+    });
+    document.getElementById("ytSave").onclick = (e) => busy(e.currentTarget, async () => {
+      const text = document.getElementById("ytText").value.trim();
+      if (!text) { document.getElementById("ytRes").textContent = "Tempel cookies dulu."; return; }
+      try {
+        const r = await api("/youtube/cookies", { body: { text } });
+        document.getElementById("ytRes").innerHTML = UI.pill(`${r.count} cookie tersimpan`, "ok");
+        paint(r);
+      } catch (err) { document.getElementById("ytRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
+    });
+    document.getElementById("ytTest").onclick = (e) => busy(e.currentTarget, async () => {
+      document.getElementById("ytRes").innerHTML = `<span class="ink2">Memeriksa sesi (headless, ±15 dtk)…</span>`;
+      try {
+        const r = await api("/youtube/test", { body: {} });
+        document.getElementById("ytRes").innerHTML = r.ok
+          ? UI.pill("Sesi valid", "ok") + ` <span class="ink2">${esc(r.channel || "channel terdeteksi")}</span>`
+          : UI.pill("Tidak valid", "bad") + " " + esc(r.error || "");
+      } catch (err) { document.getElementById("ytRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
+    });
+    document.getElementById("ytClear").onclick = (e) => busy(e.currentTarget, async () => {
+      try { paint(await api("/youtube/cookies", { method: "DELETE" })); toast("Cookies YouTube dihapus"); }
+      catch (err) { fail(err); }
+    });
+  };
+  api("/youtube/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
+}
+
 PAGES.settings = { render(view) {
   const st = STATE.status;
   const pill = (ok, l) => UI.pill((ok ? "✓ " : "") + l, ok ? "ok" : "");
   view.innerHTML = `<div class="page">${pageHead("Pengaturan", "Disimpan ke file .env di laptopmu dan langsung aktif tanpa restart. API key tidak pernah ditampilkan utuh.",
       UI.btn("Setel otomatis (terbaik)", { ico: "sparkles", kind: "primary", size: "sm", id: "autoCfg" }))}
     ${UI.banner("info", "Bingung? Klik <b>Setel otomatis</b> — sistem membaca API key yang terpasang lalu memilih provider, model, suara, dan mesin transkripsi terbaik. Setelah itu cukup tempel link di Beranda.")}
-    <div class="layout"><div class="stack lg"><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
+    <div class="layout"><div class="stack lg"><div id="ytbox"></div><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
     <aside>${st ? UI.panel({ title: "Kemampuan aktif", body: `<div class="stack">${[["LLM", st.ai.providers.map((p) => pill(p.configured, p.provider))], ["Suara", Object.entries(st.media.tts).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
         ["Gambar", Object.entries(st.media.image).map(([k, v]) => pill(v.ready, PRETTY[k] || k))], ["Lainnya", [pill(st.media.elevenlabs, "ElevenLabs"), pill(st.media.stock, "Stok"), pill(st.media.youtube_api, "YouTube API"), pill(st.ffmpeg, "FFmpeg")]]]
         .map(([k, list]) => `<div class="stack" style="gap:6px"><span class="section-title">${k}</span><div class="row" style="gap:6px">${list.join("")}</div></div>`).join("")}</div>` }) : ""}
@@ -1013,6 +1058,7 @@ PAGES.settings = { render(view) {
     try { const r = await api("/config", { body: { values, clear: [...clear] } }); toast(`Tersimpan: ${r.saved.length} pengaturan`); clear.clear(); await refreshStatus(); route(); }
     catch (err) { fail(err); }
   });
+  mountYouTube();
 } };
 
 /* ================================================================== CAMPAIGN (MotionKlip) */

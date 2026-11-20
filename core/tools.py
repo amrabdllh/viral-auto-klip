@@ -853,5 +853,39 @@ def campaign_render_job(ctx: JobContext) -> Dict:
     }
 
 
+# ============================================================================ Upload browser (tanpa popup)
+
+@handler("upload_browser", background=True)
+def upload_browser_job(ctx: JobContext) -> Dict:
+    """Upload satu klip ke YouTube lewat browser headless (bypass kuota API).
+
+    Tidak membuka jendela apa pun; progress hanya lewat job log.
+    """
+    from . import youtube_browser
+
+    p = ctx.params
+    path = resolve_source(ctx, p)
+    title = str(p.get("title") or Path(path).stem)[:100]
+    privacy = str(p.get("privacy") or "private")
+    tags = p.get("tags") or []
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.replace(",", " ").split() if t.strip()]
+
+    def progress(stage: str, pct: int, message: str) -> None:
+        ctx.progress(max(5, min(99, pct)), stage, message)
+
+    result = youtube_browser.upload_video(
+        path, title=title, description=str(p.get("description") or ""),
+        tags=tags, privacy=privacy, progress=progress)
+    return {
+        "_message": f"Terupload ke YouTube ({privacy}): {title[:60]}",
+        "upload": result,
+        "clips": [{"file_path": path, "title": title, "upload": result}],
+    }
+
+
 # Mode Live (v6.4): daftarkan handler live_clip & live_window
 from . import live  # noqa: E402,F401
+
+# Live spike presisi: buffer HLS + rolling-median chat detector (dari Clipper)
+from . import live_spike  # noqa: E402,F401

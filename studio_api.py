@@ -73,6 +73,37 @@ def catalog():
             "color_grades": ["none", "natural", "vibrant", "cinematic"], "job_kinds": sorted(jobs.HANDLERS)}
 
 
+class YouTubeCookiesRequest(BaseModel):
+    text: str = ""
+
+
+@router.get("/youtube/cookies")
+def youtube_cookies_status():
+    """Status cookies YouTube — tidak pernah mengembalikan isi cookie."""
+    from core import youtube_browser
+    return youtube_browser.cookie_status()
+
+
+@router.post("/youtube/cookies")
+def youtube_cookies_save(req: YouTubeCookiesRequest):
+    """Simpan cookies dari teks (JSON atau Netscape cookies.txt)."""
+    from core import youtube_browser
+    return _wrap(youtube_browser.save_cookies, req.text)
+
+
+@router.delete("/youtube/cookies")
+def youtube_cookies_clear():
+    from core import youtube_browser
+    return _wrap(youtube_browser.clear_cookies)
+
+
+@router.post("/youtube/test")
+def youtube_test():
+    """Cek sesi cookies tanpa upload (headless, tanpa popup)."""
+    from core import youtube_browser
+    return _wrap(youtube_browser.test_session)
+
+
 @router.get("/campaign/presets")
 def campaign_presets():
     """Daftar preset MotionKlip di presets/, lengkap dengan ringkasan isinya."""
