@@ -210,6 +210,9 @@ def process_clips(
         "virtual_background_path": virtual_background_path,
         "enable_captions": enable_captions,
         "edit": editing.resolve_edit_opts(edit_opts),
+        # v6.8: gaya "auto" → dipilih per klip (editing.auto_style)
+        "edit_auto": str((edit_opts or {}).get("style") or "").lower() == "auto",
+        "edit_overrides": dict(edit_opts or {}),
         "stream_layout": stream_layout,
         "lower_third": lower_third or {},
     }
@@ -293,6 +296,11 @@ def _process_single_clip(
         thumb_path = clip_dir / "thumbnail.jpg"
 
         edit = opts["edit"]
+        if opts.get("edit_auto"):
+            chosen = editing.auto_style(clip_info)
+            edit = editing.resolve_edit_opts({**opts["edit_overrides"], "style": chosen})
+            clip_info["edit_style_auto"] = chosen
+            logger.info(f"  Gaya editing otomatis: {chosen} (kategori {clip_info.get('category')})")
         layout = opts.get("stream_layout")
         # puncak sinyal (lonjakan chat/suara live) relatif terhadap awal klip
         laughs = [float(ev["start"]) for sg in clip_info.get("subtitle_segments") or []

@@ -573,10 +573,12 @@ def music(prompt: str, out: str, duration: float = 30, lyrics: str = "", instrum
 
 
 def capabilities() -> Dict:
+    from . import video_ai
     return {
         "tts": {p: {"label": i["label"], "ready": tts_available(p)} for p, i in TTS_PROVIDERS.items()},
         "image": {p: {"label": i["label"], "ready": image_available(p)} for p, i in image_providers().items()},
         "stock": stock_available(),
+        "video": video_ai.status(),  # v6.8: video AI generatif (Gemini Omni Flash / Kling)
         "elevenlabs": bool(_key("ELEVENLABS_API_KEY")),
         "youtube_api": bool(_key("YOUTUBE_API_KEY")),
         "defaults": {"tts": getattr(config, "TTS_PROVIDER", "edge"), "voice": getattr(config, "TTS_VOICE", ""),

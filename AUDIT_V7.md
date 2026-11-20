@@ -207,3 +207,112 @@ Belum diuji: penutup pada Content Creator/Highlight secara langsung (memakai fun
 | Durasi di metadata | `end - start` (tidak menghitung cold open/freeze/tempo) | durasi nyata file akhir |
 
 Uji: klip 2470–2493 dirender penuh: jump cut 0,6 dtk, tempo 1,06×, 15 kata ditekan dengan pop besar, headline & caption terpisah; ±4 menit per klip (sama seperti sebelumnya, tempo +±10 dtk).
+
+---
+
+## Putaran 10 (v6.8): riset tren pakai data terbaru + update otomatis
+Masalah (ditemukan karena GTA VI yang sedang booming tidak muncul):
+- Analitik Viral tanpa `YOUTUBE_API_KEY` memakai pencarian YouTube **urut relevansi tanpa filter waktu** dengan kata kunci tetap ("viral indonesia"), sehingga video lama ikut tampil dan topik spesifik tidak terlihat.
+- Cache 1 jam, **tidak ada pembaruan otomatis**.
+- Saran Viral AI memakai 15 judul hasil pencarian yang sama; Optimasi Judul **murni pengetahuan AI** (tertinggal berbulan-bulan).
+
+Perbaikan (`core/trends.py`, semua gratis tanpa API key):
+| Komponen | Isi |
+|---|---|
+| Video segar | filter resmi YouTube "hari ini" + "minggu ini" diurutkan views (±2 dtk per pencarian) |
+| Topik yang naik | n-gram judul yang muncul di ≥2 channel berbeda, dibobot views; alias ("Grand Theft Auto VI" = "GTA VI" = "GTA 6"); kata umum disaring |
+| Google Trends | RSS pencarian real-time Indonesia (cache 30 menit) |
+| Konteks AI | Saran Viral & Optimasi Judul menerima tanggal hari ini + topik naik + judul tercepat + Google Trends, dengan instruksi bahwa data terbaru mengalahkan pengetahuan lama AI |
+| Auto-update | thread latar menyegarkan "Semua" + kategori yang dibuka 24 jam terakhir tiap 60 menit (`TRENDS_REFRESH_MIN`) |
+| UI | panel "Topik yang lagi naik minggu ini" (klik → Saran Viral terisi), "Pencarian Google yang melonjak", "diperbarui X menit lalu · otomatis tiap 60 menit"; Saran Viral & Optimasi Judul menampilkan data tren yang dipakai |
+
+Uji: Analitik Gaming → topik naik **GTA 6 (5 channel)**, Roblox, Bus Simulator; video GTA VI di peringkat atas. Saran Viral "gaming" (data 20 Nov 2026) → "Jam Pertama GTA 6 di Indonesia — Ada yang Bikin Kaget", "Berapa Sih Modal Main GTA 6 di Indonesia?", "Aku Bikin Vice City di Minecraft". Auto-update tercatat 20 dtk setelah server menyala.
+
+Batas: TikTok tidak menyediakan data tren publik tanpa login, jadi tren TikTok belum masuk. Umur video dari pencarian cepat diperkirakan dari filter (hari ini ≈0,5 hari, minggu ini ≈3,5 hari).
+
+---
+
+## Putaran 11 (v6.8): video AI generatif — IDE > SCRIPT > AI > IMAGE > VIDEO bergerak
+Sebelumnya Content Creator/Story Studio menghasilkan "gambar diam + gerak kamera". Sekarang adegan bisa dihidupkan:
+| | Gemini Omni Flash (`gemini-omni-1.2-flash`) | Kling 3.0 Turbo |
+|---|---|---|
+| Key | `GEMINI_API_KEY` | `KLING_API_KEY` (API Key standar baru; AK/SK lama ditolak vendor) |
+| Gambar→video | gambar adegan = bingkai pertama (tokoh tetap konsisten) | `first_frame` |
+| Teks→video | ya | ya |
+| Durasi / rasio | 3–15 dtk, 9:16 / 16:9 | 3–15 dtk, 9:16 / 16:9 / 1:1 |
+Catatan: Veo 3.1 Preview **dimatikan Google 22 Okt 2026**; dokumentasi resmi menyarankan Gemini Omni Flash.
+
+Cara kerja (`core/video_ai.py`): naskah AI kini juga menulis `video_prompt` (aksi + gerak kamera); pengguna memilih "Gerak adegan" (gerak kamera gratis / Gemini / Kling), sumber (gambar→video atau teks→video) dan **maks adegan video AI** (default 4: adegan pembuka + tersebar merata). Klip AI disesuaikan ke durasi narasi (dipotong, atau diperlambat ≤1,25× lalu frame akhir ditahan). Gagal apa pun → adegan itu kembali ke gerak kamera. Pemakaian (jumlah video & detik) dicatat lokal.
+
+Uji: format permintaan & pembacaan jawaban kedua provider diuji dengan respons tiruan sesuai dokumentasi (gambar→video, teks→video, polling Kling, penyesuaian durasi, fallback saat 429). **Belum diuji dengan panggilan sungguhan**: `GEMINI_API_KEY` di `.env` masih berisi teks contoh/placeholder (24 karakter, bukan format `AIza…`), jadi dianggap kosong oleh aplikasi — gambar & suara Gemini juga belum aktif karenanya; `KLING_API_KEY` belum diisi.
+
+---
+
+## Putaran 12 (v6.8): mode Otomatis untuk Analisis AI
+Masalah: jumlah klip, durasi, skor minimum, tipe video, dan gaya editing diisi manual. Untuk video panjang lebih parah:
+- AI Moment Finder hanya membaca **8 potongan transkrip** (±192 rb karakter). Transkrip ±1.200 karakter/menit → video 4 jam (±288 rb karakter, 12 potongan) **±1/3 bagian akhirnya tidak pernah dibaca AI**.
+- Jumlah klip 8 → AI hanya mengusulkan ≤8 momen per potongan dan Editor-AI hanya meninjau ±12 kandidat.
+
+Mode Otomatis (isian dikosongkan = default baru):
+| Isian | Otomatis |
+|---|---|
+| Jumlah klip | ditentukan kualitas: semua klip yang lolos rubrik Editor-AI (≥56), batas ±1 klip per 4,5 menit video (3–30), minimal 3 |
+| Durasi | 15–90 dtk; AI memilih awal/akhir alami, Editor-AI merapikan |
+| Seluruh video dibaca | batas 30 potongan; bila lebih, potongan diperbesar (tidak dibuang); diproses paralel (6) |
+| Skor minimum | gerbang kandidat 45, kualitas akhir oleh Editor-AI |
+| Tipe video | default "Deteksi otomatis" |
+| Fokus kata kunci | kosong → klip yang menyebut topik yang lagi naik (cache riset tren: semua kategori + Google Trends) mendapat +6 skor; kata umum disaring |
+| Gaya editing | "Otomatis (AI per klip)": topik medis/hukum/kebencian → Minimal; ada tawa, emosi ≥7,5, atau lucu/mengejutkan dengan emosi ≥6,5 → Maksimal; lainnya Dinamis |
+
+Uji:
+- Transkrip uji dilipatkan jadi 253 menit (tanpa biaya AI): seluruh 253 menit terbaca (14 panggilan); perilaku lama berhenti ±menit 168.
+- Analisis penuh video 42 menit (deepseek-flash): batas 10 klip, 26 momen diusulkan, 15 lolos Editor-AI, 10 terbaik diambil (rubrik 59–71), durasi alami 27–63 dtk (dulu mentok 60), 244 dtk.
+- Perbaikan setelah uji: kata umum ("Sekarang", "Ytshorts") tidak lagi dianggap topik tren; syarat gaya Maksimal diperketat (dulu 6/10 klip, termasuk emosi 4,5).
+
+Catatan biaya waktu: render ±4 menit per klip (upscale + wajah AI) → 25 klip ±1,5–2 jam; perkiraan ditampilkan di progres job.
+
+---
+
+## Putaran 13 (v6.8): live/gaming, Editor-AI yang melihat, mode farming, upload otomatis
+Diuji pada job pengguna: live GTA VI 110 menit (QSPPyA1736U), hasil awal 9 klip yang dinilai "masih kurang".
+
+Temuan dari klip pengguna:
+- Klip 14–20 dtk tanpa pengantar/payoff; skor lokal (kata kunci) 28–45 karena penilai dirancang untuk obrolan.
+- **Bug**: hook ditulis dari teks sebelum Editor-AI memangkas klip → hook membahas bagian yang terbuang ("Nyari Bigfoot…" padahal isinya loot sniper).
+- Topik tren palsu: kata biasa "Langsung" dianggap topik.
+- Tata letak facecam + gameplay sudah benar (split), tidak diubah.
+- Akar masalah: Editor-AI hanya membaca teks. Penilaian visual (claude-haiku-5-5) atas klip lama: "cowok belanja" visual 3/10 ("tanpa kejadian berarti"), "loot sniper" 4/10, "Lucia punya anak" 3/10 (dibuka menu jeda) — cocok dengan penilaian pengguna.
+
+Perbaikan:
+| | |
+|---|---|
+| Tipe konten | judul/link (gta, minecraft, gameplay, live, /live/…) → `gaming_stream`: kriteria momen reaksi/kejadian game, pengantar + reaksi tuntas, 25–60 dtk |
+| Kandidat dari suara | puncak reaksi (persentil ≥90) jadi kandidat tambahan (22 kandidat pada uji) |
+| **Editor-AI melihat** (`core/vision_review.py`) | 4 frame per kandidat → model multimodal (otomatis: koneksi dengan Claude/GPT-4o/Gemini) menilai kejadian di layar & kejelasan; rubrik = 60% teks + 40% visual; teks lemah tapi visual ≥7 tidak dibuang |
+| Grounding setelah trim | hook/judul/caption diperiksa ulang ke teks hasil pangkas; pakai alternatif yang terdukung atau kutipan asli |
+| Durasi | minimum otomatis 20 dtk (gaming 22), trim tidak boleh < 85% minimum |
+| Ambang gaming | standalone ≥4, payoff ≥4,5, rubrik ≥46 (teks tidak melihat gameplay) |
+| Mode farming | "Otomatis — farming": klip ≥46 rubrik, ±1 per 3 menit, maks 40 — untuk kampanye klip berbayar per views |
+| Topik tren | topik satu kata harus nama diri (berhuruf kapital di tengah kalimat) |
+
+Uji ulang (transkrip tersimpan, tanpa render): catatan "live gaming" versi pertama terlalu keras (31/37 ditolak, rubrik "cowok belanja" 62→50) → diperhalus. Dengan penilaian visual: 37 kandidat dilihat, 16 lolos Editor-AI, 6 lolos saringan kualitas (rubrik 52–62; mis. "Gua udah ngegym, pukulan segitu doang?" — adegan pukul-pukulan). Mode farming akan mengambil ke-16. Kesimpulan jujur: live ini sebagian besar playthrough cerita, sedikit momen yang benar-benar kuat.
+
+### Skor
+Skor = 35% skor awal (kata kunci + penilaian momen AI) + 65% rubrik Editor-AI (rubrik = rata-rata berbobot hook/payoff/standalone/emosi/kejelasan ×10). Rubrik sengaja jujur ("klip biasa 4–6/10"), jadi 60–70 = layak, 70–80 = bagus, ≥80 = istimewa (semua aspek ≥8). Skor rendah di job ini konsisten dengan penilaian pengguna, bukan salah hitung.
+
+### Upload otomatis (`core/autopublish.py`)
+Centang "Upload otomatis ke jam FYP terbaik" di Analisis AI → klip langsung masuk antrean penjadwal (upload sendiri saat jamnya): jendela jam ramai per niche & platform (niche dari isi klip, gaming untuk live gaming, atau dipilih pengguna), akhir pekan pagi digeser +1 jam, menit diacak, klip skor tertinggi di jam paling ramai, maks `AUTO_PUBLISH_PER_DAY` (3) per platform per hari, jarak ≥ `AUTO_PUBLISH_MIN_GAP_H` (2,5 jam), tidak bentrok dengan jadwal yang ada. Judul/caption/hashtag dari Editor-AI + `GLOBAL_HASHTAGS` (Pengaturan) + hashtag per job; hashtag global juga dipakai jadwal manual. Hanya platform yang benar-benar tersambung (YouTube perlu login). Uji (antrean tiruan, tanpa upload sungguhan): 7 klip × 2 platform → maks 3/hari, jarak minimum 2,9 jam, slot hari yang sama dipakai bila jendela masih terbuka. Catatan: platform tidak membuka data "jam FYP" real-time; jendela memakai pola waktu ramai per niche.
+
+---
+
+## Putaran 14 (v6.8): jam upload yang belajar dari channel sendiri
+Sebelumnya: tabel jam per niche & platform, hari hanya dihitung untuk pagi akhir pekan (+1 jam), tidak belajar. Studi publik saling bertentangan (Buffer, 7,1 jt posting: TikTok terbaik Sabtu & Minggu 09.00; Sprout Social: Selasa–Kamis 14–18; SocialPilot: Shorts terbaik Jumat 16–19) dan semuanya menyarankan analitik channel sendiri.
+
+`core/slot_learning.py`:
+1. **Jam jangkar** stabil tiap hari (2 jendela teratas per niche/platform, +1 cadangan), menit hanya bervariasi 5–25.
+2. **Penyesuaian hari**: Jumat & Sabtu malam +1 jam, Minggu malam −30 menit, pagi akhir pekan +1 jam.
+3. **Belajar**: penjadwal latar tiap 30 menit mengukur views 24 jam–7 hari tiap upload yang berhasil (YouTube: Data API bila `YOUTUBE_API_KEY`, atau yt-dlp dari URL Shorts; TikTok: profil `TIKTOK_PROFILE` dicocokkan ±20 menit). Setelah ≥8 upload terukur, jam dengan ≥3 sampel dan median ≥1,15× median channel jadi slot "terbukti"; jam <0,8× tidak dipakai; ±20% slot "eksplorasi" mencoba jam lain.
+4. Halaman Jadwal Upload: panel "Jam upload otomatis" (jam hari ini + label jangkar/terbukti/eksplorasi, progres data, jam terbaik).
+
+Uji simulasi (tanpa antrean/DB asli): tanpa data → Senin–Kamis ±19:10 & 22:20, Jumat–Sabtu ±20:15 & 23:15, Minggu ±18:45 & 21:45; dengan data buatan (jam 13 = 1,97×, jam 19 = 0,51×) → hari kerja pindah ke ±13:35 (terbukti) dan jam 19 tidak dipakai; pengukuran: 2 upload ≥24 jam tercatat (YouTube 5.321, TikTok 8.800), yang baru 3 jam dilewati, tidak diukur dua kali.
+Batas: YouTube Analytics "kapan penonton online" tidak tersedia lewat API publik, jadi pembelajaran memakai views 24 jam hasil upload sendiri; views TikTok butuh profil publik.
