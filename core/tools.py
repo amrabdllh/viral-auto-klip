@@ -844,12 +844,37 @@ def campaign_render_job(ctx: JobContext) -> Dict:
         "duration": ffx.probe(str(out))["duration"], "hashtags": review.get("hashtags", ""),
         "layout": review.get("layout"),
     })
+
+    # ---- Auto-publish: kirim ke YouTube lewat browser (headless) dengan hashtag preset.
+    upload_job = None
+    if p.get("auto_upload"):
+        from .jobs import submit
+
+        title = str(p.get("title") or "")
+        description = ""
+        preset_tags = str(review.get("hashtags") or "").strip()
+        if p.get("auto_meta"):
+            generated = _auto_upload_meta(review.get("transcript_text") or "", preset_tags)
+            title = title or generated.get("title") or ""
+            description = generated.get("description") or ""
+        title = (title or out.stem)[:100]
+        discord = str(review.get("discord_tag") or "").strip()
+        parts = [description, preset_tags, f"Discord: {discord}" if discord else ""]
+        description = " ".join(part for part in parts if part).strip()
+        ctx.progress(96, "Upload", "Mengirim ke antrean upload YouTube…")
+        upload_job = submit("upload_browser", {
+            "path": str(out), "title": title, "description": description,
+            "privacy": str(p.get("upload_privacy") or "private"), "parent": ctx.id,
+        }, title=f"Upload · {title[:50]}")["id"]
+
     return {
-        "_message": f"Campaign {review['layout']} siap: {out.name}",
+        "_message": f"Campaign {review['layout']} siap: {out.name}"
+                    + (" · upload diantrekan" if upload_job else ""),
         "clips": [{"file_path": str(out), "thumbnail": str(thumb) if thumb else "",
                    "asset_id": asset["id"], "title": out.stem}],
         "total_clips": 1,
         "campaign": review,
+        "upload_job": upload_job,
     }
 
 
@@ -860,28 +885,101 @@ def upload_browser_job(ctx: JobContext) -> Dict:
     """Upload satu klip ke YouTube lewat browser headless (bypass kuota API).
 
     Tidak membuka jendela apa pun; progress hanya lewat job log.
+    Deskripsi default diambil dari metadata aset (caption + hashtag hasil AI)
+    kalau job tidak mengirim description sendiri.
     """
     from . import youtube_browser
 
     p = ctx.params
     path = resolve_source(ctx, p)
-    title = str(p.get("title") or Path(path).stem)[:100]
+    meta = _asset_meta(path)
+    title = str(p.get("title") or meta.get("title") or Path(path).stem)[:100]
+    description = str(p.get("description") or meta.get("description") or "")
+    hashtags = p.get("tags") or meta.get("hashtags") or []
+    if isinstance(hashtags, str):
+        hashtags = [t.strip().lstrip("#") for t in hashtags.replace(",", " ").split() if t.strip()]
+    if hashtags and not all(f"#{t}" in description for t in hashtags[:3]):
+        description = (description + " " + " ".join(f"#{t}" for t in hashtags)).strip()
     privacy = str(p.get("privacy") or "private")
-    tags = p.get("tags") or []
-    if isinstance(tags, str):
-        tags = [t.strip() for t in tags.replace(",", " ").split() if t.strip()]
 
     def progress(stage: str, pct: int, message: str) -> None:
         ctx.progress(max(5, min(99, pct)), stage, message)
 
     result = youtube_browser.upload_video(
-        path, title=title, description=str(p.get("description") or ""),
-        tags=tags, privacy=privacy, progress=progress)
+        path, title=title, description=description,
+        tags=hashtags, privacy=privacy, progress=progress)
     return {
         "_message": f"Terupload ke YouTube ({privacy}): {title[:60]}",
         "upload": result,
         "clips": [{"file_path": path, "title": title, "upload": result}],
     }
+
+
+@handler("upload_tiktok", background=True)
+def upload_tiktok_job(ctx: JobContext) -> Dict:
+    """Upload satu klip ke TikTok lewat `tiktok-uploader` + cookies sesi."""
+    from . import publisher
+
+    p = ctx.params
+    path = resolve_source(ctx, p)
+    meta = _asset_meta(path)
+    description = str(p.get("description") or meta.get("description") or "")
+    hashtags = p.get("tags") or meta.get("hashtags") or []
+    if isinstance(hashtags, str):
+        hashtags = [t.strip().lstrip("#") for t in hashtags.replace(",", " ").split() if t.strip()]
+    if hashtags:
+        description = (description + " " + " ".join(f"#{t}" for t in hashtags)).strip()
+    ctx.progress(20, "Upload", "Mengirim ke TikTok…")
+    result = publisher.upload_to_tiktok(
+        str(path), description=description[:2000],
+        cookies_file=str(p.get("cookies_file") or ""))
+    status = str(result.get("status") or "")
+    if status == "failed":
+        raise RuntimeError(result.get("reason") or "Upload TikTok gagal")
+    return {
+        "_message": ("TikTok: " + (result.get("reason") or status or "selesai")),
+        "upload": result,
+        "clips": [{"file_path": str(path), "title": meta.get("title") or Path(path).stem, "upload": result}],
+    }
+
+
+def _auto_upload_meta(transcript: str, preset_hashtags: str = "") -> Dict:
+    """Buat judul + deskripsi upload dari transkrip klip. Tidak melempar."""
+    if not (transcript or "").strip():
+        return {}
+    prompt = (
+        "Buat metadata upload YouTube Shorts untuk klip berikut.\n"
+        "Balas HANYA JSON: {\"title\": str, \"description\": str}\n"
+        "- title: maksimal 60 karakter, memancing rasa penasaran, tanpa emoji berlebihan.\n"
+        "- description: 2 kalimat + 5 hashtag relevan di akhir.\n"
+        f"- Hashtag wajib ikut kalau ada: {preset_hashtags or '(bebas)'}\n\n"
+        f"Transkrip:\n{transcript[:4000]}"
+    )
+    try:
+        from . import ai_providers as _ai
+
+        raw = _ai.complete(prompt, json_mode=True, max_tokens=500)
+        data = _ai.parse_json(raw)
+        title = str(data.get("title") or "").strip()[:100]
+        description = str(data.get("description") or "").strip()[:4500]
+        return {"title": title, "description": description} if title or description else {}
+    except Exception as exc:  # noqa: BLE001 - metadata opsional, jangan gagalkan render
+        logger.warning(f"auto metadata gagal ({str(exc)[:160]}); memakai nama file")
+        return {}
+
+
+def _asset_meta(path: str) -> Dict:
+    """Metadata aset untuk path ini (judul, caption, hashtag), kalau ada."""
+    try:
+        target = str(Path(path))
+        for asset in db.list_assets(kind="clip", limit=500):
+            if str(Path(asset.get("path") or "")) == target:
+                meta = dict(asset.get("meta") or {})
+                meta.setdefault("title", asset.get("name") or "")
+                return meta
+    except Exception:  # noqa: BLE001 - metadata opsional
+        pass
+    return {}
 
 
 # Mode Live (v6.4): daftarkan handler live_clip & live_window

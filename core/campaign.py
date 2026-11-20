@@ -468,6 +468,7 @@ def render_campaign(video_path: Path | str, preset_path: Path | str, *, start: f
         "intro_voice": settings["intro_voice"],
         "hashtags": preset.get("hashtags", ""),
         "discord_tag": preset.get("discord_tag", ""),
+        "transcript_text": "",
     }
 
     print(f"[campaign] {layout} layout. Outro: {outro_duration:.3f} s dari {outro.name}")
@@ -518,6 +519,8 @@ def render_campaign(video_path: Path | str, preset_path: Path | str, *, start: f
                     compute_type=compute_type,
                 )
                 # Audio potongan mulai dari 0, jadi tidak perlu rebase.
+                review["transcript_text"] = " ".join(
+                    str(seg.get("text") or "").strip() for seg in segments).strip()[:8000]
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"transkripsi campaign gagal ({str(exc)[:200]}); caption dilewati")
 
