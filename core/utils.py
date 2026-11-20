@@ -145,9 +145,8 @@ def download_video(
         "noprogress": True,  # progres dikirim lewat progress_hooks ke UI, bukan ke log konsol
         "merge_output_format": "mp4",
         "windowsfilenames": True,
-        # unduh resolusi TERTINGGI yang tersedia (tanpa batas 1080p); output tetap 1080x1920,
-        # sumber lebih tinggi hanya membuat crop 9:16 lebih tajam
-        "format_sort": ["res", "fps:60", "vcodec:h264", "acodec:m4a"],
+        # sumber 1080p60 (cukup untuk output 1080x1920; lebih kecil & cepat dari 1440p)
+        "format_sort": ["res:1080", "fps:60", "vcodec:h264", "acodec:m4a"],
         # Fragmen DASH diunduh paralel: default 1 koneksi adalah penyebab utama download lambat.
         "concurrent_fragment_downloads": 8,
         "http_chunk_size": 10 * 1024 * 1024,
@@ -219,7 +218,7 @@ def download_video(
         if clients:
             ydl_opts["extractor_args"] = {"youtube": {"player_client": clients}}
         try:
-            logger.info(f"Downloading video with yt-dlp (client={label}, kualitas tertinggi)")
+            logger.info(f"Downloading video with yt-dlp (client={label}, 1080p60)")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 downloaded = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(downloaded)
