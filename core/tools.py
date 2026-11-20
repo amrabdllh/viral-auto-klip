@@ -1042,7 +1042,7 @@ def campaign_render_job(ctx: JobContext) -> Dict:
             ffx.extract_frame(str(out), 1.0, str(thumb), 540)
         except Exception:  # noqa: BLE001 - thumbnail opsional
             thumb = None
-        preset_tags = str(review.get("hashtags") or "").strip()
+        preset_tags = str(review.get("hashtags") or "").strip() if p.get("use_preset_hashtags") else ""
         # Judul & deskripsi dibuat di sini (bukan hanya saat auto-upload) supaya
         # tombol upload manual di Library juga punya metadata — sama seperti klip biasa.
         generated: Dict = {}

@@ -996,8 +996,8 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
         row = dict(clip)
         row["file_path"] = str(final)
         row["campaign"] = True
-        # Hashtag preset campaign jadi default; field Hashtag manual tetap menang.
-        if preset_tags and not p.get("hashtags_override"):
+        # Hashtag preset campaign hanya dipakai bila user memilihnya; field manual tetap menang.
+        if preset_tags and p.get("use_preset_hashtags") and not p.get("hashtags_override"):
             row["hashtags"] = preset_tags
         start = float(row.get("start") or (picked[index]["start"] if index < len(picked) else 0))
         end = float(row.get("end") or (picked[index]["end"] if index < len(picked) else 0))
