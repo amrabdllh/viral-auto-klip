@@ -329,6 +329,138 @@ def write_campaign_captions(segments: Sequence[Dict[str, Any]], clip_start: floa
 
 
 # ==================== Render ====================
+
+def finish_with_banner_and_outro(clip: Path | str, preset: Dict[str, Any], out_path: Path | str,
+                                 *, fps: int = CAMPAIGN_FPS, crf: int = 16) -> Path:
+    """Tempel banner + outro ke klip yang SUDAH diedit.
+
+    Dua pass terpisah, keduanya berhingga:
+      1. overlay banner pada klip (audio di-copy)
+      2. sambung outro lewat ffx.append_outro (sudah dipakai produksi)
+    Pendekatan satu-graph dengan `-loop 1` menggantung karena input watermark
+    tak berujung, jadi jangan digabung.
+    """
+    from core import ffx
+
+    clip = Path(clip)
+    target = Path(out_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    bannered = target.with_name(target.stem + ".banner" + target.suffix)
+    watermark = Path(preset["watermark"])
+    info = ffx.probe(str(clip))
+    w, h = int(info["width"]), int(info["height"])
+
+    strip = preset.get("watermark_strip")
+    strip_top = preset.get("watermark_top")
+    if strip and strip_top is None:
+        strip_top = h - (strip[1] - strip[0])
+    if strip:
+        sh = strip[1] - strip[0]
+        graph = (f"[1:v]format=rgba,crop={w}:{sh}:0:{strip[0]}[wm];"
+                 f"[0:v][wm]overlay=x=0:y={strip_top}:eof_action=repeat[v]")
+    else:
+        ww = int(preset.get("watermark_width", 864))
+        offset = int(preset.get("watermark_y_offset", 0))
+        graph = (f"[1:v]format=rgba,scale={ww}:-2[wm];"
+                 f"[0:v][wm]overlay=x=(W-w)/2:y=(H-h)/2+({offset}):eof_action=repeat[v]")
+
+    ffx.run(["-i", str(clip), "-i", str(watermark),
+             "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
+             "-c:a", "copy", "-r", str(fps), *ffx.venc(crf),
+             "-movflags", "+faststart", str(bannered)], timeout=1200)
+    try:
+        ffx.append_outro(str(bannered), str(target), str(preset["outro"]),
+                         image_sec=float(preset.get("outro_seconds", 3)))
+    finally:
+        bannered.unlink(missing_ok=True)
+    return target
+
+
+
+def render_edited(video_path: Path | str, preset_path: Path | str, *, start: float,
+                  end: Optional[float], output_dir: Path | str, params: Optional[Dict[str, Any]] = None,
+                  title: str = "", model: Optional[str] = None) -> Dict[str, Any]:
+    """Campaign dengan EDITING PENUH: process_clips → banner → outro.
+
+    Satu-satunya beda dari klip biasa: layout split dari preset + banner + outro.
+    Fallback ke render_campaign lama bila pipeline editing gagal.
+    """
+    from core import ffx, tools
+    from core.clipper import detect_stream_layout, process_clips
+    from core.transcriber import transcribe_video
+
+    params = params or {}
+    preset = load_preset(preset_path)
+    settings = campaign_settings(preset, {k: params[k] for k in (
+        "layout", "facecam_rect", "gameplay_rect", "subtitle_provider", "highlight") if params.get(k)})
+    out_dir = Path(output_dir); out_dir.mkdir(parents=True, exist_ok=True)
+    info = ffx.probe(str(video_path))
+    total = float(info.get("duration") or 0)
+    end = total if end in (None, "") else min(float(end), total)
+    duration = max(0.5, end - float(start))
+
+    cut = out_dir / "cut.mp4"
+    ffx.run(["-ss", f"{float(start):.3f}", "-t", f"{duration:.3f}", "-i", str(video_path),
+             "-c", "copy", "-movflags", "+faststart", str(cut)], timeout=600)
+    try:
+        segments, _ = transcribe_video(str(cut), model_name=model, word_timestamps=True,
+                                       device=params.get("whisper_device") or None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Transkripsi campaign gagal ({str(exc)[:160]}); caption dilewati")
+        segments = []
+
+    layout = None
+    if settings["layout"] == "split":
+        cam, game = settings["facecam_rect"], settings["gameplay_rect"]
+        try:
+            det = detect_stream_layout(str(cut))
+            if det:
+                cam, game = det["cam_box"], _gameplay_rect_from_cam(det["cam_box"])
+        except Exception:  # noqa: BLE001
+            pass
+        layout = {"cam_box": list(cam), "game_box": list(game),
+                  "cam_ratio": settings["facecam_height"] / 1920.0}
+
+    clip = {"start": 0.0, "end": duration, "title": title or Path(video_path).stem,
+            "hook_text": title, "score": 100, "subtitle_segments": segments,
+            "words": [w for seg in segments for w in seg.get("words") or []]}
+    try:
+        edited = process_clips(str(cut), [clip], out_dir, **{**tools.render_options(params),
+                                                             "stream_layout": layout,
+                                                             "enable_captions": True})
+        src = Path(edited[0]["file_path"])
+    except Exception as exc:  # noqa: BLE001 - fallback ke renderer lama
+        logger.warning(f"Pipeline editing gagal ({str(exc)[:160]}); memakai renderer campaign lama")
+        cut.unlink(missing_ok=True)
+        return render_campaign(video_path, preset_path, start=start, end=end,
+                               output_dir=out_dir, title=title,
+                               overrides={k: params[k] for k in ("subtitle_provider", "intro_voice") if params.get(k)},
+                               model=model)
+
+    final = src.with_name(f"{src.stem}_campaign.mp4")
+    finish_with_banner_and_outro(src, preset, final)
+    cut.unlink(missing_ok=True)
+    return {
+        "output": str(final), "layout": settings["layout"], "fps": CAMPAIGN_FPS,
+        "duration": round(duration, 3), "subtitle_provider": settings["subtitle_provider"],
+        "intro_voice": "none", "hashtags": preset.get("hashtags", ""),
+        "discord_tag": preset.get("discord_tag", ""),
+        "transcript_text": " ".join(str(seg.get("text") or "").strip() for seg in segments).strip()[:8000],
+    }
+
+
+def _gameplay_rect_from_cam(cam: List[float]) -> List[float]:
+    x, y, w, h = cam
+    cx, cy = x + w / 2, y + h / 2
+    if cx > 0.55:
+        return [0.0, 0.0, round(max(0.2, x), 4), 1.0]
+    if cx < 0.45:
+        return [round(min(0.8, x + w), 4), 0.0, round(max(0.2, 1.0 - (x + w)), 4), 1.0]
+    if cy > 0.5:
+        return [0.0, 0.0, 1.0, round(max(0.2, y), 4)]
+    return [0.0, round(min(0.8, y + h), 4), 1.0, round(max(0.2, 1.0 - (y + h)), 4)]
+
+
 def render_campaign(video_path: Path | str, preset_path: Path | str, *, start: float,
                     end: Optional[float] = None, output_dir: Path | str,
                     title: str = "", overrides: Optional[Dict[str, Any]] = None,

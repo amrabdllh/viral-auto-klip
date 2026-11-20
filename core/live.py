@@ -44,7 +44,7 @@ MAX_BACKLOG_SEC = 3500  # playlist YouTube menyimpan ±3600 potongan 1 dtk
 # membuat timestamp audio mundur dan segment muxer berhenti merotasi (rekaman
 # macet di segmen pertama). Nyalakan hanya untuk sumber yang terbukti desync:
 #   set LIVE_AUDIO_OFFSET=1 di .env
-AUDIO_OFFSET_ENABLED = os.getenv("LIVE_AUDIO_OFFSET", "0").lower() in ("1", "true", "yes")
+AUDIO_OFFSET_ENABLED = os.getenv("LIVE_AUDIO_OFFSET", "1").lower() in ("1", "true", "yes")
 
 
 # ============================================================================ info siaran
@@ -297,7 +297,11 @@ class Recorder:
                 idx = max(0, len(durs) - n)
                 return pdt + sum(durs[:idx])
 
-            delta = start(v_pdt, v_durs) - start(a_pdt, a_durs)
+            # Audio harus DIGESER sebesar selisih titik mulainya:
+            #   itsoffset = audio_start - video_start
+            # (dulu dibalik, sehingga audio bergeser ke arah yang salah dan
+            #  segment muxer sempat macet karena timestamp negatif)
+            delta = start(a_pdt, a_durs) - start(v_pdt, v_durs)
             # Selisih > 5 menit hampir pasti salah baca, jangan diterapkan.
             return delta if abs(delta) <= 300 else 0.0
         except Exception:
@@ -814,63 +818,61 @@ def _gameplay_from_cam(cam: List[float]) -> List[float]:
 
 def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
                             p: Dict, wall0: float) -> List[Dict]:
-    """Render momen jendela live memakai template MotionKlip (preset campaign).
+    """Render jendela live dengan EDITING PENUH + banner + outro.
 
-    Satu momen gagal tidak menggagalkan seluruh jendela: dicatat lalu dilewati.
+    Semua efek yang dipakai klip biasa (jump cut, zoom, cold open, caption
+    animasi, sound design, color grade) dikerjakan `process_clips`. Setelah itu
+    banner dan outro ditempel. Jadi satu-satunya beda campaign adalah
+    split + banner + outro — sesuai permintaan.
     """
-    from . import campaign, ffx
+    from . import campaign, ffx, tools
+    from .clipper import detect_stream_layout, process_clips
 
-    preset = p.get("preset") or getattr(config, "CAMPAIGN_DEFAULT_PRESET", "") or "motion-klip-gtavi-split.json"
-    preset_path = Path(preset)
+    preset_path = Path(p.get("preset") or getattr(config, "CAMPAIGN_DEFAULT_PRESET", "")
+                       or "motion-klip-gtavi-split.json")
     if not preset_path.is_absolute():
         preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
+    preset = campaign.load_preset(preset_path)
     overrides = {k: p[k] for k in ("subtitle_provider", "intro_voice", "layout") if p.get(k)}
-    # Live butuh cepat: narasi judul hanya kalau diminta eksplisit.
-    overrides.setdefault("intro_voice", "none")
+    settings = campaign.campaign_settings(preset, overrides)
 
-    # Kotak facecam di preset bisa meleset kalau streamer mengubah ukuran/posisi
-    # cam. Di live, deteksi per window dan pakai kotak itu; gameplay dipotong
-    # agar area cam tidak muncul dua kali.
-    if p.get("auto_facecam", True):
-        try:
-            from .clipper import detect_stream_layout
+    layout = None
+    if settings["layout"] == "split":
+        cam, game = settings["facecam_rect"], settings["gameplay_rect"]
+        if p.get("auto_facecam", True):
+            try:
+                det = detect_stream_layout(video, picked)
+                if det:
+                    cam = det["cam_box"]
+                    game = _gameplay_from_cam(cam)
+                    logger.info(f"Campaign live: facecam {cam} → gameplay {game}")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Deteksi facecam campaign dilewati: {str(exc)[:160]}")
+        layout = {"cam_box": list(cam), "game_box": list(game),
+                  "cam_ratio": settings["facecam_height"] / 1920.0}
 
-            det = detect_stream_layout(video, picked)
-            if det:
-                cam = det["cam_box"]
-                overrides["facecam_rect"] = cam
-                overrides["gameplay_rect"] = _gameplay_from_cam(cam)
-                logger.info(f"Campaign live: facecam terdeteksi {cam} → gameplay {overrides['gameplay_rect']}")
-        except Exception as exc:  # noqa: BLE001 - deteksi opsional
-            logger.warning(f"Deteksi facecam campaign dilewati: {str(exc)[:160]}")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    opts = tools.render_options(p)
+    opts["stream_layout"] = layout
+    opts["enable_captions"] = True
+    ctx_clips = process_clips(video, picked, out_dir, **opts)
 
     clips: List[Dict] = []
-    for index, moment in enumerate(picked, 1):
-        start, end = float(moment.get("start") or 0), float(moment.get("end") or 0)
-        title = str(moment.get("ai_title") or moment.get("hook_text") or "")
+    for index, clip in enumerate(ctx_clips):
+        src = Path(clip["file_path"])
+        final = src.with_name(f"{src.stem}_campaign.mp4")
         try:
-            review = campaign.render_campaign(
-                video, preset_path, start=start, end=end, output_dir=out_dir,
-                title=title, overrides=overrides)
-        except Exception as exc:  # noqa: BLE001 - satu momen gagal, lanjut
-            logger.warning(f"Campaign live momen {index} gagal: {str(exc)[:200]}")
-            continue
-        out = Path(review["output"])
-        thumb = out.with_suffix(".jpg")
-        try:
-            ffx.extract_frame(str(out), 1.0, str(thumb), 540)
-        except Exception:  # noqa: BLE001
-            thumb = None
-        clips.append({
-            "file_path": str(out), "thumbnail": str(thumb) if thumb else "",
-            "title": out.stem, "ai_title": title, "hook_text": moment.get("hook_text"),
-            "score": moment.get("score"), "duration": review.get("duration"),
-            "hashtags": review.get("hashtags"), "campaign": True,
-            # start/end relatif jendela: dipakai ringkasan & _clock di live_window
-            "start": start, "end": end,
-            "wall_span": [wall0 + start, wall0 + end],
-        })
+            campaign.finish_with_banner_and_outro(src, preset, final)
+        except Exception as exc:  # noqa: BLE001 - jangan buang klip yang sudah diedit
+            logger.warning(f"Banner/outro gagal ({str(exc)[:160]}); memakai klip tanpa banner")
+            final = src
+        row = dict(clip)
+        row["file_path"] = str(final)
+        row["campaign"] = True
+        start = float(row.get("start") or (picked[index]["start"] if index < len(picked) else 0))
+        end = float(row.get("end") or (picked[index]["end"] if index < len(picked) else 0))
+        row["start"], row["end"] = start, end
+        row["wall_span"] = [wall0 + start, wall0 + end]
+        clips.append(row)
     return clips
 
 
