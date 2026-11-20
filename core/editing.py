@@ -37,21 +37,21 @@ EDIT_PRESETS: Dict[str, Dict] = {
                 "color_grade": "none", "smart_thumbnail": True, "end_cta": False,
                 "cold_open": False, "sound_design": False, "caption_fx": False, "audio_master": True,
                 "speaker_cam": True, "broll": False, "shake": False, "freeze": False, "lower_third": False, "censor": False,
-                "pro_fx": False},
+                "pro_fx": False, "auto_tempo": False},
     "dinamis": {"jump_cuts": True, "dynamic_zoom": True, "progress_bar": True, "sfx": False,
                 "color_grade": "film", "smart_thumbnail": True, "end_cta": False,
                 "cold_open": True, "sound_design": True, "caption_fx": True, "audio_master": True,
                 "speaker_cam": True, "broll": True, "shake": True, "freeze": False, "lower_third": True, "censor": True,
-                "pro_fx": True},
+                "pro_fx": True, "auto_tempo": True},
     "maksimal": {"jump_cuts": True, "dynamic_zoom": True, "progress_bar": True, "sfx": True,
                  "color_grade": "teal_orange", "smart_thumbnail": True, "end_cta": False,
                  "cold_open": True, "sound_design": True, "caption_fx": True, "audio_master": True,
                  "speaker_cam": True, "broll": True, "shake": True, "freeze": True, "lower_third": True, "censor": True,
-                 "pro_fx": True},
+                 "pro_fx": True, "auto_tempo": True},
 }
 EDIT_KEYS = ("jump_cuts", "dynamic_zoom", "progress_bar", "sfx", "color_grade", "smart_thumbnail", "end_cta",
              "cold_open", "sound_design", "caption_fx", "audio_master",
-             "speaker_cam", "broll", "shake", "freeze", "lower_third", "censor", "pro_fx")
+             "speaker_cam", "broll", "shake", "freeze", "lower_third", "censor", "pro_fx", "auto_tempo")
 
 COLOR_GRADES: Dict[str, str] = {
     "none": "",
@@ -74,6 +74,13 @@ FILLER_WORDS = {
     "eh", "ehm", "em", "emm", "eem", "hmm", "hm", "mm", "mmm", "anu", "eee", "ee",
     "uh", "uhm", "um", "umm", "erm", "er", "ah", "uhh",
 }
+# variasi panjang yang ditulis transkriptor: "eeeh", "hmmm", "ehmmm", "aah", "uhmm", "eemm", "errr"
+_FILLER_RE = re.compile(r"(e{1,}h*m*|e+r+m*|h+m+|m{2,}|a{2,}h*|a+h{2,}|u+h*m*)")
+
+
+def is_filler(word: str) -> bool:
+    c = _clean(word)
+    return bool(c) and (c in FILLER_WORDS or bool(_FILLER_RE.fullmatch(c)))
 
 
 def resolve_edit_opts(overrides: Optional[Dict] = None) -> Dict:
@@ -116,7 +123,7 @@ def relative_words(clip_info: Dict) -> List[Dict]:
 
 def plan_jump_cuts(words_rel: List[Dict], duration: float, max_gap: float = 0.55, pad: float = 0.10) -> List[Tuple[float, float]]:
     """Interval yang DIPERTAHANKAN: buang jeda > max_gap dan kata pengisi berdiri sendiri."""
-    spoken = [w for w in words_rel if _clean(w["word"]) not in FILLER_WORDS]
+    spoken = [w for w in words_rel if not is_filler(w["word"])]
     if len(spoken) < 3:
         return [(0.0, duration)]
     spans: List[List[float]] = []
@@ -129,6 +136,31 @@ def plan_jump_cuts(words_rel: List[Dict], duration: float, max_gap: float = 0.55
     spans[0][0] = max(spans[0][0] - 0.05, 0.0)
     spans[-1][1] = min(spans[-1][1] + 0.25, duration)  # ekor kecil agar kalimat terakhir tidak terpotong
     return [(round(s, 3), round(e, 3)) for s, e in spans if e - s >= 0.12]
+
+
+def plan_tempo(words_rel: List[Dict], target_wps: Optional[float] = None, max_tempo: Optional[float] = None) -> float:
+    """v6.8: percepatan halus untuk pembicara lambat (gaya kliper: 1,05–1,1×), nada suara tetap.
+
+    Diukur dari kata per detik SETELAH jump cut. Data podcast uji: median 2,93 kata/dtk; klip viral terasa pas
+    ±3,2. Klip yang sudah cepat tidak diubah (1.0). Hasil dibulatkan 0,01; < 1,03 dianggap tidak perlu."""
+    target = float(target_wps or getattr(config, "AUTO_TEMPO_TARGET_WPS", 3.15))
+    cap = float(max_tempo or getattr(config, "AUTO_TEMPO_MAX", 1.08))
+    spoken = [w for w in words_rel if not is_filler(w.get("word", ""))]
+    if len(spoken) < 15:
+        return 1.0
+    span = float(spoken[-1]["end"]) - float(spoken[0]["start"])
+    if span <= 3:
+        return 1.0
+    tempo = round(max(1.0, min(cap, target / (len(spoken) / span))), 2)
+    return tempo if tempo >= 1.03 else 1.0
+
+
+def apply_tempo(input_path: str, output_path: str, tempo: float, encode_args: List[str]) -> None:
+    """Percepat video+audio bersamaan (setpts + atempo → nada tidak berubah); semua efek yang sudah dibakar ikut."""
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", input_path, "-filter_complex",
+                    f"[0:v]setpts=PTS/{tempo:.4f}[v];[0:a]atempo={tempo:.4f}[a]", "-map", "[v]", "-map", "[a]",
+                    *encode_args, "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", output_path],
+                   check=True, capture_output=True)
 
 
 def kept_duration(intervals: Sequence[Tuple[float, float]]) -> float:
@@ -154,7 +186,7 @@ def remap_clip_info(clip_info: Dict, intervals: Sequence[Tuple[float, float]]) -
     words = []
     for w in clip_info.get("words") or []:
         rel_s, rel_e = float(w.get("start", 0)) - start, float(w.get("end", 0)) - start
-        if _clean(w.get("word", "")) in FILLER_WORDS:
+        if is_filler(w.get("word", "")):
             continue
         if not any(s - 0.05 <= rel_s <= e + 0.05 for s, e in intervals):
             continue
@@ -657,7 +689,9 @@ def _word_score(raw: str) -> int:
 
 def power_word_set(words_rel: List[Dict], limit_ratio: float = 0.12) -> set:
     """Kata yang diberi warna aksen permanen di caption (±12% kata, yang paling 'berat')."""
-    scored = sorted(((_word_score(w["word"]), _clean(w["word"])) for w in words_rel), reverse=True)
+    # v6.8: kata yang BENAR-BENAR ditekan pembicara (audio_signals: stress 2–3) ikut diberi warna aksen
+    scored = sorted(((_word_score(w["word"]) + (2 * int(w.get("stress") or 0) - 1 if int(w.get("stress") or 0) >= 2 else 0),
+                      _clean(w["word"])) for w in words_rel), reverse=True)
     cap = max(2, int(len(words_rel) * limit_ratio))
     return {c for s, c in scored[:cap] if s >= 2 and len(c) >= 3}
 

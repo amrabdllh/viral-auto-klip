@@ -441,12 +441,19 @@ class BrandKit(BaseModel):
     x: Optional[float] = None
     y: Optional[float] = None
     remove_logo: bool = False
+    outro: Optional[str] = None          # penutup klip: gambar atau video pendek
+    outro_duration: float = 3.0         # lama tampil bila gambar (detik)
+    outro_auto: bool = True
+    remove_outro: bool = False
 
 
 @router.get("/brand-kit")
 def get_brand_kit():
     kit = db.kv_get("brand_kit", {}) or {}
     kit["has_logo"] = bool(kit.get("logo") and Path(kit["logo"]).exists())
+    kit["has_outro"] = bool(kit.get("outro") and Path(kit["outro"]).exists())
+    if kit["has_outro"]:
+        kit["outro_kind"] = "image" if Path(kit["outro"]).suffix.lower() in ffx.OUTRO_IMAGE_EXT else "video"
     return kit
 
 
@@ -462,10 +469,37 @@ def save_brand_kit(req: BrandKit):
         dest = db.ASSET_DIR / f"brand_logo{src.suffix.lower()}"
         shutil.copy2(src, dest)
         kit["logo"] = str(dest)
-    if req.position not in ("top-left", "top-right", "bottom-left", "bottom-right", "center", "custom"):
+    if req.remove_outro:
+        old = kit.pop("outro", None)
+        if old:
+            Path(old).unlink(missing_ok=True)
+    elif req.outro and req.outro != kit.get("outro"):
+        src = _safe_path(req.outro)
+        ext = src.suffix.lower()
+        if ext not in ffx.OUTRO_IMAGE_EXT + ffx.OUTRO_VIDEO_EXT:
+            raise HTTPException(400, "Penutup harus gambar (PNG/JPG/WebP) atau video (MP4/MOV/WebM)")
+        if ext in ffx.OUTRO_VIDEO_EXT:
+            try:
+                info = ffx.probe(str(src))
+            except Exception:
+                raise HTTPException(400, "Video penutup tidak bisa dibaca")
+            if not info["width"]:
+                raise HTTPException(400, "File penutup tidak berisi video")
+            if info["duration"] > ffx.OUTRO_MAX_SEC + 0.5:
+                raise HTTPException(400, f"Video penutup maksimal {ffx.OUTRO_MAX_SEC:.0f} detik "
+                                         f"(file ini {info['duration']:.0f} dtk) — potong dulu di Video Editor")
+        for old in db.ASSET_DIR.glob("brand_outro.*"):
+            old.unlink(missing_ok=True)
+        dest = db.ASSET_DIR / f"brand_outro{ext}"
+        shutil.copy2(src, dest)
+        kit["outro"] = str(dest)
+    positions = ("top-left", "top-center", "top-right", "middle-left", "center", "middle-right",
+                 "bottom-left", "bottom-center", "bottom-right", "custom")
+    if req.position not in positions:
         raise HTTPException(400, "Posisi tidak valid")
     kit.update({"position": req.position, "size": max(0.05, min(0.6, req.size)),
-                "opacity": max(0.05, min(1.0, req.opacity)), "auto": req.auto, "x": req.x, "y": req.y})
+                "opacity": max(0.05, min(1.0, req.opacity)), "auto": req.auto, "x": req.x, "y": req.y,
+                "outro_duration": max(1.0, min(10.0, float(req.outro_duration or 3.0))), "outro_auto": req.outro_auto})
     db.kv_set("brand_kit", kit)
     return get_brand_kit()
 

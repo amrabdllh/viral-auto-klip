@@ -262,7 +262,8 @@ def _process_single_clip(
     try:
         clip_info = _snap_clip_to_scene_cuts(clip_info, scene_cuts)
 
-        clip_name = f"clip_{idx+1:03d}_viral{int(clip_info['score'])}_{clip_info['category']}"
+        score = int(clip_info.get("score") or 0)
+        clip_name = f"clip_{idx+1:03d}_" + (f"viral{score}_" if score else "") + str(clip_info.get("category") or "klip")
         clip_dir = output_dir / clip_name
         clip_dir.mkdir(exist_ok=True)
 
@@ -538,6 +539,14 @@ def _process_single_clip(
                     overlay_files += plan["files"]
                     behind = {"front": True}
                     logger.info(f"  Hook headline di area dada (y={plan['y']}, {plan['size']}px)")
+                    # v6.8: selama headline tampil, caption digeser ke bawah headline (dulu menempel/bertumpuk)
+                    if ass_for_burn:
+                        head_bottom = int(plan["y"]) + len(plan["filters"]) * int(plan["size"] * 1.02)
+                        fs = int(clip_style.get("font_size", 70))
+                        mv = max(230, out_h - head_bottom - 40 - int(fs * 2.3))
+                        if mv < int(clip_style.get("vertical_position", 420)):
+                            clip_style["margin_zones"] = list(clip_style.get("margin_zones") or []) + [(0.0, float(plan["until"]), mv)]
+                            generate_ass_subtitles(segments_for_sub, clip_style, str(subtitle_path), out_w, out_h)
                 elif plan:
                     behind = {"mask": str(mask_file), "filters": plan["filters"], "until": plan["until"]}
                     overlay_files += plan["files"]
@@ -648,6 +657,18 @@ def _process_single_clip(
                     final_clip_path = mastered
             except subprocess.CalledProcessError as exc:
                 logger.warning(f"Mastering audio dilewati: {(exc.stderr or b'')[-300:]!r}")
+        # (v6.8) Tempo adaptif: pembicara lambat dipercepat halus (≤1,08×, nada tetap) — pacing ala kliper pro
+        if edit.get("auto_tempo") and getattr(config, "AUTO_TEMPO", True) and not layout:
+            tempo = editing.plan_tempo(editing.relative_words(clip_info))
+            if tempo > 1.0:
+                tempo_out = clip_dir / f"{clip_name}_tempo.mp4"
+                try:
+                    editing.apply_tempo(str(final_clip_path), str(tempo_out), tempo, _video_encode_args(crf=16))
+                    final_clip_path = tempo_out
+                    clip_info["tempo"] = tempo
+                    logger.info(f"  Tempo {tempo:.2f}× (pembicara lambat → pacing lebih rapat)")
+                except subprocess.CalledProcessError as exc:
+                    logger.warning(f"Tempo dilewati: {(exc.stderr or b'')[-200:]!r}")
         clip_info["stickers"] = [{"t": s["t"], "emoji": s["emoji"]} for s in stickers]
         clip_info["broll"] = [{"t": b["t"], "query": b["query"], "source": b.get("source")} for b in broll]
         clip_info["shakes"] = shakes
@@ -679,11 +700,13 @@ def _process_single_clip(
         else:
             best = []
         first = best[0] if best else {"time": rel_thumb, "face": None}
+        # (v6.8) teks thumbnail khusus 2–5 kata dari Editor-AI (lebih besar & memancing); cadangan: hook layar
+        thumb_txt = clip_info.get("thumb_text") or clip_info.get("hook_text", "")
         create_thumbnail(thumb_src, first["time"], str(thumb_path),
-                         clip_info.get("hook_text", ""), clip_info.get("score", 0), face_box=first.get("face"))
+                         thumb_txt, clip_info.get("score", 0), face_box=first.get("face"))
         if len(best) > 1:
             thumb_alt_path = clip_dir / "thumbnail_b.jpg"
-            alt_hook = (clip_info.get("hook_alternatives") or [clip_info.get("hook_text", "")])[0]
+            alt_hook = (clip_info.get("thumb_alternatives") or clip_info.get("hook_alternatives") or [thumb_txt])[0]
             create_thumbnail(thumb_src, best[1]["time"], str(thumb_alt_path),
                              alt_hook, clip_info.get("score", 0), face_box=best[1].get("face"))
 
@@ -729,7 +752,8 @@ def _process_single_clip(
             "thumbnail": str(thumb_path),
             "thumbnail_alt": str(thumb_alt_path) if thumb_alt_path else None,
             "edit_style": edit,
-            "duration": clip_info["end"] - clip_info["start"]
+            # durasi nyata file akhir (cold open, freeze, tempo ikut terhitung)
+            "duration": round(float(get_video_info(str(final_clip_path)).get("duration") or (clip_info["end"] - clip_info["start"])), 2),
         }
         processed_clip = enrich_clip_for_platforms(processed_clip, opts["target_platform"])
 
@@ -1163,6 +1187,53 @@ def _has_face_metadata(face_bboxes: List) -> bool:
     return bool(face_bboxes and isinstance(face_bboxes[0], dict))
 
 
+def caption_chunks(words: List[Dict], max_words: int = 5, max_chars: int = 30, pause: float = 0.45) -> List[List[Dict]]:
+    """Pecah kata menjadi layar caption yang enak dibaca (v6.8).
+
+    Dulu: potong tiap 5 kata atau di tanda titik → sisa 1 kata ("tujuh.") tampil sendirian, dan caption
+    menyeberangi jeda panjang/pergantian pembicara. Sekarang: potong juga di jeda > `pause` dtk, pergantian
+    pembicara, dan batas karakter; kata yatim digabung ke layar tetangga."""
+    chunks: List[List[Dict]] = []
+    cur: List[Dict] = []
+    for i, w in enumerate(words):
+        if cur:
+            gap = float(w.get("start", 0)) - float(cur[-1].get("end", 0))
+            spk_change = w.get("speaker") and cur[-1].get("speaker") and w.get("speaker") != cur[-1].get("speaker")
+            chars = len(" ".join(str(x.get("word", "")).strip() for x in cur + [w]))
+            if gap > pause or spk_change or len(cur) >= max_words or chars > max_chars:
+                chunks.append(cur)
+                cur = []
+        cur.append(w)
+        if str(w.get("word", "")).strip().endswith((".", "!", "?")):
+            chunks.append(cur)
+            cur = []
+    if cur:
+        chunks.append(cur)
+    # gabungkan kata yatim ke layar sebelumnya (atau berikutnya) bila dekat & pembicara sama
+    merged: List[List[Dict]] = []
+    for ch in chunks:
+        if len(ch) == 1 and merged:
+            prev = merged[-1]
+            gap = float(ch[0].get("start", 0)) - float(prev[-1].get("end", 0))
+            same = not (ch[0].get("speaker") and prev[-1].get("speaker") and ch[0]["speaker"] != prev[-1]["speaker"])
+            ends_sentence = str(prev[-1].get("word", "")).strip().endswith((".", "!", "?"))
+            if gap <= 0.6 and same and not ends_sentence and len(prev) <= max_words and \
+                    len(" ".join(str(x.get("word", "")).strip() for x in prev + ch)) <= max_chars + 10:
+                prev.extend(ch)
+                continue
+        merged.append(ch)
+    out: List[List[Dict]] = []
+    for ch in merged:  # yatim di depan → gabung ke layar berikutnya
+        if out and len(out[-1]) == 1 and len(ch) <= max_words and \
+                not str(out[-1][-1].get("word", "")).strip().endswith((".", "!", "?")) and \
+                len(" ".join(str(x.get("word", "")).strip() for x in out[-1] + ch)) <= max_chars + 10 and \
+                float(ch[0].get("start", 0)) - float(out[-1][-1].get("end", 0)) <= 0.6:
+            out[-1] = out[-1] + ch
+            continue
+        out.append(ch)
+    return out
+
+
 def build_subtitle_segments_for_clip(clip_info: Dict) -> List[Dict]:
     """Build subtitle events relative to the clipped video timeline."""
     clip_start = float(clip_info["start"])
@@ -1174,15 +1245,7 @@ def build_subtitle_segments_for_clip(clip_info: Dict) -> List[Dict]:
     ]
 
     if words:
-        chunks = []
-        current = []
-        for word in words:
-            current.append(word)
-            if len(current) >= 5 or str(word.get("word", "")).endswith((".", "!", "?")):
-                chunks.append(current)
-                current = []
-        if current:
-            chunks.append(current)
+        chunks = caption_chunks(words)
 
         return [
             {
@@ -1195,6 +1258,8 @@ def build_subtitle_segments_for_clip(clip_info: Dict) -> List[Dict]:
                         "start": max(float(item["start"]) - clip_start, 0),
                         "end": min(max(float(item["end"]) - clip_start, 0), clip_duration),
                         "word": str(item["word"]).strip(),
+                        # v6.8: tekanan suara ikut ke caption (kata yang ditekan "pop" lebih besar)
+                        **({"stress": item["stress"]} if item.get("stress") else {}),
                     }
                     for item in chunk
                 ],

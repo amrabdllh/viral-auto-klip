@@ -296,9 +296,12 @@ def apply_logo(src: str, out: str, logo: str, position: str = "top-left", size: 
     vw, vh = info["width"], info["height"]
     lw = max(16, int(vw * max(0.05, min(0.6, size))))
     m = int(vw * margin)
-    pos = {"top-left": (f"{m}", f"{m + int(vh * 0.03)}"), "top-right": (f"W-w-{m}", f"{m + int(vh * 0.03)}"),
-           "bottom-left": (f"{m}", f"H-h-{m}"), "bottom-right": (f"W-w-{m}", f"H-h-{m}"),
-           "center": ("(W-w)/2", "(H-h)/2")}
+    # 9 posisi. Baris bawah sengaja di atas ±13% tinggi bawah (tombol & deskripsi TikTok/Reels menutupi area itu)
+    top, mid, bot = f"{m + int(vh * 0.03)}", "(H-h)/2", f"H-h-{int(vh * 0.13)}"
+    left, cx, right = f"{m}", "(W-w)/2", f"W-w-{m}"
+    pos = {"top-left": (left, top), "top-center": (cx, top), "top-right": (right, top),
+           "middle-left": (left, mid), "center": (cx, mid), "middle-right": (right, mid),
+           "bottom-left": (left, bot), "bottom-center": (cx, bot), "bottom-right": (right, bot)}
     if custom_xy:
         x, y = str(int(vw * custom_xy[0])), str(int(vh * custom_xy[1]))
     else:
@@ -306,7 +309,54 @@ def apply_logo(src: str, out: str, logo: str, position: str = "top-left", size: 
     fc = (f"[1:v]scale={lw}:-1,format=rgba,colorchannelmixer=aa={max(0.05, min(1, opacity)):.2f}[lg];"
           f"[0:v][lg]overlay=x={x}:y={y}[v]")
     run(["-i", src, "-loop", "1", "-i", logo, "-filter_complex", fc, "-map", "[v]", "-map", "0:a?",
-         *venc(18), "-c:a", "copy", "-t", f"{info['duration']:.3f}", "-movflags", "+faststart", out])
+         *venc(16), "-c:a", "copy", "-t", f"{info['duration']:.3f}", "-movflags", "+faststart", out])
+    return out
+
+
+OUTRO_IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp")
+OUTRO_VIDEO_EXT = (".mp4", ".mov", ".webm", ".mkv", ".m4v")
+OUTRO_MAX_SEC = 15.0
+
+
+def append_outro(src: str, out: str, outro: str, image_sec: float = 3.0, fade: float = 0.4) -> str:
+    """Sambungkan penutup (gambar atau video pendek milik pengguna) di akhir klip dengan transisi fade.
+
+    Ukuran/rasio penutup bebas: diisi ke ukuran klip dengan latar blur (tanpa pita hitam). Gambar tampil
+    `image_sec` detik tanpa suara (audio klip memudar keluar); video memakai suaranya sendiri bila ada,
+    maksimal 15 dtk."""
+    info = probe(src)
+    w, h, fps, dur = info["width"], info["height"], info["fps"] or 30.0, info["duration"]
+    is_img = Path(outro).suffix.lower() in OUTRO_IMAGE_EXT
+    if is_img:
+        o_dur, o_audio = max(0.5, min(OUTRO_MAX_SEC, float(image_sec))), False
+        o_in = ["-loop", "1", "-framerate", f"{fps:.3f}", "-t", f"{o_dur:.3f}", "-i", outro]
+    else:
+        oi = probe(outro)
+        o_dur, o_audio = max(0.3, min(OUTRO_MAX_SEC, oi["duration"])), oi["has_audio"]
+        o_in = ["-t", f"{o_dur:.3f}", "-i", outro]
+    fade = max(0.0, min(float(fade), dur / 3, o_dur / 3))
+    inputs = ["-i", src, *o_in]
+    n = 2
+    a_main = "[0:a]" if info["has_audio"] else None
+    if a_main is None:
+        inputs += ["-f", "lavfi", "-t", f"{dur:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
+        a_main, n = f"[{n}:a]", n + 1
+    if o_audio:
+        a_out = "[1:a]"
+    else:
+        inputs += ["-f", "lavfi", "-t", f"{o_dur:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
+        a_out = f"[{n}:a]"
+    norm_a = "aformat=sample_rates=48000:channel_layouts=stereo,aresample=async=1"
+    fc = (f"[1:v]{fit_filter(w, h, 'blur')},fps={fps:.3f},format=yuv420p,settb=AVTB[o];"
+          f"[0:v]fps={fps:.3f},format=yuv420p,setsar=1,settb=AVTB[m];"
+          f"{a_main}{norm_a}[am];{a_out}{norm_a},atrim=0:{o_dur:.3f}[ao];")
+    if fade > 0.05:
+        fc += (f"[m][o]xfade=transition=fade:duration={fade:.3f}:offset={dur - fade:.3f}[v];"
+               f"[am][ao]acrossfade=d={fade:.3f}[a]")
+    else:
+        fc += "[m][o]concat=n=2:v=1:a=0[v];[am][ao]concat=n=2:v=0:a=1[a]"
+    run([*inputs, "-filter_complex", fc, "-map", "[v]", "-map", "[a]", *venc(16), *AENC,
+         "-movflags", "+faststart", out])
     return out
 
 

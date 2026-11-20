@@ -14,7 +14,10 @@ const VIDEO_MODES = [{ v: "single", l: "1 pembicara" }, { v: "podcast", l: "Podc
 const WHISPER_DEVICES = [{ v: "", l: "Ikut Pengaturan" }, { v: "elevenlabs", l: "ElevenLabs Scribe (paling akurat)" }, { v: "auto", l: "Whisper di GPU (gratis)" }, { v: "cpu", l: "Whisper di CPU (lambat)" }, { v: "groq", l: "Groq Whisper (cloud)" }];
 const EDIT_STYLES = [{ v: "", l: "Ikut Pengaturan" }, { v: "minimal", l: "Minimal" }, { v: "dinamis", l: "Dinamis" }, { v: "maksimal", l: "Maksimal" }];
 const captionSelect = (v = "viral") => UI.select("caption_style", "Gaya caption", CAPTION_STYLES(), v);
-const CAPTION_STYLES = () => STATE.catalog?.caption_styles || ["viral", "modern", "tiktok_bold", "karaoke", "neon", "gradient", "minimal", "emoji"];
+const CAPTION_LABELS = { viral: "Viral (kuning tebal)", modern: "Modern", tiktok_bold: "TikTok Bold", karaoke: "Karaoke", neon: "Neon",
+  gradient: "Gradasi", minimal: "Minimal", emoji: "Emoji", hormozi: "Hormozi", mrbeast: "MrBeast", clean: "Bersih", bold: "Tebal" };
+const CAPTION_STYLES = () => (STATE.catalog?.caption_styles || ["viral", "modern", "tiktok_bold", "karaoke", "neon", "gradient", "minimal", "emoji"])
+  .map((s) => (typeof s === "string" ? { v: s, l: CAPTION_LABELS[s] || s.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) } : s));
 const aiSelects = () => {
   const st = STATE.status?.ai;
   const provs = (st?.providers || []).map((p) => ({ v: p.provider, l: `${p.label || p.provider}${p.configured ? "" : " (belum diset)"}`, disabled: !p.configured }));
@@ -147,7 +150,7 @@ PAGES.analisis = { render(view, q) {
         ${UI.num("max_duration", "Durasi maksimum", { value: 60, min: 10, max: 180, hint: "detik" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
         ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "single")}${UI.select("language", "Bahasa video", LANGS, "id")}</div>`) +
       UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Opsional — klip yang menyebut kata ini diutamakan." })}</div>
-        <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Logo Brand Kit")}</div>`) +
+        <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
       UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 55, min: 0, max: 100 })}${UI.tri("jump_cuts", "Potong jeda")}${UI.tri("dynamic_zoom", "Zoom dinamis")}${UI.tri("progress_bar", "Progress bar")}
         ${UI.tri("sfx", "SFX transisi")}${UI.tri("end_cta", "Ajakan di akhir")}${UI.select("color_grade", "Warna", [{ v: "", l: "Ikut preset" }, "none", "natural", "vibrant", "cinematic"], "")}
         ${UI.tri("cold_open", "Cold open + rewind")}${UI.tri("caption_fx", "Caption animasi + emoji")}${UI.tri("sound_design", "Sound design")}
@@ -157,7 +160,7 @@ PAGES.analisis = { render(view, q) {
         <div class="fields">${UI.select("whisper_device", "Mesin transkripsi", WHISPER_DEVICES, "")}
         ${UI.select("whisper_model", "Model Whisper", ["", "small", "medium", "large-v3-turbo", "large-v3"].map((v) => ({ v, l: v || "Ikut Pengaturan" })), "")}${aiSelects()}</div>
         <div class="switches">${UI.toggle("use_llm", "Pakai AI memilih & menulis")}${UI.toggle("publish_package", "Paket upload per platform")}${UI.toggle("audio_enhance", "Perjernih audio")}</div>`),
-      foot: footAction("Proses dengan AI", "sparkles", "Rata-rata 1–3 menit per klip di GPU.") }),
+      foot: footAction("Proses dengan AI", "sparkles", "±3–5 menit per klip di GPU (upscale + restorasi wajah AI).") }),
     aside: UI.aside("Cara kerja", ["Video diunduh (≥1080p bila tersedia) atau dipakai dari file upload.", "Ucapan ditranskrip per kata (ElevenLabs Scribe, atau Whisper sebagai cadangan).",
       "AI membaca transkrip & memilih momen dengan hook kuat.", "Tiap klip di-reframe mengikuti wajah, diberi caption, jump cut, zoom & thumbnail.",
       "AI menulis judul, caption & hashtag. Hasil bisa langsung dijadwalkan."], UI.banner("info", "Boleh pindah halaman — progres tetap jalan di <a href='#jobs'>Antrean Job</a>.")) });
@@ -179,7 +182,7 @@ PAGES.live = { render(view, q) {
         ${UI.select("backlog_min", "Mulai rekam dari", BACKLOG, 20, { numeric: true, hint: "YouTube menyimpan ±1 jam siaran ke belakang." })}${UI.select("window_min", "Buat klip", WINDOWS, 10, { numeric: true })}
         ${UI.num("clips_per_window", "Maks klip per jendela", { value: 3, min: 1, max: 8 })}${UI.select("language", "Bahasa siaran", LANGS, "id")}</div>`) +
       UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}</div>
-        <div class="switches">${UI.toggle("use_chat", "Baca chat live", { sub: "Lonjakan chat & Super Chat jadi petunjuk momen seru" })}${UI.toggle("cold_open", "Cold open + rewind")}${UI.toggle("sound_design", "Sound design")}${UI.toggle("caption_fx", "Caption animasi + emoji")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Logo Brand Kit")}</div>`) +
+        <div class="switches">${UI.toggle("use_chat", "Baca chat live", { sub: "Lonjakan chat & Super Chat jadi petunjuk momen seru" })}${UI.toggle("cold_open", "Cold open + rewind")}${UI.toggle("sound_design", "Sound design")}${UI.toggle("caption_fx", "Caption animasi + emoji")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
       UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 45, min: 0, max: 100 })}${UI.num("min_duration", "Durasi minimum", { value: 15, min: 5, max: 120, hint: "detik" })}
         ${UI.num("max_duration", "Durasi maksimum", { value: 60, min: 10, max: 180, hint: "detik" })}${UI.num("max_hours", "Rekam paling lama", { value: 6, min: 1, max: 12, hint: "jam" })}
         ${UI.select("layout", "Layout", [{ v: "", l: "Otomatis (facecam → split)" }, { v: "gaming", l: "Selalu split facecam + gameplay" }, { v: "face", l: "Ikuti wajah (crop 9:16)" }], "")}
@@ -258,7 +261,7 @@ PAGES.manual = { render(view) {
       ${UI.panel({ title: "2 · Tandai segmen", sub: "Putar video, tandai mulai & selesai, lalu tambahkan.", body: `<div class="stage"><video id="v" controls></video></div><div id="mk"></div>` })}
       ${UI.panel({ id: "f", title: "3 · Render", body: `<div class="fields">${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}${UI.select("video_mode", "Tipe video", VIDEO_MODES.slice(0, 3), "single")}
         ${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}${UI.select("language", "Bahasa", LANGS, "id")}</div>
-        <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu judul di awal", { checked: false })}${UI.toggle("brand_kit", "Logo Brand Kit")}</div>`,
+        <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu judul di awal", { checked: false })}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`,
         foot: footAction("Render segmen", "scissors") })}</div>`,
     aside: UI.panel({ title: "Segmen", head: `<span class="pill" id="cnt">0</span>`, body: `<div class="list" id="segs"></div>` }) });
   const src = sourceInput($("#src"));
@@ -291,7 +294,7 @@ PAGES.splitcam = { render(view) {
         <div class="box" id="bg"><span class="b-lbl">Gameplay</span><span class="b-rs"></span></div><div class="box teal" id="bc"><span class="b-lbl">Facecam</span><span class="b-rs"></span></div></div>
         <div id="mk"></div><div class="small muted" id="segs">Tanpa segmen = seluruh video dirender.</div>` })}
       ${UI.panel({ id: "f", title: "3 · Tata letak", body: `<div class="fields two">${UI.range("cam_ratio", "Tinggi facecam", { value: 0.38, min: 0.2, max: 0.6, step: 0.01, fmt: "%" })}
-        ${UI.field("Posisi facecam", `<div id="pos"></div>`)}${captionSelect()}</div><div class="switches">${UI.toggle("enable_captions", "Caption otomatis", { checked: false })}${UI.toggle("brand_kit", "Logo Brand Kit")}</div>`,
+        ${UI.field("Posisi facecam", `<div id="pos"></div>`)}${captionSelect()}</div><div class="switches">${UI.toggle("enable_captions", "Caption otomatis", { checked: false })}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`,
         foot: footAction("Render Split Cam", "splitcam") })}</div>`,
     aside: UI.aside("Tips", ["Kotak <b>Facecam</b> (hijau) menandai wajah streamer.", "Kotak <b>Gameplay</b> (oranye) menandai area permainan.", "Atur tinggi facecam 30–40% agar gameplay tetap jelas."]) });
   const src = sourceInput($("#src"));
@@ -317,7 +320,7 @@ PAGES.bola = { render(view) {
       UI.section("Highlight", `<div class="fields">${UI.num("num_clips", "Jumlah highlight", { value: 6, min: 1, max: 20 })}${UI.num("pre_sec", "Sebelum puncak", { value: 12, min: 3, max: 40, hint: "detik" })}
         ${UI.num("post_sec", "Sesudah puncak", { value: 8, min: 2, max: 30, hint: "detik" })}${UI.select("aspect", "Rasio", ["9:16", "1:1", "16:9"], "9:16")}${UI.select("fit_mode", "Isi frame", FIT, "blur")}
         ${UI.text("caption_text", "Label di layar", { value: "MOMEN KUNCI" })}</div>
-        <div class="switches">${UI.toggle("use_transcript", "Pakai transkrip komentator", { sub: "Lebih akurat, lebih lama" })}${UI.toggle("brand_kit", "Logo Brand Kit")}</div>`) +
+        <div class="switches">${UI.toggle("use_transcript", "Pakai transkrip komentator", { sub: "Lebih akurat, lebih lama" })}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
       UI.more("Teriakan komentator (TTS)", `${UI.toggle("commentary", "Tambahkan teriakan di puncak momen", { checked: false })}${UI.text("commentary_text", "Kalimat komentator", { value: "Gooool! Momen luar biasa di pertandingan ini!" })}<div id="vp"></div>`),
       foot: footAction("Cari highlight", "ball") }),
     aside: UI.aside("Cara kerja", ["Energi audio diukur tiap 0,5 detik.", "Lonjakan dibanding suasana ±40 detik sekitarnya = momen heboh.", "Kata seperti “gol”, “penalti”, “offside” di transkrip menambah skor.", "Tiap puncak dipotong (sebelum + sesudah) dan dirender vertikal."],
@@ -388,7 +391,7 @@ PAGES.editor = { render(view) {
       ${UI.panel({ id: "f", title: "3 · Ekspor", body: `<div class="fields">${UI.select("speed", "Kecepatan", [0.5, 0.75, 1, 1.25, 1.5, 2].map((v) => ({ v, l: v + "×" })), 1, { numeric: true })}
         ${UI.select("aspect", "Rasio", [{ v: "original", l: "Asli" }, "9:16", "1:1", "4:5", "16:9"], "original")}${UI.select("fit_mode", "Isi frame", FIT, "blur")}${captionSelect()}</div>
         ${UI.field("Musik latar", `<div id="mp"></div>`)}<div class="fields two">${UI.range("music_volume", "Volume musik", { value: 0.15, min: 0.03, max: 0.6, step: 0.01, fmt: "%" })}</div>
-        <div class="switches">${UI.toggle("subtitles", "Caption otomatis", { checked: false })}${UI.toggle("brand_kit", "Logo Brand Kit")}</div>`, foot: footAction("Ekspor video", "download") })}</div>`,
+        <div class="switches">${UI.toggle("subtitles", "Caption otomatis", { checked: false })}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`, foot: footAction("Ekspor video", "download") })}</div>`,
     aside: UI.aside("Urutan proses", ["Potong sesuai tanda mulai/selesai.", "Ubah kecepatan.", "Ubah rasio (crop / blur / letterbox).", "Tempel teks & gambar (waktu dihitung setelah dipotong).", "Caption otomatis, musik, lalu logo."]) });
   const src = sourceInput($("#src"));
   const items = [], cut = { start: 0, end: 0 };
@@ -753,30 +756,59 @@ PAGES.upload = { render(view) {
 } };
 
 /* ================================================================== BRAND KIT */
+// v6.8: watermark gambar 9 posisi (+ geser bebas) & penutup klip (gambar / video pendek) di akhir setiap klip
+const LOGO_POS = [
+  ["top-left", "↖", "Kiri atas"], ["top-center", "↑", "Atas tengah"], ["top-right", "↗", "Kanan atas"],
+  ["middle-left", "←", "Kiri tengah"], ["center", "•", "Tengah"], ["middle-right", "→", "Kanan tengah"],
+  ["bottom-left", "↙", "Kiri bawah"], ["bottom-center", "↓", "Bawah tengah"], ["bottom-right", "↘", "Kanan bawah"],
+];
 PAGES.brand = { render(view) {
-  view.innerHTML = `<div class="page">${pageHead("Brand Kit", "Logo merekmu, terpasang otomatis di semua klip: Analisis AI, Atur Manual, Split Cam, Highlight, Editor, dan video AI.")}
+  view.innerHTML = `<div class="page">${pageHead("Brand Kit", "Watermark logo & penutup klip milikmu, terpasang otomatis di semua klip: Analisis AI, Atur Manual, Split Cam, Highlight, Editor, dan video AI.")}
     <div class="layout" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
       ${UI.panel({ title: "Pratinjau", body: `<div class="phone" id="ph"><img class="logo" id="lg" alt="Logo"><div class="ph-cap">Ini rahasia kopi murah<br>yang bikin antre</div><div class="ph-safe" id="safe" hidden></div></div>
-        <label class="switch" style="justify-content:center"><input type="checkbox" id="sz"><span>Tampilkan area tombol TikTok/Reels</span></label>` })}
-      ${UI.panel({ title: "Pengaturan", body: UI.section("Logo", `<div id="up"></div><div class="row" id="logoRow" hidden><span class="small muted">Logo terpasang.</span><span class="spacer"></span>${UI.btn("Hapus logo", { size: "sm", kind: "danger", ico: "trash", id: "rm" })}</div>`) +
-        UI.section("Posisi", `<div id="pos"></div><p class="tiny muted">Pojok bawah tertutup tombol & caption platform. Pilih “Atur sendiri” lalu geser logo di pratinjau.</p>`) +
-        UI.section("Tampilan", `<div class="fields two">${UI.field("Ukuran", `<input type="range" id="size" min="0.05" max="0.6" step="0.01">`, { val: '<span class="val" id="szv"></span>' })}
+        <label class="switch" style="justify-content:center"><input type="checkbox" id="sz"><span>Tampilkan area tombol TikTok/Reels</span></label>
+        <div id="outroPrev" class="outro-prev" hidden><div class="tiny muted" style="margin-bottom:6px">Penutup di akhir klip</div><div id="outroMedia"></div></div>` })}
+      ${UI.panel({ title: "Pengaturan", body: UI.section("Logo / watermark", `<div id="up"></div><div class="row" id="logoRow" hidden><span class="small muted">Logo terpasang.</span><span class="spacer"></span>${UI.btn("Hapus logo", { size: "sm", kind: "danger", ico: "trash", id: "rm" })}</div>`) +
+        UI.section("Posisi logo", `<div class="posgrid" id="pos">${LOGO_POS.map(([v, a, l]) => `<button type="button" data-v="${v}" title="${l}" aria-label="${l}">${a}</button>`).join("")}</div>
+          <div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="custom">${icon("sliders")}<span>Atur sendiri (geser di pratinjau)</span></button><span class="small muted" id="posLabel"></span></div>
+          <p class="tiny muted">Baris bawah otomatis ditaruh sedikit di atas area tombol & deskripsi TikTok/Reels agar tidak tertutup.</p>`) +
+        UI.section("Tampilan logo", `<div class="fields two">${UI.field("Ukuran", `<input type="range" id="size" min="0.05" max="0.6" step="0.01">`, { val: '<span class="val" id="szv"></span>' })}
           ${UI.field("Transparansi", `<input type="range" id="op" min="0.1" max="1" step="0.05">`, { val: '<span class="val" id="opv"></span>' })}</div>
-          <label class="switch"><input type="checkbox" id="auto"><span>Pasang otomatis di semua klip<span class="sub">Bisa dimatikan per proses.</span></span></label>`),
+          <label class="switch"><input type="checkbox" id="auto"><span>Pasang logo otomatis di semua klip<span class="sub">Bisa dimatikan per proses.</span></span></label>`) +
+        UI.section("Penutup klip (end card)", `<p class="tiny muted" style="margin-top:0">Gambar atau video pendek (maks 15 dtk) yang disambung di akhir setiap klip dengan transisi fade — mis. ajakan follow, logo animasi, atau promo. Rasio bebas: otomatis diberi latar blur.</p>
+          <div id="upOutro"></div><div class="row" id="outroRow" hidden><span class="small muted" id="outroInfo">Penutup terpasang.</span><span class="spacer"></span>${UI.btn("Hapus penutup", { size: "sm", kind: "danger", ico: "trash", id: "rmOutro" })}</div>
+          <div id="outroDurWrap">${UI.field("Lama tampil (gambar)", `<input type="range" id="odur" min="1" max="10" step="0.5">`, { val: '<span class="val" id="odurv"></span>' })}</div>
+          <label class="switch"><input type="checkbox" id="oauto"><span>Pasang penutup otomatis di semua klip<span class="sub">Ikut saklar “Brand Kit” di tiap proses.</span></span></label>`),
         foot: `<span class="spacer"></span>${UI.btn("Simpan", { ico: "check", kind: "primary", id: "save" })}` })}</div></div>`;
-  let kit = {}, logoPath = "";
+  let kit = {}, logoPath = "", outroPath = "";
   const ph = $("#ph"), lg = $("#lg");
+  const IMG_RE = /\.(png|jpe?g|webp)$/i;
   const place = () => {
     lg.style.width = kit.size * 100 + "%"; lg.style.opacity = kit.opacity;
-    lg.style.transform = ""; lg.style.left = lg.style.right = lg.style.top = "";
-    if (kit.position === "custom") { lg.style.left = (kit.x ?? 0.05) * 100 + "%"; lg.style.top = (kit.y ?? 0.06) * 100 + "%"; }
-    else if (kit.position === "center") { lg.style.left = "50%"; lg.style.top = "50%"; lg.style.transform = "translate(-50%,-50%)"; }
-    else if (kit.position === "top-right") { lg.style.right = "4%"; lg.style.top = "7%"; }
-    else { lg.style.left = "4%"; lg.style.top = "7%"; }
-    lg.style.cursor = kit.position === "custom" ? "move" : "default";
+    lg.style.transform = ""; lg.style.left = lg.style.right = lg.style.top = lg.style.bottom = "";
+    const p = kit.position;
+    if (p === "custom") { lg.style.left = (kit.x ?? 0.05) * 100 + "%"; lg.style.top = (kit.y ?? 0.06) * 100 + "%"; }
+    else {
+      const [row, col] = p === "center" ? ["middle", "center"] : p.split("-");
+      const tx = col === "center" ? "-50%" : "0", ty = row === "middle" ? "-50%" : "0";
+      if (col === "left") lg.style.left = "4%"; else if (col === "right") lg.style.right = "4%"; else lg.style.left = "50%";
+      if (row === "top") lg.style.top = "7%"; else if (row === "bottom") lg.style.bottom = "13%"; else lg.style.top = "50%";
+      lg.style.transform = `translate(${tx},${ty})`;
+    }
+    lg.style.cursor = p === "custom" ? "move" : "default";
+    $$("#pos button").forEach((b) => b.classList.toggle("on", b.dataset.v === p));
+    $("#custom").classList.toggle("primary", p === "custom");
+    $("#posLabel").textContent = p === "custom" ? "Geser logo di pratinjau" : (LOGO_POS.find((x) => x[0] === p) || [, , ""])[2];
     $("#szv").textContent = Math.round(kit.size * 100) + "%"; $("#opv").textContent = Math.round(kit.opacity * 100) + "%";
   };
   const showLogo = (src) => { lg.src = src; lg.style.display = "block"; $("#logoRow").hidden = false; };
+  const showOutro = (path, src) => {
+    const isImg = IMG_RE.test(path);
+    $("#outroMedia").innerHTML = isImg ? `<img src="${esc(src)}" alt="Penutup">` : `<video src="${esc(src)}" muted loop autoplay playsinline></video>`;
+    $("#outroPrev").hidden = false; $("#outroRow").hidden = false;
+    $("#outroInfo").textContent = isImg ? "Penutup gambar terpasang." : "Penutup video terpasang.";
+    $("#outroDurWrap").hidden = !isImg;
+  };
   lg.addEventListener("pointerdown", (e) => {
     if (kit.position !== "custom") return;
     e.preventDefault(); const r = ph.getBoundingClientRect(); lg.setPointerCapture(e.pointerId);
@@ -785,20 +817,28 @@ PAGES.brand = { render(view) {
     const up = () => { lg.removeEventListener("pointermove", mv); lg.removeEventListener("pointerup", up); };
     lg.addEventListener("pointermove", mv); lg.addEventListener("pointerup", up);
   });
+  $("#pos").onclick = (e) => { const b = e.target.closest("button[data-v]"); if (b) { kit.position = b.dataset.v; place(); } };
+  $("#custom").onclick = () => { kit.position = "custom"; place(); };
   dropzone($("#up"), { accept: "image/png,image/jpeg,image/webp", title: "Upload logo", sub: "PNG transparan paling rapi · maks 5 MB", ico: "image", onUploaded: (i) => { logoPath = i.path; showLogo(fileUrl(i.path)); place(); } });
+  dropzone($("#upOutro"), { accept: "image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm", title: "Upload penutup", sub: "Gambar atau video ≤ 15 dtk", ico: "film", onUploaded: (i) => { outroPath = i.path; showOutro(i.path, fileUrl(i.path)); } });
   api("/api/brand-kit").then((k) => {
-    kit = { position: "top-left", size: 0.22, opacity: 0.9, auto: true, ...k };
+    kit = { position: "top-left", size: 0.22, opacity: 0.9, auto: true, outro_duration: 3, outro_auto: true, ...k };
     if (k.has_logo) showLogo(fileUrl(k.logo) + "&t=" + Date.now());
+    if (k.has_outro) showOutro(k.outro, fileUrl(k.outro) + "&t=" + Date.now());
     $("#size").value = kit.size; $("#op").value = kit.opacity; $("#auto").checked = kit.auto;
-    seg($("#pos"), [{ v: "top-left", l: "Kiri atas" }, { v: "top-right", l: "Kanan atas" }, { v: "center", l: "Tengah" }, { v: "custom", l: "Atur sendiri" }], kit.position, (v) => { kit.position = v; place(); }, { block: true });
+    $("#odur").value = kit.outro_duration; $("#odurv").textContent = kit.outro_duration + " dtk"; $("#oauto").checked = kit.outro_auto;
     place();
   });
   $("#size").oninput = (e) => { kit.size = +e.target.value; place(); };
   $("#op").oninput = (e) => { kit.opacity = +e.target.value; place(); };
+  $("#odur").oninput = (e) => { kit.outro_duration = +e.target.value; $("#odurv").textContent = kit.outro_duration + " dtk"; };
   $("#sz").onchange = (e) => ($("#safe").hidden = !e.target.checked);
-  $("#rm").onclick = () => confirmModal("Hapus logo?", "Klip berikutnya tidak akan diberi logo.", "Hapus", async () => { await api("/api/brand-kit", { body: { ...kit, logo: null, remove_logo: true } }).catch(fail); lg.style.display = "none"; $("#logoRow").hidden = true; logoPath = ""; toast("Logo dihapus"); });
+  const body = (extra = {}) => ({ logo: logoPath || null, position: kit.position, size: kit.size, opacity: kit.opacity, auto: $("#auto").checked,
+    x: kit.x ?? null, y: kit.y ?? null, outro: outroPath || null, outro_duration: kit.outro_duration, outro_auto: $("#oauto").checked, ...extra });
+  $("#rm").onclick = () => confirmModal("Hapus logo?", "Klip berikutnya tidak akan diberi logo.", "Hapus", async () => { await api("/api/brand-kit", { body: body({ logo: null, remove_logo: true }) }).catch(fail); lg.style.display = "none"; $("#logoRow").hidden = true; logoPath = ""; toast("Logo dihapus"); });
+  $("#rmOutro").onclick = () => confirmModal("Hapus penutup?", "Klip berikutnya tidak akan diberi penutup.", "Hapus", async () => { await api("/api/brand-kit", { body: body({ outro: null, remove_outro: true }) }).catch(fail); $("#outroPrev").hidden = true; $("#outroRow").hidden = true; $("#outroMedia").innerHTML = ""; outroPath = ""; toast("Penutup dihapus"); });
   $("#save").onclick = (e) => busy(e.currentTarget, async () => {
-    try { await api("/api/brand-kit", { body: { logo: logoPath || null, position: kit.position, size: kit.size, opacity: kit.opacity, auto: $("#auto").checked, x: kit.x ?? null, y: kit.y ?? null } }); toast("Brand Kit tersimpan"); }
+    try { await api("/api/brand-kit", { body: body() }); logoPath = ""; outroPath = ""; toast("Brand Kit tersimpan"); }
     catch (err) { fail(err); }
   });
 } };

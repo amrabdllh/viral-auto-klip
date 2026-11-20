@@ -228,7 +228,7 @@ def _elevenlabs_tts(text: str, out: str, voice: str, speed: float) -> List[Dict]
     Path(out).write_bytes(base64.b64decode(data["audio_base64"]))
     align = data.get("alignment") or {}
     chars, starts, ends = align.get("characters", []), align.get("character_start_times_seconds", []), align.get("character_end_times_seconds", [])
-    words, cur, ws = [], "", None
+    words, cur, ws, prev_e = [], "", None, 0.0
     for ch, s, e in zip(chars, starts, ends):
         if ch.isspace():
             if cur:

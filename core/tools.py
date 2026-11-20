@@ -91,6 +91,7 @@ def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> No
             out = apply_brand(src, tmp, force=force)
             if out != src:
                 Path(out).replace(src)
+                c["duration"] = round(ffx.probe(src)["duration"], 2)  # penutup klip menambah durasi
         except Exception as exc:
             ctx.log(f"Logo Brand Kit gagal di {Path(c['file_path']).name}: {exc}")
 
@@ -98,7 +99,7 @@ def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> No
 def render_options(params: Dict) -> Dict:
     aspect = params.get("output_type", "Vertical")
     return dict(
-        style_name=params.get("caption_style", "modern"),
+        style_name=params.get("caption_style") or "viral",  # sama dengan default form UI
         caption_overrides={k: params[k] for k in ("font_size", "vertical_position") if params.get(k)},
         enable_face_reframe=params.get("enable_face_reframe", True),
         add_watermark=bool(params.get("watermark_text")),
@@ -114,7 +115,7 @@ def render_options(params: Dict) -> Dict:
         edit_opts={k: params.get(k) for k in ("jump_cuts", "dynamic_zoom", "progress_bar", "sfx", "color_grade",
                                                "smart_thumbnail", "end_cta", "cold_open", "sound_design",
                                                "caption_fx", "audio_master", "speaker_cam", "broll", "shake", "freeze",
-                                               "lower_third", "censor", "pro_fx")} | {"style": params.get("edit_style", "")},
+                                               "lower_third", "censor", "pro_fx", "auto_tempo")} | {"style": params.get("edit_style", "")},
         # v6.4: "auto" = facecam streamer terdeteksi → split wajah/gameplay; podcast/grup tetap reframe wajah
         layout=params.get("layout") or ("face" if params.get("video_mode") in ("podcast", "group") else "auto"),
         lower_third=params.get("_lower_third") or None,
@@ -376,13 +377,14 @@ def highlight_bola(ctx: JobContext) -> Dict:
     ctx.progress(45, "Render", f"{len(picks)} momen terdeteksi")
     mode = p.get("fit_mode", "blur")
     w, h = ffx.size_for(p.get("aspect", "9:16"))
+    crop = ffx.auto_crop(video)  # sumber berbingkai (border + logo channel) → hanya area gambar
     clips = []
     for i, peak in enumerate(picks):
         ctx.progress(45 + int(45 * i / len(picks)), "Render", f"Highlight {i + 1}/{len(picks)} @ {int(peak // 60)}:{int(peak % 60):02d}")
         start, end = max(0.0, peak - pre), min(duration, peak + post)
         raw = ctx.dir / f"_hl_{i:02d}.mp4"
         ffx.run(["-ss", f"{start:.2f}", "-i", video, "-t", f"{end - start:.2f}", "-filter_complex",
-                 f"[0:v]{ffx.fit_filter(w, h, mode)},fps=30,format=yuv420p[v]", "-map", "[v]", "-map", "0:a?",
+                 f"[0:v]{crop}{ffx.fit_filter(w, h, mode)},fps=30,format=yuv420p[v]", "-map", "[v]", "-map", "0:a?",
                  *ffx.venc(19), *ffx.AENC, str(raw)])
         out = ctx.dir / f"highlight_{i + 1:02d}.mp4"
         label = (p.get("caption_text") or "MOMEN KUNCI").strip()
@@ -565,8 +567,9 @@ def transcript_job(ctx: JobContext) -> Dict:
             origin = "dokumen"
         else:
             video = resolve_source(ctx, p)
-            segments, _ = transcribe(ctx, video, p, 25)
-            origin = "Whisper"
+            segments, tinfo = transcribe(ctx, video, p, 25)
+            dev = str((tinfo or {}).get("device") or whisper_device(p)[0])
+            origin = {"elevenlabs": "ElevenLabs Scribe", "groq": "Groq Whisper"}.get(dev, f"Whisper ({dev})")
             title = title or Path(video).stem
     if p.get("translate_to"):
         ctx.progress(70, "Terjemah", f"Menerjemahkan ke {p['translate_to']}")

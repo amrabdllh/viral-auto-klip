@@ -35,11 +35,13 @@ _SCHEMA = {
         "hook_text": {"type": "string"}, "hook_quote": {"type": "string"},
         "hook_alternatives": {"type": "array", "items": {"type": "string"}},
         "title": {"type": "string"}, "title_quote": {"type": "string"},
+        "thumb_text": {"type": "string"},
+        "thumb_alternatives": {"type": "array", "items": {"type": "string"}},
         "caption": {"type": "string"},
         "hashtags": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["standalone", "hook", "payoff", "emotion", "clarity", "verdict", "summary", "hook_text",
-                 "hook_quote", "title", "title_quote", "caption", "hashtags"],
+                 "hook_quote", "title", "title_quote", "thumb_text", "caption", "hashtags"],
 }
 
 _SYSTEM = (
@@ -53,6 +55,15 @@ _STOP = set("""yang dan atau untuk dengan dari pada itu ini aku kamu dia kita ka
 belum akan bisa juga saja aja lagi kalau kalo karena tapi tetapi jadi ya iya oke ada apa gimana kenapa sama lebih
 sangat banget dalam sebuah oleh agar supaya sih dong deh kok nih tuh lah mau harus punya jika maka saat ketika
 the and you that this with for are was have not but""".split())
+
+
+# kata pembingkai clickbait (bukan klaim isi): boleh dipakai walau tidak diucapkan di klip
+_FRAME = set("""ternyata alasan alasannya rahasia rahasianya kenapa mengapa gimana bagaimana cara caranya fakta faktanya
+kebenaran sebenarnya justru bahkan cuma hanya semua orang banyak jangan pernah selalu bikin buat bilang dibilang ngomong
+katanya akhirnya awalnya diam kaget terkejut nyesel menyesal salah benar beda bedanya tanpa sebelum sesudah setelah
+begini begitu inilah itulah hal satu dua tiga terlalu paling sampai hingga langsung seketika berani blak blakan
+jujur pengakuan terungkap terbongkar mengejutkan nyata sebenarnya dibalik balik inilah kalian penonton banget parah
+gila serius beneran wajib tonton dengar dengerin tunggu akhir ending mindblowing why how what never always truth""".split())
 
 
 def _tokens(text: str) -> List[str]:
@@ -73,12 +84,19 @@ def quote_supported(quote: str, source_text: str, min_ratio: float = 0.8) -> boo
 
 
 def overlap_ratio(claim: str, source_text: str) -> float:
-    """Porsi kata isi pada klaim (hook/judul/caption) yang benar-benar muncul di teks klip."""
-    words = _content_words(claim)
+    """Porsi kata isi pada klaim (hook/judul/caption) yang benar-benar muncul di teks klip.
+    Kata pembingkai rasa penasaran (_FRAME: "ternyata", "alasan", "rahasia", …) tidak dihitung — itu gaya, bukan klaim."""
+    words = [w for w in _content_words(claim) if w not in _FRAME]
     if not words:
         return 1.0
     src = set(_tokens(source_text))
     return sum(1 for w in words if w in src or any(s.startswith(w[:5]) for s in src if len(s) >= 5)) / len(words)
+
+
+def numbers_supported(claim: str, source_text: str) -> bool:
+    """Angka di hook/judul/thumbnail harus benar-benar diucapkan (angka karangan = clickbait menipu)."""
+    src = set(_tokens(source_text))
+    return all(n in src for n in re.findall(r"\d+", str(claim or "")))
 
 
 def _speaker_of(seg: Dict) -> str:
@@ -134,11 +152,28 @@ def _prompt(clip: Dict, transcript: List[Dict], source_title: str, feedback: str
         "kuat dan berakhir di payoff. 'reject' bila tidak bisa diselamatkan.\n"
         "summary: 1 kalimat tentang apa yang BENAR-BENAR dikatakan klip.\n"
         "risk: 'none' | 'medical' | 'financial' | 'legal' | 'hate' | 'misleading' (saran yang bisa merugikan penonton).\n"
-        "hook_text: teks layar maks 10 kata yang mencerminkan isi nyata klip (bukan janji kosong). "
+        "\nPAKET UPLOAD — tujuannya membuat orang BERHENTI scroll dan PENASARAN sampai akhir, tapi tetap JUJUR "
+        "(setiap fakta/angka/nama harus benar diucapkan di klip). Pakai teknik yang paling cocok dengan isi klip:\n"
+        "  1) celah penasaran: sebut akibat/kesimpulan yang mengejutkan TANPA membuka alasannya (jawabannya ada di klip);\n"
+        "  2) kontras/kontradiksi: 'Punya X, tapi justru Y';\n"
+        "  3) detail spesifik dari klip: angka, nama, benda, situasi konkret (bukan kata abstrak);\n"
+        "  4) pernyataan berani/kontroversial yang benar-benar diucapkan, boleh dikutip dalam tanda petik;\n"
+        "  5) tantangan langsung ke penonton: 'Kamu masih …?'.\n"
+        "DILARANG generik & hambar: 'Tips sukses', 'Motivasi hidup', 'Pelajaran berharga', 'Kisah inspiratif', "
+        "'Wajib tonton', 'Ternyata begini' tanpa objek, ringkasan datar seperti 'X menjelaskan pentingnya Y'. "
+        "DILARANG menipu: janji yang tidak dibayar klip, angka/nama karangan, emoji berlebihan.\n"
+        "Contoh lemah → kuat: 'Pentingnya pendidikan bagi anak' → 'Keluar kuliah? Ini syarat dari papanya'; "
+        "'Tips mengatur uang' → 'Gaji 5 juta tapi tetap bisa nabung setengahnya'.\n"
+        "hook_text: teks layar 3 detik pertama, maks 8 kata, membuka pertanyaan yang baru terjawab di klip. "
         "hook_quote: kutipan PERSIS (≥3 kata) dari ucapan di klip yang mendasari hook.\n"
-        "title: judul maks 80 karakter, tanpa awalan kategori; title_quote: kutipan PERSIS dari klip yang mendasarinya.\n"
-        f"caption: maks {config.UPLOAD_CAPTION_MAX_CHARS} karakter, hanya fakta dari klip, diakhiri ajakan komentar.\n"
-        f"hashtags: {config.MAX_HASHTAGS} hashtag relevan. hook_alternatives: 2 hook lain (juga berdasar isi klip).\n"
+        "thumb_text: teks thumbnail 2–5 kata, sangat singkat & kuat, terbaca dalam 1 detik (boleh '?' atau '!'), "
+        "berbeda dari hook_text. thumb_alternatives: 2 opsi thumb_text lain dengan teknik berbeda.\n"
+        "title: maks 70 karakter, kata paling memancing di depan, tanpa awalan kategori; format bagus: "
+        "'X, tapi Y', 'Kenapa …?', kutipan berani dalam tanda petik. title_quote: kutipan PERSIS dari klip yang mendasarinya.\n"
+        f"caption: maks {config.UPLOAD_CAPTION_MAX_CHARS} karakter. Baris pertama = kalimat penasaran (BUKAN ringkasan), "
+        "lalu 1–2 kalimat konteks yang jujur, akhiri pertanyaan yang memancing orang berdebat di komentar.\n"
+        f"hashtags: {config.MAX_HASHTAGS} hashtag relevan (campuran spesifik topik + umum). "
+        "hook_alternatives: 2 hook lain dengan teknik berbeda (juga berdasar isi klip).\n"
         "Bahasa sama dengan transkrip, gaya natural kreator. Tulis hook/judul/caption dengan suara kreator atau kutipan "
         "langsung; JANGAN memakai kata 'pembicara', 'narator', atau 'dia' sebagai subjek."
         + (f"\n\nPERBAIKI: {feedback}" if feedback else "")
@@ -192,6 +227,8 @@ def _normalize(d: Optional[Dict]) -> Optional[Dict]:
     for a in d.get("hook_alternatives") or []:
         alts.append(str(a.get("hook_text") or a.get("hook") or "") if isinstance(a, dict) else str(a))
     d["hook_alternatives"] = [a for a in alts if a.strip()]
+    d["thumb_alternatives"] = [str(a.get("thumb_text") or a.get("text") or "") if isinstance(a, dict) else str(a)
+                               for a in (d.get("thumb_alternatives") or []) if a]
     if not all(k in d for k in _SCORE_KEYS):
         return None  # tanpa skor lengkap penilaian tidak bisa dipercaya
     return d
@@ -225,6 +262,15 @@ def _ground_package(d: Dict, clip_text: str) -> Tuple[Dict, List[str]]:
         problems.append(f"judul '{title}' tidak didukung ucapan klip")
     if overlap_ratio(re.sub(r"#\w+", "", cap), clip_text) < 0.5:
         problems.append("caption memuat hal yang tidak dikatakan di klip")
+    thumb = str(d.get("thumb_text", ""))
+    if not thumb.strip() or overlap_ratio(thumb, clip_text) < 0.5 or len(thumb.split()) > 6:
+        problems.append(f"thumb_text '{thumb}' tidak didukung ucapan klip atau terlalu panjang (maks 5 kata)")
+    for label, text in (("hook", hook), ("judul", title), ("thumb_text", thumb)):
+        if not numbers_supported(text, clip_text):
+            problems.append(f"{label} memuat angka yang tidak diucapkan di klip")
+    out["thumb_alternatives"] = [t for t in (d.get("thumb_alternatives") or [])
+                                 if isinstance(t, str) and t.strip() and overlap_ratio(t, clip_text) >= 0.5
+                                 and numbers_supported(t, clip_text) and len(t.split()) <= 6][:2]
     return out, problems
 
 
@@ -237,8 +283,14 @@ def _apply_fallback(clip: Dict, d: Dict, problems: List[str], clip_text: str) ->
         title = _first_words(d.get("title_quote") or hook or clip_text, 12)
         title = title[:1].upper() + title[1:]
     if any(p.startswith("caption") for p in problems):
-        cap = f"{hook or _first_words(clip_text, 12)}. Setuju? Komen di bawah!"
-    d["hook_text"], d["title"], d["caption"] = hook, title, cap
+        # cadangan tetap memancing: hook + kutipan asli dari klip + pertanyaan, tanpa klaim karangan
+        quote = _first_words(d.get("hook_quote") or d.get("title_quote") or clip_text, 16)
+        cap = f"{(hook or _first_words(clip_text, 10)).rstrip('.?!')}?\n\"{quote}…\"\nKamu setuju atau nggak? Tulis di komentar 👇"
+    thumb = str(d.get("thumb_text", ""))
+    if any(p.startswith("thumb_text") for p in problems):
+        alts = d.get("thumb_alternatives") or []
+        thumb = alts[0] if alts else _first_words(hook or clip_text, 4)
+    d["hook_text"], d["title"], d["caption"], d["thumb_text"] = hook, title, cap, thumb
 
 
 def _consensus(reviews: List[Dict]) -> Dict:
@@ -271,13 +323,14 @@ def _review_one(clip: Dict, transcript: List[Dict], source_title: str) -> Option
     d["_grounding_retry"] = False
     if problems:
         d2 = _ask(clip, transcript, source_title,
-                  feedback="; ".join(problems) + ". Tulis ulang hook/judul/caption HANYA dari hal yang diucapkan di klip, "
-                           "dan salin kutipan persisnya.")
+                  feedback="; ".join(problems) + ". Tulis ulang hook/judul/thumb_text/caption: tetap memancing penasaran, "
+                           "tapi setiap fakta/angka HANYA dari hal yang diucapkan di klip, dan salin kutipan persisnya.")
         if d2:
             d2, problems2 = _ground_package(d2, clip_text)
             # skor/verdict tetap dari penilaian pertama; paket diambil dari percobaan kedua bila lebih baik
             if len(problems2) <= len(problems):
-                for k in ("hook_text", "hook_quote", "hook_alternatives", "title", "title_quote", "caption", "hashtags", "summary"):
+                for k in ("hook_text", "hook_quote", "hook_alternatives", "title", "title_quote", "caption", "hashtags",
+                          "summary", "thumb_text", "thumb_alternatives"):
                     if k in d2:
                         d[k] = d2[k]
                 problems = problems2
@@ -348,6 +401,8 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
         clip["hook_text"] = str(d["hook_text"]).strip()[:90]
         clip["hook_alternatives"] = [str(h).strip()[:90] for h in (d.get("hook_alternatives") or []) if str(h).strip()][:3]
         clip["ai_title"] = str(d["title"]).strip()[:95]
+        clip["thumb_text"] = str(d.get("thumb_text") or "").strip()[:48]
+        clip["thumb_alternatives"] = [str(t).strip()[:48] for t in (d.get("thumb_alternatives") or []) if str(t).strip()][:2]
         clip["upload_caption"] = str(d["caption"]).strip()[:config.UPLOAD_CAPTION_MAX_CHARS]
         tags = []
         for tag in d.get("hashtags") or []:
