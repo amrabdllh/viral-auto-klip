@@ -343,12 +343,16 @@ def brand_logo() -> Optional[Dict]:
 
 def apply_brand(ctx_path: str, out: str, force: Optional[bool] = None) -> str:
     """Brand Kit: logo/watermark gambar (posisi pilihan) lalu penutup klip (gambar/video pengguna) di akhir.
-    `force`: None = ikuti pengaturan 'otomatis' masing-masing, False = lewati semua, True = pasang semua."""
+
+    `force` = saklar "Brand Kit" di form proses (saklar UTAMA): False = lewati semua untuk proses ini;
+    True/None = pasang, tetapi tiap bagian tetap mengikuti saklarnya sendiri di halaman Brand Kit
+    ("Pasang logo otomatis" / "Pasang penutup otomatis"). FIX v6.8: dulu True memaksa keduanya terpasang
+    sehingga saklar di halaman Brand Kit tidak berpengaruh (saklar form aktif secara default)."""
     kit = db.kv_get("brand_kit", {}) or {}
-    has_logo = bool(kit.get("logo") and Path(kit["logo"]).exists())
-    has_outro = bool(kit.get("outro") and Path(kit["outro"]).exists())
-    want_logo = has_logo and (kit.get("auto", True) if force is None else force)
-    want_outro = has_outro and (kit.get("outro_auto", True) if force is None else force)
+    if force is False:
+        return ctx_path
+    want_logo = bool(kit.get("logo") and Path(kit["logo"]).exists()) and bool(kit.get("auto", True))
+    want_outro = bool(kit.get("outro") and Path(kit["outro"]).exists()) and bool(kit.get("outro_auto", True))
     if not (want_logo or want_outro):
         return ctx_path
     cur = ctx_path
