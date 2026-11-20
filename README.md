@@ -1,5 +1,54 @@
 # 🚀 Viral Auto Klip Studio v6
 
+> **Repo ini adalah hasil konsolidasi**: viral-auto-klip v6.8 dipakai sebagai codebase,
+> lalu fitur yang hanya ada di proyek **Clipper** dipindahkan masuk. Detail lengkap ada di
+> [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).
+
+## Yang ditambahkan dari Clipper
+
+| Fitur | Di mana |
+|---|---|
+| **Campaign / MotionKlip** — facecam + gameplay, banner, judul bernarasi, subtitle karaoke, outro, hashtag | `core/campaign.py`, halaman **Campaign** |
+| **Live spike presisi** — rolling-median chat detector + capture `[momen−25s, momen+20s]` | `core/chat_spikes.py`, `core/live_media.py`, `core/live_spike.py` |
+| **Template MotionKlip di mode live** (jendela & spike) | `core/live.py` `_render_campaign_window` |
+| **Upload YouTube headless** — bypass kuota API, tanpa jendela/popup | `core/youtube_browser.py` |
+| **Upload TikTok headless** — Playwright, bukan Selenium | `core/tiktok_browser.py` |
+| **Cookies di UI** — tempel, tes sesi, hapus (nilai tidak pernah ditampilkan) | Pengaturan → YouTube / TikTok |
+| **Penjaga publish** — cegah upload dobel & salah akun | `core/publish_guard.py` |
+| **Standar viral MotionKlip** — 15–45 dtk, headline 5–7 kata, safe zone, watermark 864px | `core/viral_standard.py`, `docs/MAKE_CLIP_SKILL.md` |
+| **Batch campaign** — satu job, banyak rentang | halaman Campaign (textarea Batch) |
+| **Judul & deskripsi otomatis** — dari transkrip, untuk upload | `_auto_upload_meta()` |
+
+## Menjalankan
+
+```powershell
+.venv\Scripts\python.exe -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+Buka **http://127.0.0.1:8000/app**.
+
+Server **sengaja hanya listen di 127.0.0.1** — aplikasi ini tidak punya auth, jadi
+jangan di-bind ke `0.0.0.0`.
+
+## Test
+
+```powershell
+.venv\Scripts\python.exe tests	est_campaign.py
+.venv\Scripts\python.exe tests	est_live_media.py     # 24 test buffer HLS
+.venv\Scripts\python.exe tests	est_chat_spikes.py    # 13 cek spike detector
+```
+
+## Kebutuhan
+
+`requirements.txt` (vak) + `playwright` (sudah ditambahkan). Setelah install:
+
+```powershell
+.venv\Scripts\python.exe -m playwright install chromium
+```
+
+ffmpeg: pakai `tools/ffmpeg` bila ada, kalau tidak dari PATH.
+
+
 > **Baru di v6:** studio konten lengkap di **http://localhost:8000/app**: Analisis AI, Atur Manual, Split Cam, Highlight Bola, Konten Tempel, Content Creator / Story Studio / Motion Graphic, TTS & clone suara, musik/SFX, Editor, Merge, Loop, WA Story, Analitik Viral, Optimasi Judul, Transcript, Auto Upload terjadwal, dan Brand Kit. Detail: [CHANGELOG_V6.md](CHANGELOG_V6.md). UI lama: `/legacy`.
 
 **AI-Powered Viral Video Clipper — Inspired by Klipers.pro & OpusClip**
