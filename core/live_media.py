@@ -616,7 +616,8 @@ def _write_playlist(path: Path, segments: list[_Segment]) -> None:
 
 
 def _tool(name: str) -> str:
-    bundled = Path(__file__).resolve().parent / "tools" / "ffmpeg" / (name + (".exe" if os.name == "nt" else ""))
+    # Modul ini tinggal di core/, sedangkan binary ada di <repo>/tools/ffmpeg.
+    bundled = Path(__file__).resolve().parents[1] / "tools" / "ffmpeg" / (name + (".exe" if os.name == "nt" else ""))
     return str(bundled) if bundled.is_file() else shutil.which(name) or name
 
 
