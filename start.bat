@@ -74,7 +74,7 @@ echo UI Studio v6: http://localhost:8000/app  (UI lama: /legacy)
 echo Tekan Ctrl+C untuk stop server.
 echo.
 start "" "http://localhost:8000/app"
-python -m uvicorn server:app --reload --port 8000
+python -m uvicorn server:app --reload --host 127.0.0.1 --port 8000
 goto done
 
 :streamlitmode
