@@ -432,20 +432,35 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
     cut = out_dir / "cut.mp4"
     ffx.run(["-ss", f"{float(start):.3f}", "-t", f"{duration:.3f}", "-i", str(video_path),
              "-c", "copy", "-movflags", "+faststart", str(cut)], timeout=600)
-    try:
-        segments, _ = transcribe_video(str(cut), model_name=model, word_timestamps=True,
-                                       device=params.get("whisper_device") or None)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Transkripsi campaign gagal ({str(exc)[:160]}); caption dilewati")
-        segments = []
+    # Subtitle dari preset/UI: ElevenLabs/Groq cloud bila dipilih, selain itu Whisper lokal.
+    # Sebelumnya provider diabaikan dan selalu memakai Whisper lokal.
+    provider = str(settings.get("subtitle_provider") or "").lower()
+    cloud = provider if provider in ("elevenlabs", "scribe", "elevenlabs-scribe", "groq", "cloud",
+                                     "groq-whisper") else None
+    segments: List[Dict[str, Any]] = []
+    if provider not in ("none", "off", "tanpa"):
+        try:
+            segments, _ = transcribe_video(str(cut), model_name=model, word_timestamps=True,
+                                           device=cloud or params.get("whisper_device") or None)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Transkripsi campaign gagal ({str(exc)[:160]}); caption dilewati")
+            segments = []
     if params.get("streamer_only", True) and segments:
         # Dialog game ikut tertranskrip (audio siaran satu campuran) — buang
         # segmen yang kosakatanya didominasi bahasa lain, caption tetap milik streamer.
         try:
             from core.transcriber import drop_foreign_segments
-            segments = drop_foreign_segments(segments, str(params.get("language") or config.WHISPER_LANGUAGE or ""))
+            segments = drop_foreign_segments(segments, str(params.get("language") or config.WHISPER_LANGUAGE or "id"))
         except Exception:  # noqa: BLE001
             pass
+        # Versi terjemahan (dialog game Inggris → Indonesia) tidak tertangkap filter kata,
+        # jadi LLM memilah segmen milik streamer. Gagal → pakai hasil filter lokal.
+        if segments and params.get("use_llm", True):
+            try:
+                segments = tools.filter_streamer_segments(
+                    segments, context=str(title or params.get("url") or ""))
+            except Exception:  # noqa: BLE001
+                pass
 
     layout = None
     if settings["layout"] == "split":
@@ -502,7 +517,7 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
             "hook_text": title, "score": 100, "subtitle_segments": segments,
             "category": category,
             "words": [w for seg in segments for w in seg.get("words") or []]}
-    fields = {**tools.render_options(params), "stream_layout": layout, "enable_captions": True}
+    fields = {**tools.render_options(params), "stream_layout": layout, "enable_captions": bool(segments)}
     if layout is None:
         fields["layout"] = "off"  # preset tanpa split: jangan auto-deteksi facecam
     # Render editing pada fps campaign (default 60). Tanpa ini process_clips
@@ -528,6 +543,7 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
     final = src.with_name(f"{src.stem}_campaign.mp4")
     finish_with_banner_and_outro(src, preset, final)
     cut.unlink(missing_ok=True)
+    src.unlink(missing_ok=True)  # hanya file campaign yang disimpan
     return {
         "output": str(final), "layout": settings["layout"], "fps": CAMPAIGN_FPS,
         "duration": round(duration, 3), "subtitle_provider": settings["subtitle_provider"],

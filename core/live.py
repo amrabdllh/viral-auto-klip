@@ -972,7 +972,7 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
     opts["stream_layout"] = layout
     if layout is None:
         opts["layout"] = "off"  # preset tanpa split: jangan auto-deteksi facecam
-    opts["enable_captions"] = True
+    opts["enable_captions"] = bool(p.get("enable_captions", True))
     from . import editing
     prev_fps = editing.OUTPUT_FPS
     editing.OUTPUT_FPS = max(24, min(60, int(settings.get("fps") or 60)))
@@ -990,6 +990,8 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
         except Exception as exc:  # noqa: BLE001 - jangan buang klip yang sudah diedit
             logger.warning(f"Banner/outro gagal ({str(exc)[:160]}); memakai klip tanpa banner")
             final = src
+        if final != src:
+            src.unlink(missing_ok=True)  # hanya file campaign yang disimpan
         row = dict(clip)
         row["file_path"] = str(final)
         row["campaign"] = True
@@ -1026,9 +1028,18 @@ def live_window(ctx: JobContext) -> Dict:
     if p.get("streamer_only", True):
         from .transcriber import drop_foreign_segments
         before = len(transcript)
-        transcript = drop_foreign_segments(transcript, str(p.get("language") or config.WHISPER_LANGUAGE or ""))
+        transcript = drop_foreign_segments(transcript, str(p.get("language") or config.WHISPER_LANGUAGE or "id"))
         if before > len(transcript):
             ctx.log(f"Subtitle streamer saja: {before - len(transcript)} segmen dialog game/bahasa lain dibuang")
+        if llm and transcript:
+            try:
+                kept = tools.filter_streamer_segments(
+                    transcript, context=str(p.get("channel") or p.get("url") or ""))
+                if len(kept) < len(transcript):
+                    ctx.log(f"Dialog game dibuang LLM: {len(transcript) - len(kept)} segmen")
+                transcript = kept
+            except Exception:  # noqa: BLE001 - filter opsional
+                pass
     p["_lower_third"] = tools.build_lower_third(p, transcript, default_name=p.get("channel", ""), subtitle="Live di YouTube")
 
     ctx.progress(35, "Sinyal live", "Membaca lonjakan chat & suara streamer")

@@ -40,11 +40,24 @@ def resolve_source(ctx: JobContext, params: Dict, key: str = "") -> str:
         return str(p)
     if not url:
         raise ValueError("Masukkan link video atau upload file")
-    from .utils import download_video
+    from .utils import SOURCE_CACHE_DIR, download_video
     ctx.progress(4, "Download", "Mengunduh video sumber (yt-dlp)…")
     src_dir = ctx.dir / "source"
     src_dir.mkdir(exist_ok=True)
-    video = download_video(url, src_dir, cookies_from_browser=params.get("cookies_browser", ""))
+    last = {"t": 0.0, "pct": -1.0}
+
+    def on_progress(pct: float, speed: float, eta) -> None:
+        now = time.monotonic()
+        if pct < 100 and pct - last["pct"] < 1.0 and now - last["t"] < 2.0:
+            return
+        last["t"], last["pct"] = now, pct
+        mb = (speed or 0) / 1_000_000
+        eta_txt = f"sisa {int(eta)} dtk" if eta else "sisa ?"
+        ctx.progress(4 + int(max(0.0, min(pct, 100.0)) * 0.14), "Download",
+                     f"{pct:.0f}% · {mb:.1f} MB/s · {eta_txt}")
+
+    video = download_video(url, src_dir, cookies_from_browser=params.get("cookies_browser", ""),
+                           progress_cb=on_progress, cache_dir=SOURCE_CACHE_DIR)
     ctx.log(f"Sumber: {Path(video).name}")
     return video
 
@@ -184,6 +197,65 @@ def build_lower_third(params: Dict, transcript: List[Dict], default_name: str = 
     return {"names": names, "by_speaker": by_speaker, "subtitle": subtitle} if names else {}
 
 
+def filter_streamer_segments(segments: List[Dict], context: str = "") -> List[Dict]:
+    """Buang dialog game dari caption. LLM memilah segmen yang benar-benar diucapkan streamer.
+
+    Audio siaran mencampur mikrofon streamer + suara game. Whisper bisa ikut menulis
+    dialog game, bahkan menerjemahkannya ke Bahasa Indonesia saat tidak ada ucapan
+    streamer di jendela itu. Filter kata fungsi (drop_foreign_segments) tidak bisa
+    menangkap versi terjemahan, jadi LLM memilah berdasarkan isi/kalimat.
+    """
+    if not segments:
+        return segments
+    if len(segments) > 50:
+        # Transkrip panjang (live window / VOD): panggil per potongan agar jawaban
+        # LLM tidak terpotong dan setiap segmen tetap punya nomor yang jelas.
+        kept: List[Dict] = []
+        for start in range(0, len(segments), 40):
+            kept.extend(filter_streamer_segments(segments[start:start + 40], context))
+        return kept
+    lines = []
+    for index, seg in enumerate(segments, 1):
+        text = " ".join(str(seg.get("text") or "").split())
+        if text:
+            lines.append(f"{index}. [{float(seg.get('start') or 0):.1f}-{float(seg.get('end') or 0):.1f}] {text}")
+    if not lines:
+        return segments
+    prompt = (
+        "Kamu memilah transkrip klip streamer Indonesia yang sedang bermain game. "
+        "Audio klip mencampur mikrofon streamer dengan suara game, jadi dialog karakter game "
+        "(bahasa Inggris) bisa ikut tertranskripsi atau diterjemahkan ke Bahasa Indonesia.\n"
+        "Pilih HANYA nomor segmen yang benar-benar diucapkan streamer. Buang dialog game/NPC.\n"
+        "Ciri dialog game: formal, terjemahan kaku, membahas toko/misi/karakter/instruksi. "
+        "Ciri streamer: bahasa gaul, reaksi, menyapa penonton, komentar bebas.\n"
+        f"Konteks klip: {context[:300] or '-'}\n"
+        "Balas HANYA JSON: {\"keep\": [nomor segmen], \"reason\": \"singkat\"}.\n"
+        "Kalau tidak ada ucapan streamer sama sekali, keep: [].\n\n"
+        "Transkrip:\n" + "\n".join(lines)
+    )
+    try:
+        raw = ai.complete(prompt, max_tokens=min(3000, 300 + 12 * len(segments)), json_mode=True)
+        data = ai.parse_json(raw)
+        keep = data.get("keep")
+        if not isinstance(keep, list):
+            return segments
+        picked, seen = [], set()
+        for value in keep:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= index <= len(segments) and index not in seen:
+                seen.add(index)
+                picked.append(segments[index - 1])
+        logger.info(f"Filter dialog game: {len(segments)} → {len(picked)} segmen "
+                    f"({str(data.get('reason') or '')[:120]})")
+        return picked
+    except Exception as exc:  # noqa: BLE001 - filter opsional, jangan gagalkan render
+        logger.warning(f"Filter dialog game gagal ({str(exc)[:120]}); memakai semua segmen")
+        return segments
+
+
 def _source_title(params: Dict, video: str) -> str:
     """Judul video sumber (konteks bagi Editor-AI); nama file bila video lokal."""
     url = params.get("url") or ""
@@ -261,6 +333,10 @@ def clip_quick(ctx: JobContext) -> Dict:
     info = get_video_info(video)
     info["title"] = _source_title(p, video)
     transcript, tinfo = transcribe(ctx, video, p, 18)
+    if p.get("streamer_only", True) and transcript:
+        # Caption/analisis hanya dari ucapan streamer, bukan dialog game.
+        from .transcriber import drop_foreign_segments
+        transcript = drop_foreign_segments(transcript, str(p.get("language") or config.WHISPER_LANGUAGE or "id"))
     # Nama channel bukan nama pembicara: di podcast ia menempel pada tamu/host yang sedang tampil.
     # Kartu nama hanya muncul bila pengguna mengisi "Nama pembicara".
     p["_lower_third"] = build_lower_third(p, transcript)
@@ -278,8 +354,30 @@ def clip_quick(ctx: JobContext) -> Dict:
     if p.get("hook_card") is False:
         for c in clips_data:
             c["no_hook_card"] = True
+    selected = clips_data[:num]
+    if p.get("streamer_only", True):
+        # Filter per klip (transkrip 15 menit terlalu panjang untuk satu panggilan LLM):
+        # buang dialog game dari caption, biarkan kategori & durasi dari analyzer.
+        # Tetap jalan walau pemilihan momen memakai skor lokal; gagal → segmen apa adanya.
+        for c in selected:
+            segs = c.get("subtitle_segments") or []
+            if not segs:
+                continue
+            try:
+                kept = filter_streamer_segments(
+                    segs, context=str(c.get("ai_title") or c.get("hook_text") or info.get("title") or ""))
+                c["subtitle_segments"] = kept
+                c["words"] = [w for s in kept for w in (s.get("words") or [])]
+            except Exception:  # noqa: BLE001 - filter opsional
+                pass
     ctx.progress(58, "Render", f"Merender {min(len(clips_data), num)} klip (reframe wajah, caption, editing)…")
-    clips = process_clips(video, clips_data[:num], ctx.dir, **render_options(p))
+    if p.get("campaign"):
+        # Hasil akhir hanya template MotionKlip (banner + judul + subtitle + outro),
+        # dengan kategori & durasi tetap dari analyzer per klip.
+        from . import live
+        clips = live._render_campaign_window(video, selected, ctx.dir, p, 0.0)
+    else:
+        clips = process_clips(video, selected, ctx.dir, **render_options(p))
     brand_clips(ctx, clips, p.get("brand_kit"))
     ctx.progress(92, "Publish", "Paket upload & metadata")
     publish = _publish(ctx, clips, p)

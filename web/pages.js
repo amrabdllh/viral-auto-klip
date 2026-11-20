@@ -150,7 +150,9 @@ PAGES.analisis = { render(view, q) {
         ${UI.num("max_duration", "Durasi maksimum", { value: 60, min: 10, max: 180, hint: "detik" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
         ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "single")}${UI.select("language", "Bahasa video", LANGS, "id")}</div>`) +
       UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Opsional — klip yang menyebut kata ini diutamakan." })}</div>
-        <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
+        <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}
+          ${UI.toggle("campaign", "Render pakai template MotionKlip", { checked: false, sub: "Hasil hanya campaign: banner + judul + subtitle + outro" })}</div>
+        <div class="fields">${UI.field("Preset campaign", `<select name="preset" id="anPreset"><option value="">(memuat…)</option></select>`, { hint: "Dipakai kalau template MotionKlip diaktifkan" })}</div>`) +
       UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 55, min: 0, max: 100 })}${UI.tri("jump_cuts", "Potong jeda")}${UI.tri("dynamic_zoom", "Zoom dinamis")}${UI.tri("progress_bar", "Progress bar")}
         ${UI.tri("sfx", "SFX transisi")}${UI.tri("end_cta", "Ajakan di akhir")}${UI.select("color_grade", "Warna", [{ v: "", l: "Ikut preset" }, "none", "natural", "vibrant", "cinematic"], "")}
         ${UI.tri("cold_open", "Cold open + rewind")}${UI.tri("caption_fx", "Caption animasi + emoji")}${UI.tri("sound_design", "Sound design")}
@@ -165,9 +167,21 @@ PAGES.analisis = { render(view, q) {
       "AI membaca transkrip & memilih momen dengan hook kuat.", "Tiap klip di-reframe mengikuti wajah, diberi caption, jump cut, zoom & thumbnail.",
       "AI menulis judul, caption & hashtag. Hasil bisa langsung dijadwalkan."], UI.banner("info", "Boleh pindah halaman — progres tetap jalan di <a href='#jobs'>Antrean Job</a>.")) });
   const src = sourceInput($("#src"), { prefill: q.url || "" });
+  api("/api/campaign/presets").then((r) => {
+    const sel = $("#anPreset");
+    if (!sel) return;
+    const list = r.presets || [];
+    sel.innerHTML = list.map((p) => p.error
+      ? `<option value="${esc(p.file)}" disabled>${esc(p.file)} — ${esc(p.error)}</option>`
+      : `<option value="${esc(p.file)}">${esc(p.file)} · ${esc(p.layout)} · ${esc(p.fps)} fps</option>`).join("")
+      || `<option value="">Tidak ada preset</option>`;
+    if (r.default) sel.value = r.default;
+  }).catch(() => {});
   $("#go").onclick = (e) => {
     const s = requireSource(src); if (!s) return;
     const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names"]);
+    if (!p.campaign) delete p.preset;
+    else p.viral_standard = false;  // campaign: durasi ikut konteks (15–90), bukan batas skill 45 dtk
     runJob($("#job"), "clip_quick", { ...p, ...s }, { title: "Analisis AI", btn: e.currentTarget });
   };
 } };
