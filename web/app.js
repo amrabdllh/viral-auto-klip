@@ -523,7 +523,8 @@ function mediaCard(c, { selectable = false } = {}) {
     <div class="m-body"><div class="m-title" title="${esc(title)}">${esc(title)}</div><div class="m-meta">${esc(metaLine) || "&nbsp;"}</div></div>
     <div class="m-actions">${UI.btn("Unduh", { ico: "download", size: "sm", href: fileUrl(path, true) })}<span class="spacer"></span>
       ${caption ? UI.btn("", { ico: "copy", size: "sm", kind: "ghost", title: "Salin caption & hashtag", attrs: `data-copy="${esc(caption)}"` }) : ""}
-      ${isVideo(path) && id ? UI.btn("", { ico: "calendar", size: "sm", kind: "ghost", title: "Jadwalkan upload", attrs: "data-sched" }) : ""}</div></article>`;
+      ${isVideo(path) && id ? UI.btn("", { ico: "calendar", size: "sm", kind: "ghost", title: "Jadwalkan upload", attrs: "data-sched" }) : ""}
+      ${isVideo(path) ? UI.btn("", { ico: "upload", size: "sm", kind: "ghost", title: "Upload ke YouTube (headless, tanpa popup)", attrs: "data-yt" }) : ""}</div></article>`;
 }
 
 function bindCards(root) {
@@ -533,7 +534,21 @@ function bindCards(root) {
     const cp = e.target.closest("[data-copy]");
     if (cp) return copyText(cp.dataset.copy, "Disalin");
     const sc = e.target.closest("[data-sched]");
-    if (sc) scheduleModal({ asset_id: sc.closest(".media").dataset.asset });
+    if (sc) return scheduleModal({ asset_id: sc.closest(".media").dataset.asset });
+    const yt = e.target.closest("[data-yt]");
+    if (yt) {
+      const card = yt.closest(".media");
+      const path = card.dataset.path;
+      const title = (card.querySelector(".m-title")?.textContent || baseName(path)).slice(0, 100);
+      return busy(yt, async () => {
+        try {
+          const job = await api("/jobs", { body: { kind: "upload_browser", title: "Upload YouTube · " + title, params: { path, title, privacy: "private" } } });
+          toast("Upload berjalan di latar belakang — tidak ada jendela yang muncul");
+          const done = await waitJob(job.id);
+          toast(done.status === "done" ? "Terupload ke YouTube (private)" : "Upload gagal: " + (done.message || "lihat Log Job"));
+        } catch (err) { fail(err); }
+      });
+    }
   });
   root.addEventListener("change", (e) => { if (e.target.classList.contains("m-sel")) e.target.closest(".media").classList.toggle("selected", e.target.checked); });
 }
