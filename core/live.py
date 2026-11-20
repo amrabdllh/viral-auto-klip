@@ -107,6 +107,41 @@ def _playlist_timing(url: str, headers: Dict) -> Tuple[Optional[float], List[flo
     return pdt, durs
 
 
+def cleanup_orphan_recorders() -> int:
+    """Bunuh ffmpeg rekaman yang tertinggal saat server dimatikan paksa.
+
+    Server yang di-`taskkill /F` tidak menjalankan `finally`, jadi subproses
+    ffmpeg tetap hidup dan terus mengunduh stream — beberapa proses yatim
+    berebut bandwidth dan membuat rekaman baru berjalan 0,2x realtime.
+    PID dicatat di <job>/rec/ffmpeg.pid.
+    """
+    killed = 0
+    try:
+        roots = list(Path(config.OUTPUT_DIR).glob("job_*/rec/ffmpeg.pid"))
+    except OSError:
+        return 0
+    for pid_file in roots:
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            continue
+        try:
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                                 capture_output=True, text=True, timeout=10).stdout.lower()
+        except Exception:
+            out = ""
+        if "ffmpeg.exe" in out:
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=10)
+                killed += 1
+            except Exception:
+                pass
+        pid_file.unlink(missing_ok=True)
+    if killed:
+        logger.warning(f"{killed} proses ffmpeg yatim dari sesi sebelumnya dimatikan")
+    return killed
+
+
 # ============================================================================ recorder
 
 class Recorder:
@@ -203,6 +238,10 @@ class Recorder:
 
     # ---- internal
     def _kill(self) -> None:
+        try:
+            (self.dir / "ffmpeg.pid").unlink(missing_ok=True)
+        except OSError:
+            pass
         proc = self._proc
         if proc and proc.poll() is None:
             try:
@@ -302,6 +341,10 @@ class Recorder:
         err_path = self.dir / f"ffmpeg_{run_no:02d}.log"
         err = open(err_path, "wb")
         self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
+        try:
+            (self.dir / "ffmpeg.pid").write_text(str(self._proc.pid), encoding="utf-8")
+        except OSError:
+            pass
         # jam dinding potongan awal: hitung dari playlist yang sama yang dibaca FFmpeg (selisih ±1 dtk)
         wall_base = time.time() - n
         try:

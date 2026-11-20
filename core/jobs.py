@@ -163,6 +163,11 @@ def start_worker() -> None:
         if _STARTED:
             return
         _STARTED = True
+        try:
+            from .live import cleanup_orphan_recorders
+            cleanup_orphan_recorders()
+        except Exception:
+            pass
         interrupted = db.mark_interrupted()
         if interrupted:
             logger.warning(f"{interrupted} job terputus saat server mati ditandai 'interrupted'")
