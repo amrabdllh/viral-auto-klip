@@ -966,7 +966,13 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
     if layout is None:
         opts["layout"] = "off"  # preset tanpa split: jangan auto-deteksi facecam
     opts["enable_captions"] = True
-    ctx_clips = process_clips(video, picked, out_dir, **opts)
+    from . import editing
+    prev_fps = editing.OUTPUT_FPS
+    editing.OUTPUT_FPS = max(24, min(60, int(settings.get("fps") or 60)))
+    try:
+        ctx_clips = process_clips(video, picked, out_dir, **opts)
+    finally:
+        editing.OUTPUT_FPS = prev_fps
 
     clips: List[Dict] = []
     for index, clip in enumerate(ctx_clips):
