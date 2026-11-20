@@ -518,13 +518,14 @@ function mediaCard(c, { selectable = false } = {}) {
   else media = `<div class="m-thumb audio">${icon("doc")}`;
   if (!isAudio(path)) media += `<div class="m-badges">${score ? `<span class="m-badge score">${Math.round(score)}</span>` : ""}${dur ? `<span class="m-badge">${fmtDur(dur)}</span>` : ""}</div></div>`;
   const metaLine = [c.clock ? "Live " + c.clock : "", c.category && !String(c.category).startsWith("manual") ? c.category : "", c.fyp_grade ? "FYP " + c.fyp_grade : "", c.size ? fmtBytes(c.size) : "", c.size_mb ? c.size_mb + " MB" : "", meta.provider || ""].filter(Boolean).join(" · ");
-  return `<article class="media" data-asset="${esc(id)}" data-path="${esc(path)}">${media}
+  return `<article class="media" data-asset="${esc(id)}" data-path="${esc(path)}" data-cap="${esc(caption)}">${media}
     ${selectable ? `<input type="checkbox" class="m-sel" aria-label="Pilih">` : ""}
     <div class="m-body"><div class="m-title" title="${esc(title)}">${esc(title)}</div><div class="m-meta">${esc(metaLine) || "&nbsp;"}</div></div>
     <div class="m-actions">${UI.btn("Unduh", { ico: "download", size: "sm", href: fileUrl(path, true) })}<span class="spacer"></span>
       ${caption ? UI.btn("", { ico: "copy", size: "sm", kind: "ghost", title: "Salin caption & hashtag", attrs: `data-copy="${esc(caption)}"` }) : ""}
       ${isVideo(path) && id ? UI.btn("", { ico: "calendar", size: "sm", kind: "ghost", title: "Jadwalkan upload", attrs: "data-sched" }) : ""}
-      ${isVideo(path) ? UI.btn("", { ico: "upload", size: "sm", kind: "ghost", title: "Upload ke YouTube (headless, tanpa popup)", attrs: "data-yt" }) : ""}</div></article>`;
+      ${isVideo(path) ? UI.btn("", { ico: "upload", size: "sm", kind: "ghost", title: "Upload ke YouTube (headless, tanpa popup)", attrs: "data-yt" }) : ""}
+      ${isVideo(path) ? UI.btn("", { ico: "music", size: "sm", kind: "ghost", title: "Upload ke TikTok", attrs: "data-tt" }) : ""}</div></article>`;
 }
 
 function bindCards(root) {
@@ -539,13 +540,29 @@ function bindCards(root) {
     if (yt) {
       const card = yt.closest(".media");
       const path = card.dataset.path;
+      const caption = card.dataset.cap || "";
       const title = (card.querySelector(".m-title")?.textContent || baseName(path)).slice(0, 100);
       return busy(yt, async () => {
         try {
-          const job = await api("/jobs", { body: { kind: "upload_browser", title: "Upload YouTube · " + title, params: { path, title, privacy: "private" } } });
+          const job = await api("/jobs", { body: { kind: "upload_browser", title: "Upload YouTube · " + title, params: { path, title, description: caption, privacy: "private" } } });
           toast("Upload berjalan di latar belakang — tidak ada jendela yang muncul");
           const done = await waitJob(job.id);
           toast(done.status === "done" ? "Terupload ke YouTube (private)" : "Upload gagal: " + (done.message || "lihat Log Job"));
+        } catch (err) { fail(err); }
+      });
+    }
+    const tt = e.target.closest("[data-tt]");
+    if (tt) {
+      const card = tt.closest(".media");
+      const path = card.dataset.path;
+      const caption = card.dataset.cap || "";
+      const title = (card.querySelector(".m-title")?.textContent || baseName(path)).slice(0, 100);
+      return busy(tt, async () => {
+        try {
+          const job = await api("/jobs", { body: { kind: "upload_tiktok", title: "Upload TikTok · " + title, params: { path, description: caption } } });
+          toast("Upload TikTok berjalan di latar belakang");
+          const done = await waitJob(job.id);
+          toast(done.status === "done" ? "TikTok: " + ((done.result?.upload?.status) || "selesai") : "Upload gagal: " + (done.message || "lihat Log Job"));
         } catch (err) { fail(err); }
       });
     }

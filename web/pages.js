@@ -1092,7 +1092,10 @@ PAGES.campaign = { render(view) {
         ${UI.select("layout", "Layout", [{ v: "", l: "Ikut preset" }, { v: "split", l: "Split (facecam + gameplay)" }, { v: "full", l: "Full frame" }], "")}
         ${UI.select("subtitle_provider", "Subtitle", [{ v: "", l: "Ikut preset" }, { v: "none", l: "Tanpa subtitle" }, { v: "whisper", l: "Whisper lokal" }, { v: "elevenlabs", l: "ElevenLabs Scribe" }], "")}
         ${UI.select("intro_voice", "Suara judul", [{ v: "", l: "Ikut preset" }, { v: "none", l: "Tanpa narasi" }, { v: "auto", l: "Auto (ElevenLabs → lokal)" }, { v: "edge", l: "Edge TTS (gratis)" }, { v: "elevenlabs", l: "ElevenLabs" }], "")}
-        ${UI.tri("highlight", "Highlight kata")}</div>`,
+        ${UI.tri("highlight", "Highlight kata")}
+        ${UI.select("upload_privacy", "Visibilitas upload", [{ v: "private", l: "Private" }, { v: "unlisted", l: "Unlisted" }, { v: "public", l: "Public" }], "private")}</div>
+        <div class="switches">${UI.toggle("auto_upload", "Upload ke YouTube setelah render", { checked: false, sub: "Headless — tidak ada jendela yang muncul; hashtag preset ikut terkirim" })}
+          ${UI.toggle("auto_meta", "Buat judul & deskripsi otomatis", { checked: true, sub: "Dari transkrip klip, dipakai saat upload" })}</div>`,
         foot: footAction("Export Campaign", "film", "Render 60 fps · bisa beberapa menit") })}</div>`,
     aside: UI.aside("Alur campaign", [
       "Pilih video sumber 16:9 yang sudah selesai (replay / rekaman).",
