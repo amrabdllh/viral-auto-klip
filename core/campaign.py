@@ -427,16 +427,25 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
     fields = {**tools.render_options(params), "stream_layout": layout, "enable_captions": True}
     if layout is None:
         fields["layout"] = "off"  # preset tanpa split: jangan auto-deteksi facecam
+    # Render editing pada fps campaign (default 60). Tanpa ini process_clips
+    # memakai editing.OUTPUT_FPS=30, lalu pass banner hanya menduplikasi frame
+    # ke 60 — hasilnya 60 fps semu, gerakan tetap 30 fps.
+    from core import editing
+    prev_fps = editing.OUTPUT_FPS
+    editing.OUTPUT_FPS = max(24, min(60, int(settings.get("fps") or CAMPAIGN_FPS)))
     try:
-        edited = process_clips(str(cut), [clip], out_dir, **fields)
-        src = Path(edited[0]["file_path"])
-    except Exception as exc:  # noqa: BLE001 - fallback ke renderer lama
-        logger.warning(f"Pipeline editing gagal ({str(exc)[:160]}); memakai renderer campaign lama")
-        cut.unlink(missing_ok=True)
-        return render_campaign(video_path, preset_path, start=start, end=end,
-                               output_dir=out_dir, title=title,
-                               overrides={k: params[k] for k in ("subtitle_provider", "intro_voice") if params.get(k)},
-                               model=model)
+        try:
+            edited = process_clips(str(cut), [clip], out_dir, **fields)
+            src = Path(edited[0]["file_path"])
+        except Exception as exc:  # noqa: BLE001 - fallback ke renderer lama
+            logger.warning(f"Pipeline editing gagal ({str(exc)[:160]}); memakai renderer campaign lama")
+            cut.unlink(missing_ok=True)
+            return render_campaign(video_path, preset_path, start=start, end=end,
+                                   output_dir=out_dir, title=title,
+                                   overrides={k: params[k] for k in ("subtitle_provider", "intro_voice") if params.get(k)},
+                                   model=model)
+    finally:
+        editing.OUTPUT_FPS = prev_fps
 
     final = src.with_name(f"{src.stem}_campaign.mp4")
     finish_with_banner_and_outro(src, preset, final)
