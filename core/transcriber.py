@@ -11,7 +11,26 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from faster_whisper import WhisperModel
+
+def _register_nvidia_dlls() -> None:
+    """Windows: DLL CUDA dari wheel pip (nvidia-cublas-cu12, nvidia-cudnn-cu12) tidak otomatis
+    ditemukan CTranslate2 — tanpa ini Whisper gagal 'cublas64_12.dll not found' lalu jatuh ke CPU."""
+    if os.name != "nt":
+        return
+    import importlib.util
+    spec = importlib.util.find_spec("nvidia")
+    for base in (list(spec.submodule_search_locations) if spec and spec.submodule_search_locations else []):
+        for bin_dir in Path(base).glob("*/bin"):
+            if any(bin_dir.glob("*.dll")):
+                os.add_dll_directory(str(bin_dir))
+                # PATH juga diperbarui agar worker subprocess ikut mewarisi
+                if str(bin_dir) not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+
+
+_register_nvidia_dlls()
+
+from faster_whisper import WhisperModel  # noqa: E402
 from groq import Groq
 from loguru import logger
 
@@ -36,7 +55,44 @@ MODEL_FALLBACKS = {
 }
 
 
-def transcribe_video(
+MAX_WORD_SECONDS = 1.0  # kata yang "ditahan" lebih lama dari ini membuat subtitle terlihat nyangkut
+
+
+def _sanitize_words(transcript: List[Dict]) -> List[Dict]:
+    """Rapikan timestamp per kata: urut, tidak tumpang-tindih, dan tidak ada kata yang tampil terlalu lama."""
+    fixed = 0
+    for seg in transcript:
+        words = seg.get("words") or []
+        for i, w in enumerate(words):
+            start, end = float(w.get("start") or 0), float(w.get("end") or 0)
+            if end - start > MAX_WORD_SECONDS:
+                end = start + MAX_WORD_SECONDS
+                fixed += 1
+            nxt = words[i + 1]["start"] if i + 1 < len(words) else None
+            if nxt is not None and end > nxt:
+                end = max(start + 0.02, float(nxt))
+            w["start"], w["end"] = round(start, 3), round(max(end, start + 0.02), 3)
+    if fixed:
+        logger.info(f"Timestamp {fixed} kata dipendekkan (maks {MAX_WORD_SECONDS}s) agar subtitle tidak nyangkut")
+    return transcript
+
+
+def transcribe_video(video_path: str, model_name: str = None, word_timestamps: bool = False,
+                     device: str = None, compute_type: str = None) -> Tuple[List[Dict], Dict]:
+    """Transkripsi dengan fallback: cloud (ElevenLabs/Groq) gagal → Whisper lokal (GPU → CPU)."""
+    preferred = (device or config.WHISPER_DEVICE or "auto").lower()
+    if preferred in ("elevenlabs", "scribe", "elevenlabs-scribe", "groq", "cloud", "groq-whisper"):
+        try:
+            transcript, info = _transcribe_video_impl(video_path, model_name, word_timestamps, preferred, compute_type)
+            return _sanitize_words(transcript), info
+        except Exception as exc:
+            logger.warning(f"Transkripsi {preferred} gagal ({str(exc)[:200]}) — pindah ke Whisper lokal")
+            preferred, compute_type = "auto", (config.WHISPER_COMPUTE_TYPE if compute_type == "cloud" else compute_type)
+    transcript, info = _transcribe_video_impl(video_path, model_name, word_timestamps, preferred, compute_type)
+    return _sanitize_words(transcript), info
+
+
+def _transcribe_video_impl(
     video_path: str,
     model_name: str = None,
     word_timestamps: bool = False,
@@ -58,6 +114,8 @@ def transcribe_video(
     preferred_compute = (compute_type or config.WHISPER_COMPUTE_TYPE or "int8").lower()
     if preferred_device in ("groq", "cloud", "groq-whisper"):
         return _transcribe_with_groq(video_path, word_timestamps=word_timestamps)
+    if preferred_device in ("elevenlabs", "scribe", "elevenlabs-scribe"):
+        return _transcribe_with_elevenlabs(video_path)
 
     plan = _build_transcription_plan(model_name, preferred_device, preferred_compute)
     last_error = None
@@ -94,12 +152,7 @@ def transcribe_video(
                 model_kwargs["device_index"] = device_index
             model = WhisperModel(attempt_model, **model_kwargs)
             logger.info("Whisper model loaded. Starting transcription...")
-            segments, info = model.transcribe(
-                video_path,
-                beam_size=5,
-                word_timestamps=word_timestamps,
-                vad_filter=True,
-            )
+            segments, info = _run_transcribe(model, video_path, word_timestamps, attempt_device)
             transcript = []
             for segment in segments:
                 item = {"start": segment.start, "end": segment.end, "text": segment.text}
@@ -142,6 +195,9 @@ def transcribe_video(
                     "All local Whisper attempts failed. Falling back to Groq Whisper cloud transcription."
                 )
                 return _transcribe_with_groq(video_path, word_timestamps=word_timestamps)
+            if config.ELEVENLABS_API_KEY:
+                logger.warning("All local Whisper attempts failed. Falling back to ElevenLabs Scribe.")
+                return _transcribe_with_elevenlabs(video_path)
             raise
         finally:
             del model
@@ -154,10 +210,11 @@ def _transcribe_with_groq(video_path: str, word_timestamps: bool = False) -> Tup
     if not config.GROQ_API_KEY:
         raise RuntimeError("Groq Whisper selected, but GROQ_API_KEY is empty.")
 
-    audio_path = _extract_groq_audio(video_path)
+    audio_path = _extract_cloud_audio(video_path, config.GROQ_WHISPER_AUDIO_BITRATE, "groq", limit_mb=95)
     try:
         logger.info(f"Transcribing with Groq Whisper model={config.GROQ_WHISPER_MODEL}")
         client = Groq(api_key=config.GROQ_API_KEY)
+        extra = {"language": config.WHISPER_LANGUAGE} if config.WHISPER_LANGUAGE else {}
         with open(audio_path, "rb") as audio_file:
             response = client.audio.transcriptions.create(
                 file=(Path(audio_path).name, audio_file.read()),
@@ -165,6 +222,7 @@ def _transcribe_with_groq(video_path: str, word_timestamps: bool = False) -> Tup
                 response_format="verbose_json",
                 timestamp_granularities=["segment", "word"] if word_timestamps else ["segment"],
                 temperature=0.0,
+                **extra,
             )
         payload = _response_to_dict(response)
         transcript = _groq_payload_to_segments(payload)
@@ -182,25 +240,108 @@ def _transcribe_with_groq(video_path: str, word_timestamps: bool = False) -> Tup
         Path(audio_path).unlink(missing_ok=True)
 
 
-def _extract_groq_audio(video_path: str) -> str:
-    audio_path = str(Path(tempfile.gettempdir()) / f"groq_whisper_{os.getpid()}_{Path(video_path).stem}.mp3")
+def _extract_cloud_audio(video_path: str, bitrate: str, label: str, limit_mb: float = 0) -> str:
+    audio_path = str(Path(tempfile.gettempdir()) / f"{label}_stt_{os.getpid()}_{Path(video_path).stem}.mp3")
     cmd = [
         "ffmpeg", "-y",
         "-i", video_path,
         "-vn",
         "-ac", "1",
         "-ar", "16000",
-        "-b:a", config.GROQ_WHISPER_AUDIO_BITRATE,
+        "-b:a", bitrate,
         audio_path,
     ]
     subprocess.run(cmd, check=True, capture_output=True)
     size_mb = Path(audio_path).stat().st_size / (1024 * 1024)
-    if size_mb > 95:
+    if limit_mb and size_mb > limit_mb:
         logger.warning(
-            f"Groq audio file is {size_mb:.1f}MB, near the API 100MB limit. "
-            "Consider shorter videos or lower GROQ_WHISPER_AUDIO_BITRATE."
+            f"{label} audio file is {size_mb:.1f}MB, near the API upload limit. "
+            "Consider shorter videos or a lower audio bitrate."
         )
     return audio_path
+
+
+def _transcribe_with_elevenlabs(video_path: str) -> Tuple[List[Dict], Dict]:
+    """Transkripsi cloud via ElevenLabs Scribe (timestamp per kata, akurasi tinggi)."""
+    if not config.ELEVENLABS_API_KEY:
+        raise RuntimeError("ElevenLabs Scribe dipilih, tapi ELEVENLABS_API_KEY kosong.")
+    import requests
+
+    audio_path = _extract_cloud_audio(video_path, config.ELEVENLABS_AUDIO_BITRATE, "elevenlabs")
+    try:
+        logger.info(f"Transcribing with ElevenLabs Scribe model={config.ELEVENLABS_STT_MODEL}")
+        data = {
+            "model_id": config.ELEVENLABS_STT_MODEL,
+            "timestamps_granularity": "word",
+            # v6.4: label pembicara per kata (kamera ikut pembicara) + event suara (tawa → efek reaksi)
+            "diarize": "true",
+            "tag_audio_events": "true",
+        }
+        if config.WHISPER_LANGUAGE:
+            data["language_code"] = config.WHISPER_LANGUAGE
+        with open(audio_path, "rb") as audio_file:
+            response = requests.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers={"xi-api-key": config.ELEVENLABS_API_KEY},
+                data=data,
+                files={"file": (Path(audio_path).name, audio_file, "audio/mpeg")},
+                timeout=1800,
+            )
+        if response.status_code >= 400:
+            raise RuntimeError(f"ElevenLabs STT error {response.status_code}: {response.text[:300]}")
+        payload = response.json()
+        transcript = _elevenlabs_payload_to_segments(payload)
+        info = {
+            "language": payload.get("language_code"),
+            "language_probability": payload.get("language_probability"),
+            "duration": transcript[-1]["end"] if transcript else None,
+            "device": "elevenlabs",
+            "compute_type": "cloud",
+            "model": config.ELEVENLABS_STT_MODEL,
+        }
+        logger.info(f"ElevenLabs transcription complete: {len(transcript)} segments")
+        return transcript, info
+    finally:
+        Path(audio_path).unlink(missing_ok=True)
+
+
+def _elevenlabs_payload_to_segments(payload: Dict, max_words: int = 22, max_gap: float = 0.9) -> List[Dict]:
+    """Kelompokkan kata ElevenLabs menjadi segmen kalimat (akhir kalimat / jeda / panjang maks)."""
+    words = [
+        {"start": float(w.get("start") or 0), "end": float(w.get("end") or w.get("start") or 0),
+         "word": str(w.get("text") or "").strip(), **({"speaker": str(w["speaker_id"])} if w.get("speaker_id") else {})}
+        for w in payload.get("words") or []
+        if (w.get("type") in (None, "word")) and str(w.get("text") or "").strip()
+    ]
+    events = [
+        {"start": float(w.get("start") or 0), "end": float(w.get("end") or w.get("start") or 0),
+         "text": str(w.get("text") or "").strip("() ").lower()}
+        for w in payload.get("words") or [] if w.get("type") == "audio_event"
+    ]
+    if not words:
+        text = str(payload.get("text", "")).strip()
+        return [{"start": 0.0, "end": 0.1, "text": text}] if text else []
+    segments, current = [], []
+    for word in words:
+        if current and (word["start"] - current[-1]["end"] > max_gap or len(current) >= max_words):
+            segments.append(current)
+            current = []
+        current.append(word)
+        if word["word"].endswith((".", "!", "?")) and len(current) >= 4:
+            segments.append(current)
+            current = []
+    if current:
+        segments.append(current)
+    out = [
+        {"start": seg[0]["start"], "end": max(seg[-1]["end"], seg[0]["start"] + 0.1),
+         "text": " ".join(w["word"] for w in seg), "words": seg}
+        for seg in segments
+    ]
+    # event suara (laughter, applause, …) disimpan di segmen terdekat — tidak masuk teks/caption
+    for ev in events:
+        seg = min(out, key=lambda sg: 0 if sg["start"] <= ev["start"] <= sg["end"] else min(abs(sg["start"] - ev["start"]), abs(sg["end"] - ev["start"])))
+        seg.setdefault("audio_events", []).append(ev)
+    return out
 
 
 def _response_to_dict(response) -> Dict:
@@ -304,12 +445,7 @@ def _transcribe_direct_worker(video_path, model_name, word_timestamps, device, c
     if device == "cuda":
         model_kwargs["device_index"] = device_index
     model = WhisperModel(model_name, **model_kwargs)
-    segments, info = model.transcribe(
-        video_path,
-        beam_size=5,
-        word_timestamps=word_timestamps,
-        vad_filter=True,
-    )
+    segments, info = _run_transcribe(model, video_path, word_timestamps, device)
     transcript = []
     for segment in segments:
         item = {"start": segment.start, "end": segment.end, "text": segment.text}
@@ -455,29 +591,56 @@ def _cuda_runtime_available() -> bool:
         return False
 
 
-def _should_try_next_attempt(exc: Exception, attempt_device: str) -> bool:
-    if attempt_device == "cpu":
-        return False
-    return _is_cuda_load_error(exc) or attempt_device in ("auto", "cuda")
+def _transcribe_kwargs(word_timestamps: bool) -> Dict:
+    """Bangun argumen transcribe dengan tuning dari config (beam, bahasa, initial prompt)."""
+    kwargs = {
+        "beam_size": config.WHISPER_BEAM_SIZE,
+        "word_timestamps": word_timestamps,
+        "vad_filter": True,
+    }
+    if config.WHISPER_LANGUAGE:
+        kwargs["language"] = config.WHISPER_LANGUAGE
+    # FIX: prompt berbahasa Indonesia hanya dipakai untuk video yang memang dinyatakan Indonesia.
+    if config.WHISPER_INITIAL_PROMPT and config.WHISPER_LANGUAGE == "id":
+        kwargs["initial_prompt"] = config.WHISPER_INITIAL_PROMPT
+    return kwargs
 
 
-def _is_cuda_load_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return any(hint in message for hint in CUDA_DLL_ERROR_HINTS)
+def _run_transcribe(model, video_path: str, word_timestamps: bool, device: str):
+    """Jalankan transkripsi.
+
+    FIX: `batch_size` TIDAK diterima oleh WhisperModel.transcribe (TypeError) —
+    sebelumnya membuat SEMUA percobaan CUDA gagal lalu jatuh ke CPU. Batch hanya
+    didukung lewat BatchedInferencePipeline, jadi dipakai di sana (CUDA saja).
+    """
+    kwargs = _transcribe_kwargs(word_timestamps)
+    # FIX v4: faster-whisper mendekode audio lewat PyAV dengan argumen `metadata_errors`
+    # yang sudah DIHAPUS di PyAV 19 (satu-satunya versi untuk Python 3.14) -> TypeError dan
+    # transkripsi lokal selalu gagal. Audio sekarang didekode dengan FFmpeg menjadi array numpy.
+    audio = _load_audio_ffmpeg(video_path)
+    if (device or "").lower() == "cuda" and config.WHISPER_BATCH_SIZE > 0:
+        try:
+            from faster_whisper import BatchedInferencePipeline
+            return BatchedInferencePipeline(model).transcribe(
+                audio, batch_size=config.WHISPER_BATCH_SIZE, **kwargs
+            )
+        except ImportError:
+            logger.warning("BatchedInferencePipeline tidak tersedia (faster-whisper lama). Pakai mode biasa.")
+    return model.transcribe(audio, **kwargs)
 
 
-def _is_memory_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return isinstance(exc, MemoryError) or any(
-        hint in message
-        for hint in (
-            "bad allocation",
-            "out of memory",
-            "not enough memory",
-            "cannot allocate memory",
-            "std::bad_alloc",
-        )
-    )
+def _load_audio_ffmpeg(path: str, sample_rate: int = 16000):
+    """Dekode audio apa pun ke float32 mono 16 kHz (format input Whisper) via FFmpeg."""
+    import numpy as np
+
+    cmd = [
+        "ffmpeg", "-nostdin", "-v", "error", "-i", str(path),
+        "-vn", "-ac", "1", "-ar", str(sample_rate), "-f", "f32le", "-acodec", "pcm_f32le", "-",
+    ]
+    completed = subprocess.run(cmd, capture_output=True, check=False)
+    if completed.returncode != 0 or not completed.stdout:
+        raise RuntimeError(f"FFmpeg gagal mendekode audio: {completed.stderr.decode(errors='replace')[-300:]}")
+    return np.frombuffer(completed.stdout, dtype=np.float32).copy()
 
 
 def _worker_main():

@@ -17,6 +17,7 @@ from core.analyzer import analyze_viral_potential, configure_llm_clients
 from core.clipper import process_clips
 from core.transcriber import transcribe_video
 from core.clipping_software import submit_clip_job, wait_for_clip_job
+from core import ai_providers as ai
 import config
 
 setup_logging()
@@ -112,14 +113,16 @@ def main():
         
         st.divider()
         st.subheader("🎨 Style & Fitur")
+        enable_captions = st.checkbox("Caption otomatis (burn-in)", value=True)
         caption_style = st.selectbox(
             "Caption Style",
-            ["modern", "tiktok_bold", "gradient", "neon", "minimal", "karaoke"],
+            ["modern", "tiktok_bold", "gradient", "neon", "minimal", "karaoke", "emoji"],
             index=0,
         )
-        caption_font_size = st.slider("Caption Font Size", 5, 70, 48, help="Mirip clipping.software: 18-30 cocok untuk API, 42-55 cocok untuk Full HD local.")
-        caption_vertical_position = st.slider("Caption Vertical Position", 10, 260, 95, help="10 dekat bawah, 260 lebih naik.")
-        caption_border_thickness = st.slider("Caption Border Thickness", 0, 8, 3)
+        caption_font_size = st.slider("Caption Font Size", 30, 120, 72, help="Untuk video 1080x1920: 64–80 nyaman dibaca di HP.")
+        caption_vertical_position = st.slider("Caption Vertical Position", 10, 900, 420,
+                                              help="Jarak dari bawah (px). ±420 = di atas zona tombol & caption TikTok/Reels.")
+        caption_border_thickness = st.slider("Caption Border Thickness", 0, 10, 6)
         enable_face = st.checkbox("Face Reframing (Ikuti Wajah)", value=True)
         
         st.subheader("🎥 Mode Video")
@@ -164,12 +167,26 @@ def main():
                 "Auto (rekomendasi — deteksi GPU otomatis)",
                 "GPU NVIDIA (paksa cuda, fallback CPU)",
                 "Groq Whisper Cloud (tidak pakai GPU laptop)",
+                "ElevenLabs Scribe Cloud (akurasi tinggi, timestamp per kata)",
                 "CPU aman (paling stabil)",
                 "🛡️ Super Stable CPU Mode (100% stabil, tidak pakai GPU sama sekali)"
             ],
             index=0,
-            help="Groq Whisper Cloud memakai API Groq. Auto/GPU tetap bisa fallback ke Groq jika local gagal dan GROQ_API_KEY tersedia."
+            help="Groq Whisper & ElevenLabs Scribe memakai API cloud (audio dikirim ke provider). Auto/GPU tetap bisa fallback ke cloud bila lokal gagal dan API key tersedia."
         )
+        elevenlabs_api_key = ""
+        if "ElevenLabs" in transcribe_mode:
+            elevenlabs_api_key = st.text_input("ElevenLabs API Key", value="", type="password",
+                                               help="Bisa juga di .env sebagai ELEVENLABS_API_KEY=...")
+            if config.ELEVENLABS_API_KEY:
+                st.caption("ElevenLabs API key terdeteksi dari .env.")
+        language_label = st.selectbox(
+            "Bahasa Video",
+            ["Otomatis", "Indonesia (id)", "English (en)", "Melayu (ms)", "Jawa (jw)"],
+            index={"": 0, "id": 1, "en": 2, "ms": 3, "jw": 4}.get(config.WHISPER_LANGUAGE, 0),
+            help="Menentukan bahasa mempercepat & mempertajam transkripsi. Indonesia juga mengaktifkan hint tanda baca.",
+        )
+        whisper_language = {"Otomatis": "", "Indonesia (id)": "id", "English (en)": "en", "Melayu (ms)": "ms", "Jawa (jw)": "jw"}[language_label]
         whisper_model = st.selectbox(
             "Model Whisper",
             ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"],
@@ -182,37 +199,79 @@ def main():
             value=config.WHISPER_ALLOW_LARGE_ON_GPU,
             help="Untuk large/large-v3 penuh. large-v3-turbo biasanya lebih aman di RTX 3060 6GB."
         )
-        enable_llm = st.checkbox("Gunakan AI untuk Scoring Momen", value=config.USE_LLM_SCORING)
+        st.subheader("🧠 AI (Moment Finder + Rerank + Packaging)")
+        enable_llm = st.checkbox("Gunakan AI untuk memilih & menulis klip", value=config.USE_LLM_SCORING)
+        providers = list(config.ALL_AI_PROVIDERS)
         ai_provider = st.selectbox(
             "Provider AI",
-            ["Groq", "Gemini", "OpenRouter", "Ollama"],
-            index=["Groq", "Gemini", "OpenRouter", "Ollama"].index(config.AI_PROVIDER)
-            if config.AI_PROVIDER in ["Groq", "Gemini", "OpenRouter", "Ollama"] else 0,
-            help="Groq Llama 70B paling direkomendasikan. Gemini/OpenRouter bisa jadi opsi gratis. Ollama jalan lokal."
+            providers,
+            index=providers.index(config.AI_PROVIDER) if config.AI_PROVIDER in providers else 0,
+            format_func=lambda name: ai.PROVIDER_INFO.get(name, {}).get("label", name),
+            help="Claude/GPT/Gemini = kualitas top-tier. Groq = tercepat & gratis. Ollama = lokal. "
+                 "Custom = endpoint OpenAI-compatible apa pun (base URL + API key sendiri)."
         )
-        provider_models = config.AI_PROVIDER_MODELS.get(ai_provider, [])
-        ai_model = st.selectbox(
+        provider_models = ai.provider_models(ai_provider)
+        default_model = ai.resolve_model(ai_provider)
+        model_options = provider_models + ["✏️ Model lain (ketik sendiri)"]
+        model_choice = st.selectbox(
             "Model AI",
-            provider_models,
-            index=provider_models.index(config.LLM_MODEL) if config.LLM_MODEL in provider_models else 0,
-            help="Pilih model yang dipakai untuk menilai momen viral."
+            model_options,
+            index=provider_models.index(default_model) if default_model in provider_models else len(model_options) - 1,
+            help="Model untuk mencari momen, menilai, dan menulis hook/judul/caption."
         )
-        groq_api_key = ""
-        gemini_api_key = ""
-        openrouter_api_key = ""
-        ollama_base_url = config.OLLAMA_BASE_URL
-        if ai_provider == "Groq":
-            groq_api_key = st.text_input("Groq API Key", value="", type="password", help="Bisa juga di .env sebagai GROQ_API_KEY=...")
-            if config.GROQ_API_KEY:
-                st.caption("Groq API key terdeteksi dari .env. Kolom ini boleh dikosongkan.")
-            else:
-                st.caption("Groq belum konek: isi Groq API Key di sini atau tambahkan GROQ_API_KEY ke .env.")
-        elif ai_provider == "Gemini":
-            gemini_api_key = st.text_input("Gemini API Key", value="", type="password", help="Bisa juga di .env sebagai GEMINI_API_KEY=...")
-        elif ai_provider == "OpenRouter":
-            openrouter_api_key = st.text_input("OpenRouter API Key", value="", type="password", help="Bisa juga di .env sebagai OPENROUTER_API_KEY=...")
+        ai_model = model_choice
+        if model_choice.startswith("✏️"):
+            ai_model = st.text_input("Nama model", value="" if default_model in provider_models else default_model,
+                                     placeholder="mis. gpt-5.2 / claude-opus-5-5 / qwen2.5:14b")
+        ai_api_key, ai_base_url = "", ""
+        key_attr = ai.PROVIDER_INFO.get(ai_provider, {}).get("key_attr")
+        if key_attr:
+            ai_api_key = st.text_input(f"{ai_provider} API Key", value="", type="password",
+                                       help=f"Bisa juga disimpan di .env sebagai {key_attr}=...")
+            if getattr(config, key_attr, ""):
+                st.caption(f"API key {ai_provider} terdeteksi dari .env — kolom ini boleh dikosongkan.")
+        if ai_provider == "Custom":
+            ai_base_url = st.text_input("Base URL (OpenAI-compatible)", value=config.CUSTOM_AI_BASE_URL,
+                                        placeholder="https://api.provider-kamu.com/v1")
         elif ai_provider == "Ollama":
-            ollama_base_url = st.text_input("Ollama Base URL", value=config.OLLAMA_BASE_URL, help="Default: http://localhost:11434")
+            ai_base_url = st.text_input("Ollama Base URL", value=config.OLLAMA_BASE_URL)
+        elif ai_provider == "Antigravity":
+            status = ai.google_login_status()
+            if status["logged_in"]:
+                st.success(f"✅ Login sebagai {status['email'] or 'akun Google'}")
+                if st.button("Logout Google"):
+                    ai.google_logout()
+                    st.rerun()
+            else:
+                if not status["has_client_secret"]:
+                    st.info(
+                        "Google mewajibkan tiap aplikasi punya OAuth client sendiri (login bawaan Antigravity hanya "
+                        "untuk Antigravity). Setup sekali (±5 menit):\n"
+                        "1. console.cloud.google.com → buat project\n"
+                        "2. Enable **Generative Language API**\n"
+                        "3. Google Auth Platform → Get started (Audience External) → tambah email kamu di Test users\n"
+                        "4. Clients → Create client → **Desktop app** → Download JSON\n"
+                        "5. Upload file JSON di bawah\n\n"
+                        "Lebih cepat tanpa OAuth: pilih provider **Gemini** + API key gratis dari aistudio.google.com/apikey"
+                    )
+                secret_file = st.file_uploader("client_secret.json (OAuth Desktop app)", type=["json"], key="g_secret")
+                if secret_file is not None:
+                    try:
+                        ai.save_client_secret(secret_file.getvalue().decode("utf-8"))
+                        st.success("client_secret.json tersimpan. Klik Login di bawah.")
+                    except Exception as exc:
+                        st.error(str(exc))
+                if st.button("🔐 Login dengan Google", disabled=not ai.google_login_status()["has_client_secret"]):
+                    try:
+                        with st.spinner("Selesaikan login di tab browser yang terbuka…"):
+                            ai.google_login()
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Login gagal: {exc}")
+        if st.button("🔌 Tes koneksi AI"):
+            ai.set_credentials(ai_provider, api_key=ai_api_key, base_url=ai_base_url, model=ai_model)
+            ok, message = ai.test_connection(ai_provider, ai.resolve_model(ai_provider, ai_model))
+            (st.success if ok else st.error)(f"{ai_provider}: {message}")
         
         st.divider()
         st.subheader("📤 Output")
@@ -220,6 +279,11 @@ def main():
         use_nvenc = st.checkbox("Render pakai NVIDIA NVENC", value=config.USE_NVENC, help="Lebih cepat di RTX 3060. Jika gagal, sistem fallback ke CPU encoder.")
         keep_source_video = st.checkbox("Simpan source video", value=config.KEEP_SOURCE_VIDEO, help="Disarankan aktif supaya bisa proses ulang tanpa download lagi.")
         target_platform = st.selectbox("Target Platform", ["TikTok", "YouTube Shorts", "Instagram Reels", "Semua"])
+        make_publish = st.checkbox(
+            "Buat Paket Upload (publish/) + Rencana Posting",
+            value=config.ENABLE_PUBLISH_PACKAGE,
+            help="Folder publish/ berisi video siap upload, caption per platform, jam upload terbaik, dan varian caption A/B test.",
+        )
         
         st.divider()
         st.subheader("🎵 Klipers.pro Audio & Style")
@@ -264,14 +328,23 @@ def main():
         process_video(
             url, uploaded_file, num_clips, min_score, min_duration, max_duration,
             caption_style, enable_face, transcribe_mode, enable_llm, add_watermark,
-            target_platform, ai_provider, ai_model, groq_api_key, gemini_api_key,
-            openrouter_api_key, ollama_base_url, video_mode, output_type,
-            enable_audio, enable_music, music_file, auto_zoom, split_screen, bg_blur,
-            klipers_reframe, whisper_model, allow_large_gpu, eye_contact, virtual_bg_file, cookie_browser, cookies_file,
-            use_nvenc, keep_source_video,
-            caption_font_size, caption_vertical_position, caption_border_thickness,
-            clip_engine, clipping_api_key
+            target_platform, ai_provider, ai_model,
+            ai_api_key=ai_api_key, ai_base_url=ai_base_url,
+            video_mode=video_mode, output_type=output_type,
+            enable_audio=enable_audio, enable_music=enable_music, music_file=music_file,
+            auto_zoom=auto_zoom, split_screen=split_screen, bg_blur=bg_blur,
+            klipers_reframe=klipers_reframe, whisper_model=whisper_model, allow_large_gpu=allow_large_gpu,
+            eye_contact=eye_contact, virtual_bg_file=virtual_bg_file, cookie_browser=cookie_browser,
+            cookies_file=cookies_file, use_nvenc=use_nvenc, keep_source_video=keep_source_video,
+            caption_font_size=caption_font_size, caption_vertical_position=caption_vertical_position,
+            caption_border_thickness=caption_border_thickness, clip_engine=clip_engine,
+            clipping_api_key=clipping_api_key, make_publish=make_publish,
+            elevenlabs_api_key=elevenlabs_api_key, whisper_language=whisper_language,
+            enable_captions=enable_captions,
         )
+    elif st.session_state.get("last_result"):
+        # FIX: tombol download memicu rerun Streamlit -> dulu hasil hilang dari layar.
+        show_results(**st.session_state["last_result"], celebrate=False)
 
 def process_video(
     url,
@@ -287,11 +360,9 @@ def process_video(
     add_watermark,
     target_platform,
     ai_provider="Groq",
-    ai_model="llama-3.3-70b-versatile",
-    groq_api_key="",
-    gemini_api_key="",
-    openrouter_api_key="",
-    ollama_base_url="http://localhost:11434",
+    ai_model="",
+    ai_api_key="",
+    ai_base_url="",
     video_mode="Single Speaker (Talking Head)",
     output_type="Vertical",
     enable_audio=True,
@@ -314,11 +385,19 @@ def process_video(
     caption_border_thickness=3,
     clip_engine="Local Advanced Engine",
     clipping_api_key="",
+    make_publish=True,
+    elevenlabs_api_key="",
+    whisper_language="",
+    enable_captions=True,
 ):
     progress_bar = st.progress(0)
     status_text = st.empty()
-    
+    st.session_state.pop("last_result", None)
+
     try:
+        config.WHISPER_LANGUAGE = whisper_language
+        if elevenlabs_api_key:
+            config.ELEVENLABS_API_KEY = elevenlabs_api_key.strip()
         config.MIN_VIRAL_SCORE = min_score
         config.MIN_CLIP_DURATION = min_duration
         config.MAX_CLIP_DURATION = max_duration
@@ -372,6 +451,10 @@ def process_video(
             whisper_device = "groq"
             whisper_compute = "cloud"
             st.info("Groq Whisper Cloud aktif — transkripsi diproses di Groq, GPU/CPU laptop tidak terbebani.")
+        elif "ElevenLabs" in transcribe_mode:
+            whisper_device = "elevenlabs"
+            whisper_compute = "cloud"
+            st.info("ElevenLabs Scribe aktif — audio dikirim ke ElevenLabs untuk transkripsi.")
         elif "Super Stable" in transcribe_mode:
             whisper_device = "cpu"
             whisper_compute = "int8"
@@ -387,19 +470,15 @@ def process_video(
         else:
             whisper_device = "cpu"
             whisper_compute = "int8"
-        if enable_llm and not configure_llm_clients(
-            provider=ai_provider,
-            model=ai_model,
-            groq_api_key=groq_api_key,
-            gemini_api_key=gemini_api_key,
-            openrouter_api_key=openrouter_api_key,
-            ollama_base_url=ollama_base_url,
-        ):
-            st.warning(
-                f"AI scoring aktif, tapi {ai_provider} belum tersedia atau API key belum valid. "
-                "Proses lanjut dengan scoring lokal."
-            )
-            enable_llm = False
+        if enable_llm:
+            if configure_llm_clients(provider=ai_provider, model=ai_model, api_key=ai_api_key, base_url=ai_base_url):
+                st.info(f"🧠 AI aktif: {ai_provider} / {config.LLM_MODEL}")
+            else:
+                st.warning(
+                    f"AI aktif, tapi {ai_provider} belum dikonfigurasi (API key / base URL / login). "
+                    "Proses lanjut dengan scoring lokal."
+                )
+                enable_llm = False
         
         # Step 1: Download or use uploaded
         status_text.info("📥 Mengunduh / memproses video...")
@@ -460,7 +539,8 @@ def process_video(
             transcript_segments, 
             video_info, 
             face_data=None,  # will detect per clip
-            use_llm=enable_llm
+            use_llm=enable_llm,
+            video_path=video_path,
         )
         
         if not clips_data:
@@ -529,16 +609,34 @@ def process_video(
             group_framing=group_framing,
             klipers_reframe=klipers_reframe,
             eye_contact_correction=eye_contact,
-            virtual_background_path=virtual_bg_path
+            virtual_background_path=virtual_bg_path,
+            enable_captions=enable_captions,
         )
         
+        publish_dir = None
+        if make_publish:
+            try:
+                from core.publisher import build_publish_package
+                platforms_list = [target_platform] if target_platform != "Semua" else None
+                publish_dir = build_publish_package(processed, output_dir, platforms=platforms_list)
+                status_text.info(f"📤 Paket upload siap: {publish_dir}")
+            except Exception as exc:
+                st.warning(f"Gagal membuat paket publish: {exc}")
+
         progress_bar.progress(95)
         
         # Step 5: Show results
         status_text.success("🎉 SEMUA KLIP SIAP!")
         progress_bar.progress(100)
         
-        show_results(processed, output_dir, video_info, target_platform)
+        st.session_state["last_result"] = {
+            "processed_clips": processed,
+            "output_dir": output_dir,
+            "video_info": video_info,
+            "target_platform": target_platform,
+            "publish_dir": publish_dir,
+        }
+        show_results(processed, output_dir, video_info, target_platform, publish_dir)
         
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
@@ -557,8 +655,10 @@ def process_video(
             except Exception as e:
                 logger.warning(f"Gagal hapus source video: {e}")
 
-def show_results(processed_clips: list, output_dir: Path, video_info: dict, target_platform: str = "Semua"):
-    st.balloons()
+def show_results(processed_clips: list, output_dir: Path, video_info: dict, target_platform: str = "Semua",
+                 publish_dir=None, celebrate: bool = True):
+    if celebrate:
+        st.balloons()
     
     st.header("🏆 Hasil Klip Viral Kamu")
     if not processed_clips:
@@ -610,6 +710,12 @@ def show_results(processed_clips: list, output_dir: Path, video_info: dict, targ
                 st.write(f"**Durasi:** {clip['duration']:.1f} detik")
                 st.write(f"**Alasan Viral:** {clip['reason']}")
                 st.write(f"**Hook:** {clip.get('hook_text', '—')}")
+                if clip.get("ai_title"):
+                    st.write(f"**Judul (AI):** {clip['ai_title']}")
+                if clip.get("hook_alternatives"):
+                    st.write(f"**Hook A/B:** {' · '.join(clip['hook_alternatives'])}")
+                source_label = "🧠 AI Moment Finder" if clip.get("source") == "ai_moment_finder" else "📐 Rule-based"
+                st.write(f"**Sumber momen:** {source_label} | skor lokal {clip.get('local_score', '—')} · skor AI {clip.get('llm_score') or '—'}")
                 st.write(f"**Caption Upload:** {clip.get('upload_caption', '—')}")
                 st.write(f"**Hashtag:** {' '.join(clip.get('hashtags', [])) or '—'}")
                 st.write(f"**FYP Grade:** {clip.get('fyp_grade', '—')}")
@@ -623,18 +729,19 @@ def show_results(processed_clips: list, output_dir: Path, video_info: dict, targ
                     st.write(f"**Sentiment:** {clip['sentiment']:+.2f}")
             
             with cols[2]:
-                if os.path.exists(clip["thumbnail"]):
+                if clip.get("thumbnail") and os.path.exists(clip["thumbnail"]):
                     st.image(clip["thumbnail"], width="stretch")
-                
-                # Download button
-                with open(clip["file_path"], "rb") as f:
-                    st.download_button(
-                        label="⬇️ Download MP4",
-                        data=f,
-                        file_name=Path(clip["file_path"]).name,
-                        mime="video/mp4",
-                        key=f"dl_{i}"
-                    )
+
+                # Download button (FIX: dulu open() tanpa cek file -> crash seluruh halaman hasil)
+                if os.path.exists(clip["file_path"]):
+                    with open(clip["file_path"], "rb") as f:
+                        st.download_button(
+                            label="⬇️ Download MP4",
+                            data=f,
+                            file_name=Path(clip["file_path"]).name,
+                            mime="video/mp4",
+                            key=f"dl_{i}"
+                        )
     
     # Metadata download
     metadata_path = output_dir / "metadata.json"
@@ -647,6 +754,38 @@ def show_results(processed_clips: list, output_dir: Path, video_info: dict, targ
                 mime="application/json"
             )
     
+    if publish_dir and Path(publish_dir).exists():
+        import zipfile
+        import io
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file in Path(publish_dir).rglob("*"):
+                if file.is_file():
+                    zf.write(file, file.relative_to(Path(publish_dir)))
+        st.download_button(
+            "📤 Download Paket Upload (ZIP)",
+            data=zip_buf.getvalue(),
+            file_name=f"{Path(publish_dir).name}.zip",
+            mime="application/zip",
+        )
+        st.info("📤 Paket publish berisi caption per platform, jam upload terbaik & varian A/B test.")
+
+    with st.expander("⬆️ Auto-upload ke YouTube Shorts / TikTok"):
+        st.caption("YouTube butuh client_secret.json OAuth (YOUTUBE_CLIENT_SECRET_FILE). "
+                   "TikTok butuh `pip install tiktok-uploader` + cookies (TIKTOK_COOKIES_FILE).")
+        up_col1, up_col2, up_col3 = st.columns(3)
+        with up_col1:
+            do_yt = st.checkbox("YouTube Shorts", key="up_yt")
+        with up_col2:
+            do_tt = st.checkbox("TikTok", key="up_tt")
+        with up_col3:
+            up_limit = st.number_input("Jumlah klip teratas (0 = semua)", 0, 20, 3, key="up_limit")
+        if st.button("🚀 Upload sekarang", key="up_go", disabled=not (do_yt or do_tt)):
+            from core.publisher import upload_clips
+            with st.spinner("Mengupload..."):
+                report = upload_clips(processed_clips, youtube=do_yt, tiktok=do_tt, limit=int(up_limit))
+            st.json(report)
+
     st.success(f"✅ Semua file tersimpan di: `{output_dir}`")
     st.info("💡 **Tips Selanjutnya**: Upload ke TikTok/Shorts/Reels dengan caption menarik + hashtag #ViralAutoKlip #Shorts")
 

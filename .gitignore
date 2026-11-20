@@ -19,6 +19,17 @@ build/
 # Output & temp
 output/
 temp/
+models/
+mentahan/
+# FFmpeg lokal hasil start.bat (~300 MB biner, jangan di-commit)
+ffmpeg/
+ffmpeg.zip
+ffmpeg_temp/
+# Token OAuth (rahasia)
+.yt_upload_token.json
+.google_ai_token.json
+google_client_secret.json
+client_secret*.json
 *.mp4
 *.mp3
 *.wav
@@ -40,3 +51,10 @@ logs/
 
 # Model cache (bisa besar)
 # ~/.cache/whisper/   ← comment jika mau exclude
+
+# Studio v6: database, upload & aset lokal
+data/
+
+# Real-ESRGAN biner (diunduh manual, rilis resmi xinntao/Real-ESRGAN v0.2.5.0)
+tools/realesrgan/
+tools/models/
