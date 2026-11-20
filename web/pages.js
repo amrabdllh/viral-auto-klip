@@ -13,7 +13,14 @@ const FIT = [{ v: "blur", l: "Utuh + latar blur" }, { v: "cover", l: "Crop penuh
 const VIDEO_MODES = [{ v: "single", l: "1 pembicara" }, { v: "podcast", l: "Podcast / 2 orang" }, { v: "group", l: "Grup 3+ orang" }, { v: "auto", l: "Deteksi otomatis" }];
 const WHISPER_DEVICES = [{ v: "", l: "Ikut Pengaturan" }, { v: "elevenlabs", l: "ElevenLabs Scribe (paling akurat)" }, { v: "auto", l: "Whisper di GPU (gratis)" }, { v: "cpu", l: "Whisper di CPU (lambat)" }, { v: "groq", l: "Groq Whisper (cloud)" }];
 const EDIT_STYLES = [{ v: "", l: "Ikut Pengaturan" }, { v: "auto", l: "Otomatis (AI per klip)" }, { v: "minimal", l: "Minimal" }, { v: "dinamis", l: "Dinamis" }, { v: "maksimal", l: "Maksimal" }];
-const CLIP_COUNTS = [{ v: "", l: "Otomatis (AI, sesuai kualitas)" }, ...[3, 5, 8, 10, 15, 20, 25, 30, 40].map((n) => ({ v: n, l: `${n} klip` }))];
+const PUBLISH_CATS = [{ v: "", l: "Otomatis (AI dari isi klip)" }, { v: "gaming", l: "Gaming" }, { v: "comedy", l: "Komedi" }, { v: "education", l: "Edukasi" },
+  { v: "finance", l: "Keuangan" }, { v: "motivation", l: "Motivasi" }, { v: "tech", l: "Teknologi" }, { v: "relationship", l: "Hubungan" }, { v: "general", l: "Umum" }];
+const pubStatus = () => {
+  const pf = STATE.status?.platforms || {};
+  const on = Object.values(pf).filter((p) => p.ready && (p.logged_in !== false)).map((p) => p.label);
+  return on.length ? `Terhubung: ${on.join(", ")}.` : "Belum ada platform terhubung — hubungkan YouTube/TikTok di <a href='#upload'>Jadwal Upload</a> dulu.";
+};
+const CLIP_COUNTS = [{ v: "", l: "Otomatis — kualitas (AI)" }, { v: "farm", l: "Otomatis — farming (lebih banyak)" }, ...[3, 5, 8, 10, 15, 20, 25, 30, 40].map((n) => ({ v: n, l: `${n} klip` }))];
 const captionSelect = (v = "viral") => UI.select("caption_style", "Gaya caption", CAPTION_STYLES(), v);
 const CAPTION_LABELS = { viral: "Viral (kuning tebal)", modern: "Modern", tiktok_bold: "TikTok Bold", karaoke: "Karaoke", neon: "Neon",
   gradient: "Gradasi", minimal: "Minimal", emoji: "Emoji", hormozi: "Hormozi", mrbeast: "MrBeast", clean: "Bersih", bold: "Tebal" };
@@ -147,11 +154,15 @@ PAGES.analisis = { render(view, q) {
   view.innerHTML = toolPage({ id: "analisis", needs: ["llm", "ffmpeg"],
     desc: "AI membaca seluruh transkrip, memilih momen paling viral, lalu merender klip vertikal dengan reframe wajah, caption animasi, dan editing dinamis.",
     main: UI.panel({ id: "f", body: UI.section("Sumber video", `<div id="src"></div>`) +
-      UI.section("Klip", `<div class="fields">${UI.select("num_clips", "Jumlah klip", CLIP_COUNTS, "", { numeric: true, hint: "Otomatis: semua momen yang lolos penilaian Editor-AI, maks ±1 klip per 4,5 menit video." })}${UI.num("min_duration", "Durasi minimum", { value: "", min: 5, max: 120, hint: "detik · kosong = otomatis (AI, mulai 15)" })}
+      UI.section("Klip", `<div class="fields">${UI.select("num_clips", "Jumlah klip", CLIP_COUNTS, "", { hint: "Kualitas: hanya klip yang benar-benar bagus (±1 per 4,5 menit maks). Farming: klip 'lumayan' ikut diambil (±1 per 3 menit, maks 40)." })}${UI.num("min_duration", "Durasi minimum", { value: "", min: 5, max: 120, hint: "detik · kosong = otomatis (AI, mulai 15)" })}
         ${UI.num("max_duration", "Durasi maksimum", { value: "", min: 10, max: 180, hint: "detik · kosong = otomatis (AI, hingga 90)" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
         ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "auto")}${UI.select("language", "Bahasa video", LANGS, "id")}</div>`) +
       UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "auto")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Kosong = otomatis: klip yang menyebut topik yang lagi naik diutamakan." })}</div>
         <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
+      UI.section("Upload otomatis", `<div class="switches">${UI.toggle("auto_publish", "Upload otomatis ke jam FYP terbaik", { checked: false, sub: "Klip langsung dijadwalkan & diupload sendiri ke platform yang terhubung — tanpa isi jadwal." })}</div>
+        <div class="fields">${UI.select("auto_publish_platform", "Platform", [{ v: "", l: "Semua yang terhubung" }, { v: "youtube", l: "YouTube Shorts" }, { v: "tiktok", l: "TikTok" }], "")}
+        ${UI.select("publish_category", "Kategori jadwal", PUBLISH_CATS, "")}${UI.text("extra_hashtags", "Hashtag tambahan (job ini)", { placeholder: "#gta6 #windah", hint: "Ditambah hashtag AI + hashtag global di Pengaturan." })}</div>
+        <p class="tiny muted" style="margin:4px 0 0">${pubStatus()}</p>`) +
       UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: "", min: 0, max: 100, hint: "Kosong = otomatis (saringan kualitas Editor-AI)" })}${UI.tri("jump_cuts", "Potong jeda")}${UI.tri("dynamic_zoom", "Zoom dinamis")}${UI.tri("progress_bar", "Progress bar")}
         ${UI.tri("sfx", "SFX transisi")}${UI.tri("end_cta", "Ajakan di akhir")}${UI.select("color_grade", "Warna", [{ v: "", l: "Ikut preset" }, "none", "natural", "vibrant", "cinematic"], "")}
         ${UI.tri("cold_open", "Cold open + rewind")}${UI.tri("caption_fx", "Caption animasi + emoji")}${UI.tri("sound_design", "Sound design")}
@@ -168,7 +179,9 @@ PAGES.analisis = { render(view, q) {
   const src = sourceInput($("#src"), { prefill: q.url || "" });
   $("#go").onclick = (e) => {
     const s = requireSource(src); if (!s) return;
-    const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names"]);
+    const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names", "publish_category", "extra_hashtags"]);
+    if (p.auto_publish_platform) p.auto_publish_platforms = [p.auto_publish_platform];
+    delete p.auto_publish_platform;
     runJob($("#job"), "clip_quick", { ...p, ...s }, { title: "Analisis AI", btn: e.currentTarget });
   };
 } };

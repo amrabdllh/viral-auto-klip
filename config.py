@@ -246,9 +246,19 @@ VIDEO_AI_MAX_SCENES = int(os.getenv("VIDEO_AI_MAX_SCENES", "4"))  # batas adegan
 AUTO_MINUTES_PER_CLIP = float(os.getenv("AUTO_MINUTES_PER_CLIP", "4.5"))  # batas atas ±1 klip per 4,5 menit konten
 AUTO_MIN_CLIPS = int(os.getenv("AUTO_MIN_CLIPS", "3"))
 AUTO_MAX_CLIPS = int(os.getenv("AUTO_MAX_CLIPS", "30"))
-AUTO_MIN_DURATION = int(os.getenv("AUTO_MIN_DURATION", "15"))
+AUTO_MIN_DURATION = int(os.getenv("AUTO_MIN_DURATION", "20"))  # <20 dtk sering tanpa konteks/payoff
 AUTO_MAX_DURATION = int(os.getenv("AUTO_MAX_DURATION", "90"))
-AUTO_MIN_RUBRIC = float(os.getenv("AUTO_MIN_RUBRIC", "56"))  # saringan kualitas Editor-AI saat jumlah klip otomatis
+AUTO_MIN_RUBRIC = float(os.getenv("AUTO_MIN_RUBRIC", "56"))
+AUTO_FARM_MIN_RUBRIC = float(os.getenv("AUTO_FARM_MIN_RUBRIC", "46"))  # mode farming: klip "lumayan" ikut diambil
+AUTO_FARM_MINUTES_PER_CLIP = float(os.getenv("AUTO_FARM_MINUTES_PER_CLIP", "3"))
+AUTO_FARM_MAX_CLIPS = int(os.getenv("AUTO_FARM_MAX_CLIPS", "40"))  # saringan kualitas Editor-AI saat jumlah klip otomatis
+# v6.8: upload otomatis ke jam FYP terbaik
+GLOBAL_HASHTAGS = os.getenv("GLOBAL_HASHTAGS", "")  # mis. "#veruclipper #fyp" — ditambahkan ke SEMUA upload
+AUTO_PUBLISH_PER_DAY = int(os.getenv("AUTO_PUBLISH_PER_DAY", "3"))  # maks upload otomatis per platform per hari
+AUTO_PUBLISH_MIN_GAP_H = float(os.getenv("AUTO_PUBLISH_MIN_GAP_H", "2.5"))  # jarak minimal antar upload (jam)
+VISION_REVIEW = os.getenv("VISION_REVIEW", "1").lower() in ("1", "true", "yes")  # Editor-AI melihat frame (live/gaming)
+VISION_PROVIDER = os.getenv("VISION_PROVIDER", "")  # kosong = otomatis (koneksi dengan model Claude/GPT-4o/Gemini)
+VISION_MODEL = os.getenv("VISION_MODEL", "")
 TRENDS_AUTO_REFRESH = os.getenv("TRENDS_AUTO_REFRESH", "1").lower() in ("1", "true", "yes")  # riset tren otomatis
 TRENDS_REFRESH_MIN = int(os.getenv("TRENDS_REFRESH_MIN", "60"))  # interval pembaruan (menit)
 AUTO_TEMPO = os.getenv("AUTO_TEMPO", "1").lower() in ("1", "true", "yes")  # percepat halus pembicara lambat

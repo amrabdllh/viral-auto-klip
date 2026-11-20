@@ -270,3 +270,35 @@ Uji:
 - Perbaikan setelah uji: kata umum ("Sekarang", "Ytshorts") tidak lagi dianggap topik tren; syarat gaya Maksimal diperketat (dulu 6/10 klip, termasuk emosi 4,5).
 
 Catatan biaya waktu: render ±4 menit per klip (upscale + wajah AI) → 25 klip ±1,5–2 jam; perkiraan ditampilkan di progres job.
+
+---
+
+## Putaran 13 (v6.8): live/gaming, Editor-AI yang melihat, mode farming, upload otomatis
+Diuji pada job pengguna: live GTA VI 110 menit (QSPPyA1736U), hasil awal 9 klip yang dinilai "masih kurang".
+
+Temuan dari klip pengguna:
+- Klip 14–20 dtk tanpa pengantar/payoff; skor lokal (kata kunci) 28–45 karena penilai dirancang untuk obrolan.
+- **Bug**: hook ditulis dari teks sebelum Editor-AI memangkas klip → hook membahas bagian yang terbuang ("Nyari Bigfoot…" padahal isinya loot sniper).
+- Topik tren palsu: kata biasa "Langsung" dianggap topik.
+- Tata letak facecam + gameplay sudah benar (split), tidak diubah.
+- Akar masalah: Editor-AI hanya membaca teks. Penilaian visual (claude-haiku-5-5) atas klip lama: "cowok belanja" visual 3/10 ("tanpa kejadian berarti"), "loot sniper" 4/10, "Lucia punya anak" 3/10 (dibuka menu jeda) — cocok dengan penilaian pengguna.
+
+Perbaikan:
+| | |
+|---|---|
+| Tipe konten | judul/link (gta, minecraft, gameplay, live, /live/…) → `gaming_stream`: kriteria momen reaksi/kejadian game, pengantar + reaksi tuntas, 25–60 dtk |
+| Kandidat dari suara | puncak reaksi (persentil ≥90) jadi kandidat tambahan (22 kandidat pada uji) |
+| **Editor-AI melihat** (`core/vision_review.py`) | 4 frame per kandidat → model multimodal (otomatis: koneksi dengan Claude/GPT-4o/Gemini) menilai kejadian di layar & kejelasan; rubrik = 60% teks + 40% visual; teks lemah tapi visual ≥7 tidak dibuang |
+| Grounding setelah trim | hook/judul/caption diperiksa ulang ke teks hasil pangkas; pakai alternatif yang terdukung atau kutipan asli |
+| Durasi | minimum otomatis 20 dtk (gaming 22), trim tidak boleh < 85% minimum |
+| Ambang gaming | standalone ≥4, payoff ≥4,5, rubrik ≥46 (teks tidak melihat gameplay) |
+| Mode farming | "Otomatis — farming": klip ≥46 rubrik, ±1 per 3 menit, maks 40 — untuk kampanye klip berbayar per views |
+| Topik tren | topik satu kata harus nama diri (berhuruf kapital di tengah kalimat) |
+
+Uji ulang (transkrip tersimpan, tanpa render): catatan "live gaming" versi pertama terlalu keras (31/37 ditolak, rubrik "cowok belanja" 62→50) → diperhalus. Dengan penilaian visual: 37 kandidat dilihat, 16 lolos Editor-AI, 6 lolos saringan kualitas (rubrik 52–62; mis. "Gua udah ngegym, pukulan segitu doang?" — adegan pukul-pukulan). Mode farming akan mengambil ke-16. Kesimpulan jujur: live ini sebagian besar playthrough cerita, sedikit momen yang benar-benar kuat.
+
+### Skor
+Skor = 35% skor awal (kata kunci + penilaian momen AI) + 65% rubrik Editor-AI (rubrik = rata-rata berbobot hook/payoff/standalone/emosi/kejelasan ×10). Rubrik sengaja jujur ("klip biasa 4–6/10"), jadi 60–70 = layak, 70–80 = bagus, ≥80 = istimewa (semua aspek ≥8). Skor rendah di job ini konsisten dengan penilaian pengguna, bukan salah hitung.
+
+### Upload otomatis (`core/autopublish.py`)
+Centang "Upload otomatis ke jam FYP terbaik" di Analisis AI → klip langsung masuk antrean penjadwal (upload sendiri saat jamnya): jendela jam ramai per niche & platform (niche dari isi klip, gaming untuk live gaming, atau dipilih pengguna), akhir pekan pagi digeser +1 jam, menit diacak, klip skor tertinggi di jam paling ramai, maks `AUTO_PUBLISH_PER_DAY` (3) per platform per hari, jarak ≥ `AUTO_PUBLISH_MIN_GAP_H` (2,5 jam), tidak bentrok dengan jadwal yang ada. Judul/caption/hashtag dari Editor-AI + `GLOBAL_HASHTAGS` (Pengaturan) + hashtag per job; hashtag global juga dipakai jadwal manual. Hanya platform yang benar-benar tersambung (YouTube perlu login). Uji (antrean tiruan, tanpa upload sungguhan): 7 klip × 2 platform → maks 3/hari, jarak minimum 2,9 jam, slot hari yang sama dipakai bila jendela masih terbuka. Catatan: platform tidak membuka data "jam FYP" real-time; jendela memakai pola waktu ramai per niche.

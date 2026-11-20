@@ -149,6 +149,21 @@ def _source_title(params: Dict, video: str) -> str:
     return Path(video).stem
 
 
+_GAMING_RE = re.compile(r"\b(gta|grand theft auto|minecraft|roblox|valorant|mobile legends?|mlbb|pubg|free ?fire|"
+                        r"fortnite|genshin|elden ring|resident evil|horror game|gameplay|let'?s play|walkthrough|"
+                        r"live ?stream|mabar|speedrun|ranked|push rank|playthrough|ps5|nintendo|steam|\bgame\b)", re.I)
+
+
+def content_type(params: Dict, title: str, url: str = "") -> str:
+    """v6.8: tebak tipe konten untuk menyesuaikan kriteria momen. 'gaming_stream' bila judul/link menunjukkan
+    gaming atau siaran live (youtube.com/live/…), selain itu kosong (obrolan/podcast)."""
+    if params.get("content_type"):
+        return str(params["content_type"])
+    if _GAMING_RE.search(title or "") or "/live/" in (url or ""):
+        return "gaming_stream"
+    return ""
+
+
 def source_channel(url: str) -> str:
     """Nama channel/uploader sumber (untuk lower third). Kosong bila gagal."""
     if not url:
@@ -193,13 +208,15 @@ def clip_quick(ctx: JobContext) -> Dict:
 
     def _auto(v) -> bool:  # isian dikosongkan / "auto" = AI yang menentukan (v6.8)
         return v is None or str(v).strip().lower() in ("", "0", "auto", "otomatis")
-    auto_n, auto_score = _auto(p.get("num_clips")), _auto(p.get("min_score"))
+    farm = str(p.get("num_clips") or "").strip().lower() in ("farm", "farming")  # v6.8: lebih banyak klip
+    auto_n, auto_score = _auto(p.get("num_clips")) or farm, _auto(p.get("min_score"))
     auto_dur = _auto(p.get("min_duration")) and _auto(p.get("max_duration"))
     # skor minimum otomatis: gerbang kandidat dilonggarkan, kualitas akhirnya disaring Editor-AI
     config.MIN_VIRAL_SCORE = 45.0 if auto_score else max(0.0, min(float(p["min_score"]), 100.0))
     config.MIN_CLIP_DURATION = int(config.AUTO_MIN_DURATION) if _auto(p.get("min_duration")) else max(5, int(p["min_duration"]))
     config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(config.AUTO_MAX_DURATION) if _auto(p.get("max_duration")) else int(p["max_duration"]))
     num = 0 if auto_n else max(1, min(int(p["num_clips"]), 40))
+    auto_mode = ("farm" if farm else "quality") if auto_n else False
     config.MAX_CLIPS_PER_VIDEO = num or int(config.AUTO_MAX_CLIPS)
     if p.get("watermark_text"):
         config.WATERMARK_TEXT = p["watermark_text"]
@@ -216,18 +233,25 @@ def clip_quick(ctx: JobContext) -> Dict:
     video = resolve_source(ctx, p)
     info = get_video_info(video)
     info["title"] = _source_title(p, video)
+    info["content_type"] = content_type(p, info["title"], p.get("url", ""))
+    if info["content_type"] == "gaming_stream":
+        ctx.log("Tipe konten: live/gaming → momen reaksi & kejadian game diutamakan, kandidat dari puncak suara ikut dinilai")
+        if _auto(p.get("min_duration")):
+            config.MIN_CLIP_DURATION = max(config.MIN_CLIP_DURATION, 22)  # reaksi butuh pengantar
     if auto_n:  # batas atas sesuai panjang video: ±1 klip per 4,5 menit (video 4 jam → hingga 30 klip)
         minutes = float(info.get("duration") or 0) / 60
-        num = int(max(config.AUTO_MIN_CLIPS, min(config.AUTO_MAX_CLIPS, math.ceil(minutes / config.AUTO_MINUTES_PER_CLIP))))
+        per, cap = ((config.AUTO_FARM_MINUTES_PER_CLIP, config.AUTO_FARM_MAX_CLIPS) if farm
+                    else (config.AUTO_MINUTES_PER_CLIP, config.AUTO_MAX_CLIPS))
+        num = int(max(config.AUTO_MIN_CLIPS, min(cap, math.ceil(minutes / per))))
         config.MAX_CLIPS_PER_VIDEO = num
-        ctx.log(f"Mode otomatis: video {minutes:.0f} menit → hingga {num} klip (jumlah akhir ditentukan kualitas)"
+        ctx.log(f"Mode otomatis{' farming' if farm else ''}: video {minutes:.0f} menit → hingga {num} klip (jumlah akhir ditentukan kualitas)"
                 + (f", durasi {config.MIN_CLIP_DURATION}–{config.MAX_CLIP_DURATION} dtk" if auto_dur else ""))
     transcript, tinfo = transcribe(ctx, video, p, 18)
     # Nama channel bukan nama pembicara: di podcast ia menempel pada tamu/host yang sedang tampil.
     # Kartu nama hanya muncul bila pengguna mengisi "Nama pembicara".
     p["_lower_third"] = build_lower_third(p, transcript)
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
-    clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video, auto_count=auto_n)
+    clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video, auto_count=auto_mode)
     if p.get("categories"):
         clips_data = [c for c in clips_data if c.get("category") in p["categories"]]
     if p.get("keyword"):
@@ -256,9 +280,24 @@ def clip_quick(ctx: JobContext) -> Dict:
     publish = _publish(ctx, clips, p)
     register_clips(ctx, clips, "analisis_ai")
     (ctx.dir / "transcript.json").write_text(json.dumps(transcript, ensure_ascii=False), encoding="utf-8")
-    return {"_message": f"{len(clips)} klip viral siap", "clips": clips, "total_clips": len(clips),
+    auto_pub = None
+    if p.get("auto_publish") and clips:  # v6.8: langsung dijadwalkan ke jam FYP terbaik, upload sendiri
+        from . import autopublish
+        ctx.progress(96, "Upload otomatis", "Menjadwalkan klip ke jam FYP terbaik…")
+        auto_pub = autopublish.schedule_clips(clips, platforms=p.get("auto_publish_platforms") or None,
+                                              niche_override=p.get("publish_category") or "",
+                                              extra_tags=p.get("extra_hashtags") or "", content_type=info.get("content_type", ""))
+        if auto_pub["skipped"]:
+            ctx.log(f"Upload otomatis dilewati: {auto_pub['skipped']}")
+        for s in auto_pub["scheduled"]:
+            ctx.log(f"Dijadwalkan {datetime.fromtimestamp(s['run_at']).strftime('%a %d %b %H:%M')} → "
+                    f"{', '.join(s['platforms'])} ({s['niche']}): {s['title'][:60]}")
+    return {"_message": f"{len(clips)} klip viral siap" + (f" · {len(auto_pub['scheduled'])} dijadwalkan otomatis"
+                                                            if auto_pub and auto_pub["scheduled"] else ""),
+            "clips": clips, "total_clips": len(clips),
             "transcription": tinfo, "publish_folder": publish, "source": video,
-            "ai": f"{config.AI_PROVIDER}/{config.LLM_MODEL}" if llm else "local-only"}
+            "ai": f"{config.AI_PROVIDER}/{config.LLM_MODEL}" if llm else "local-only",
+            "auto_publish": auto_pub}
 
 
 # ============================================================================ Atur Manual

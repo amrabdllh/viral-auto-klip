@@ -13,6 +13,7 @@ hook/judul/caption yang WAJIB menyertakan kutipan persis dari klip. Kutipan & ka
 """
 import re
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -139,6 +140,11 @@ def _prompt(clip: Dict, transcript: List[Dict], source_title: str, feedback: str
         "Transkrip dengan konteks sebelum/sesudah (baris di antara >>> MULAI dan <<< AKHIR adalah isi klip):\n"
         + _context_block(transcript, clip["start"], clip["end"])
         + _audio_note(clip)
+        + (("\n\nTIPE KONTEN: live streaming gaming (klip vertikal: wajah streamer di atas, gameplay di bawah). "
+            "Penonton MELIHAT gameplay-nya, jadi konteks visual ikut menjelaskan — jangan menghukum kalimat pendek, "
+            "bahasa gaul, atau reaksi spontan. Nilai dari: apakah ada kejadian/reaksi yang menghibur (lucu, kaget, epik, "
+            "gagal, plot twist), dan apakah reaksinya tuntas. Transkrip bisa bercampur dialog karakter game.")
+           if an().CONTENT_TYPE == "gaming_stream" else "")
         + "\n\nNilai klip itu seperti penonton yang BELUM PERNAH melihat video penuhnya:\n"
         "- standalone 0-10: bisa dipahami tanpa konteks sebelumnya? (kata ganti 'dia/itu/begitu' jelas rujukannya? "
         "tidak mulai dengan jawaban atas pertanyaan yang tidak ikut terpotong?)\n"
@@ -354,7 +360,7 @@ def _apply_trim(clip: Dict, d: Dict, transcript: List[Dict], taken: List[Tuple[f
     if not cand:
         return False
     dur = cand["end"] - cand["start"]
-    if not (config.MIN_CLIP_DURATION * 0.8 <= dur <= config.MAX_CLIP_DURATION + 3):
+    if not (max(config.MIN_CLIP_DURATION * 0.85, 15) <= dur <= config.MAX_CLIP_DURATION + 3):
         return False
     old = (clip["start"], clip["end"])
     clip.update({
@@ -377,22 +383,54 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
     logger.info(f"🎞️ Editor-AI meninjau {len(pool)} kandidat klip (rubrik: standalone, hook, payoff, emosi, kejelasan)…")
     with ThreadPoolExecutor(max_workers=workers) as ex:
         results = list(ex.map(lambda c: _review_one(c, transcript, source_title), pool))
+    # v6.8: live/gaming → Editor-AI juga MELIHAT 4 frame tiap kandidat (nilai ada di layar, bukan hanya di ucapan)
+    visuals: List[Optional[Dict]] = [None] * len(pool)
+    video = an().VIDEO_PATH
+    if an().CONTENT_TYPE == "gaming_stream" and video and Path(video).exists():
+        from . import vision_review
+        if vision_review.available():
+            todo = [i for i, d in enumerate(results) if d is not None]
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                for i, v in zip(todo, ex.map(lambda i: vision_review.review(pool[i], video), todo)):
+                    visuals[i] = v
+            logger.info(f"👁️ Editor-AI melihat {sum(1 for v in visuals if v)} kandidat ({vision_review.pick_model()[1]})")
 
     kept: List[Dict] = []
     rejected = trimmed = 0
-    for clip, d in zip(pool, results):
+    for clip, d, vis in zip(pool, results, visuals):
         if d is None:  # tidak bisa ditinjau (rate limit/error) → pertahankan apa adanya, tanpa klaim baru
             clip["review"] = {"status": "unreviewed"}
             kept.append(clip)
             continue
         verdict = str(d.get("verdict", "keep")).lower().strip()
         rub = rubric_score(d)
-        weak = _num(d.get("standalone")) < config.REVIEW_MIN_STANDALONE or _num(d.get("payoff")) < config.REVIEW_MIN_PAYOFF
+        if vis:  # gabungkan: 60% penilaian teks + 40% penilaian visual (kejadian di layar & kejelasan)
+            rub = 0.6 * rub + 0.4 * 10 * (0.65 * vis["visual"] + 0.35 * vis["clarity"])
+            d["standalone"] = max(_num(d.get("standalone")), vis["clarity"])
+            d["payoff"] = max(_num(d.get("payoff")), 0.9 * vis["visual"])
+            if verdict == "reject" and vis["visual"] >= 7:
+                verdict = "keep"  # teks lemah tapi kejadian di layar kuat → jangan dibuang
+        # live/gaming: AI hanya membaca teks (tidak melihat gameplay) → ambang lebih longgar agar momen visual tidak terbuang
+        gaming = an().CONTENT_TYPE == "gaming_stream"
+        min_st, min_pay = (4.0, 4.5) if gaming else (config.REVIEW_MIN_STANDALONE, config.REVIEW_MIN_PAYOFF)
+        weak = _num(d.get("standalone")) < min_st or _num(d.get("payoff")) < min_pay
         if verdict == "trim" and _apply_trim(clip, d, transcript, []):
             trimmed += 1
+            # v6.8 FIX: paket ditulis dari teks SEBELUM dipangkas → hook bisa membahas bagian yang sudah terbuang
+            # (mis. hook "Nyari Bigfoot…" padahal klip akhirnya soal loot senjata). Periksa ulang ke teks baru.
+            new_text = clip.get("transcript") or clip.get("text") or ""
+            _, probs = _ground_package(d, new_text)
+            if probs:
+                alt = next((h for h in d.get("hook_alternatives") or [] if overlap_ratio(h, new_text) >= 0.5), None)
+                if alt and any(p.startswith("hook") for p in probs):
+                    d["hook_text"] = alt
+                    _, probs = _ground_package(d, new_text)
+                if probs:
+                    _apply_fallback(clip, d, probs, new_text)
+                d["_grounding_problems"] = list(d.get("_grounding_problems") or []) + [f"setelah trim: {p}" for p in probs]
         elif verdict == "trim":
             verdict = "keep"
-        if verdict == "reject" or (weak and verdict != "trim") or rub < config.REVIEW_MIN_SCORE:
+        if verdict == "reject" or (weak and verdict != "trim") or rub < (config.REVIEW_MIN_SCORE - (6 if gaming else 0)):
             rejected += 1
             logger.info(f"  Editor-AI menolak klip {clip['start']:.0f}s (rubrik {rub:.0f}): "
                         f"{'; '.join(map(str, d.get('problems') or []))[:140]}")
@@ -420,6 +458,7 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
             "problems": [str(p) for p in (d.get("problems") or [])][:5],
             "risk": str(d.get("risk", "none")), "grounding_problems": d.get("_grounding_problems", []),
             "grounding_retry": d.get("_grounding_retry", False), "passes": d.get("_passes", 1),
+            **({"visual": vis} if vis else {}),
         }
         kept.append(clip)
     logger.info(f"🎞️ Editor-AI: {len(kept)} lolos, {rejected} ditolak, {trimmed} batasnya dirapikan")

@@ -204,9 +204,20 @@ def boost_trending(clips: List[Dict], bonus: float = 6.0) -> List[str]:
     if not topics or not clips:
         return []
     hits: List[str] = []
+
+    def proper(word: str, raw: str) -> bool:
+        """Topik satu kata hanya dihitung bila muncul berhuruf kapital di tengah kalimat (nama diri: 'Prabowo'),
+        bukan kata biasa ('langsung', 'sekarang') yang kebetulan ada di daftar tren."""
+        for m in re.finditer(rf"(?<!\w){re.escape(word)}(?!\w)", raw, re.I):
+            before = raw[:m.start()].rstrip()
+            if raw[m.start()].isupper() and before and before[-1] not in ".!?\"'":
+                return True
+        return False
     for c in clips:
-        text = f" {_norm(c.get('transcript') or c.get('text') or '')} "
-        found = [t for t in topics if f" {_norm(t)} " in text]
+        raw = str(c.get("transcript") or c.get("text") or "")
+        text = f" {_norm(raw)} "
+        found = [t for t in topics if f" {_norm(t)} " in text and (" " in _norm(t) or any(ch.isdigit() for ch in t)
+                                                                   or proper(_norm(t), raw))]
         if found:
             c["score"] = round(min(100.0, float(c.get("score") or 0) + bonus), 1)
             c["trending_topics"] = found[:3]

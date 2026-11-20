@@ -566,7 +566,8 @@ class BulkScheduleRequest(BaseModel):
 def _asset_copy(asset: Dict) -> Dict:
     meta = asset.get("meta") or {}
     caption = meta.get("upload_caption") or meta.get("description") or ""
-    tags = " ".join(meta.get("hashtags") or [])
+    from core.autopublish import _hashtags
+    tags = " ".join(_hashtags({"hashtags": meta.get("hashtags") or []}, ""))  # + hashtag global pengguna
     return {"title": meta.get("ai_title") or meta.get("title") or asset.get("name") or "",
             "description": f"{caption}\n\n{tags}".strip()}
 
