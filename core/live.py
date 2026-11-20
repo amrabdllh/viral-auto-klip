@@ -948,25 +948,24 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
 
     layout = None
     if settings["layout"] == "split":
-        cam, game = settings["facecam_rect"], settings["gameplay_rect"]
-        face = None
+        cam = game = face = None
         try:
             det = detect_stream_layout(video, picked)
         except Exception as exc:  # noqa: BLE001
             det = None
             logger.warning(f"Deteksi facecam campaign dilewati: {str(exc)[:160]}")
         if det:
-            # Preset tetap pemilik kotak crop; deteksi memusatkan wajah di panel.
+            # Auto-detect menentukan perlu split atau tidak + kotak yang
+            # memusatkan wajah; preset hanya cadangan bila deteksi gagal.
+            cam, game = det["cam_box"], _gameplay_from_cam(det["cam_box"])
             face = [det["face"][0], det["face"][1]]
-            if not cam:
-                cam = det["cam_box"]
-                game = _gameplay_from_cam(cam)
-                logger.info(f"Campaign live: facecam {cam} → gameplay {game}")
-            else:
-                logger.info(f"Campaign live: preset {cam}, wajah {face[0]:.3f},{face[1]:.3f}")
-        layout = {"cam_box": list(cam), "game_box": list(game),
-                  "cam_ratio": settings["facecam_height"] / 1920.0,
-                  "face": face, "caption_y": campaign.caption_margin(settings, preset)}
+            logger.info(f"Campaign live: auto {cam} (wajah {face[0]:.3f},{face[1]:.3f})")
+        else:
+            cam, game = settings.get("facecam_rect"), settings.get("gameplay_rect")
+        if cam and game:
+            layout = {"cam_box": list(cam), "game_box": list(game),
+                      "cam_ratio": settings["facecam_height"] / 1920.0,
+                      "face": face, "caption_y": campaign.caption_margin(settings, preset)}
 
     opts = tools.render_options(p)
     opts["stream_layout"] = layout

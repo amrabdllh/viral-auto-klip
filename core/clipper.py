@@ -782,6 +782,30 @@ def _process_single_clip(
 FACE_CAM_MAX_WIDTH = 0.32
 
 
+def centered_cam_box(face, cam_ratio: float = 0.38) -> List[float]:
+    """Kotak facecam yang memusatkan wajah di panel, tanpa padding.
+
+    Tinggi kotak ±2× tinggi wajah (ruang rambut), lebar mengikuti rasio panel
+    atas. Kalau wajah berada sangat dekat tepi frame, kotak dipersempit sampai
+    bisa muat terpusat — konsekuensinya crop lebih dekat, tetapi tidak ada bar
+    hitam. Dipakai untuk semua streamer, bukan koordinat tetap.
+    """
+    mx, my, _fw, fh = (float(v) for v in face)
+    panel_ratio = 1080 / (1920 * max(0.2, min(0.6, cam_ratio)))
+    k = panel_ratio * 1080 / 1920  # cw/ch ternormalisasi (vh/vw = 1080/1920)
+    ch = min(0.9, max(fh * 2.0, 0.18))
+    cw = ch * k
+    # wajah tepat di tengah: x = mx - cw/2 harus di dalam [0, 1-cw]
+    cw = max(0.08, min(cw, 2 * min(mx, 1 - mx)))
+    ch = min(0.9, cw / k)
+    # jaga kotak tetap di dalam frame (wajah ~52% dari atas kotak)
+    ch = min(ch, 2 * min(my / 0.52, (1 - my) / 0.48))
+    cw = max(0.08, ch * k)
+    x = min(max(mx - cw / 2, 0.0), 1 - cw)
+    y = min(max(my - ch * 0.52, 0.0), 1 - ch)
+    return [round(x, 4), round(y, 4), round(cw, 4), round(ch, 4)]
+
+
 def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = None, samples: int = 14,
                          force: bool = False, cam_ratio: float = 0.38) -> Optional[Dict]:
     """Deteksi facecam streamer (wajah kecil yang posisinya tetap di pinggir layar gameplay).
@@ -848,20 +872,11 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     if not force and (share < 0.55 or big_frames > read * 0.3 or not at_edge):
         logger.info(f"Layout probe: share={share:.2f} big={big_frames} at_edge={at_edge} → bukan layout streamer")
         return None
-    # kotak facecam: ±2,1× tinggi wajah (Clipper memakai ±2×) dan rasio sama
-    # dengan panel atas (1080 × 1920·cam_ratio). Wajah diposisikan sedikit di
-    # bawah tengah kotak (52%) supaya rambut/dahi tidak terpotong di panel.
-    panel_ratio = 1080 / (1920 * cam_ratio)
-    # Kotak facecam: ukuran proporsional panel atas (~0.22–0.25 lebar, seperti Clipper).
-    # Jangan memaksa cw membesar ke 0.32+ karena bila facecam di pinggir layar (x mentok 1.0),
-    # pelebaran kotak hanya menambah latar kosong di sebelah kiri dan mendorong wajah ke kanan.
-    ch = min(0.60, max(fh * 2.0, 0.24))
-    cw = ch * vh * panel_ratio / vw
-    cw = max(0.20, min(0.26, cw))
-    ch = cw * vw / (panel_ratio * vh)
-    x = min(max(mx - cw / 2, 0.0), 1 - cw)
-    y = min(max(my - ch * 0.52, 0.0), 1 - ch)
-    return {"cam_box": [round(x, 4), round(y, 4), round(cw, 4), round(ch, 4)], "game_box": [0.0, 0.0, 1.0, 1.0],
+    # Kotak facecam dihitung agar wajah SELALU di tengah panel (bukan preset
+    # tetap): tinggi 2× wajah, lebar mengikuti rasio panel, lalu dipersempit
+    # bila wajah terlalu dekat tepi frame — tanpa padding/bar hitam.
+    box = centered_cam_box((mx, my, fw, fh), cam_ratio)
+    return {"cam_box": box, "game_box": [0.0, 0.0, 1.0, 1.0],
             "cam_ratio": cam_ratio, "face": [round(mx, 3), round(my, 3), round(fw, 3), round(fh, 3)], "share": round(share, 2)}
 
 

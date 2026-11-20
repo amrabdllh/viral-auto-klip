@@ -442,22 +442,23 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
 
     layout = None
     if settings["layout"] == "split":
-        cam, game = settings["facecam_rect"], settings["gameplay_rect"]
-        face = None
+        cam = game = face = None
         try:
             det = detect_stream_layout(str(cut))
         except Exception:  # noqa: BLE001
             det = None
         if det:
-            # Preset tetap pemilik kotak crop; deteksi hanya memberi posisi wajah
-            # supaya panel bisa memusatkannya (padding di sisi yang kosong).
+            # Auto-detect memilih layout DAN kotak yang memusatkan wajah;
+            # preset hanya cadangan bila deteksi gagal (mis. podcast/grup).
+            cam, game = det["cam_box"], _gameplay_rect_from_cam(det["cam_box"])
             face = [det["face"][0], det["face"][1]]
-            if not cam:
-                cam, game = det["cam_box"], _gameplay_rect_from_cam(det["cam_box"])
-            logger.info(f"Campaign face: box {cam}, wajah {face[0]:.3f},{face[1]:.3f}")
-        layout = {"cam_box": list(cam), "game_box": list(game),
-                  "cam_ratio": settings["facecam_height"] / 1920.0,
-                  "face": face, "caption_y": caption_margin(settings, preset)}
+            logger.info(f"Campaign face: auto {cam} (wajah {face[0]:.3f},{face[1]:.3f})")
+        else:
+            cam, game = settings.get("facecam_rect"), settings.get("gameplay_rect")
+        if cam and game:
+            layout = {"cam_box": list(cam), "game_box": list(game),
+                      "cam_ratio": settings["facecam_height"] / 1920.0,
+                      "face": face, "caption_y": caption_margin(settings, preset)}
 
     clip = {"start": 0.0, "end": duration, "title": title or Path(video_path).stem,
             "hook_text": title, "score": 100, "subtitle_segments": segments,
