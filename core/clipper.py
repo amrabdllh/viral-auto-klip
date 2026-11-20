@@ -826,6 +826,8 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     mx, my = float(np.median([p[0] for p in best])), float(np.median([p[1] for p in best]))
     fw, fh = float(np.median([p[2] for p in best])), float(np.median([p[3] for p in best]))
     at_edge = mx < 0.32 or mx > 0.68 or my < 0.3 or my > 0.7
+    logger.info(f"Layout probe: frames={read} small={len(pts)} big={big_frames} "
+                f"share={share:.2f} face_w={fw:.3f} mx={mx:.2f} my={my:.2f} at_edge={at_edge} force={force}")
     if not force and (share < 0.55 or big_frames > read * 0.3 or not at_edge):
         return None
     # kotak facecam: ±2.9× tinggi wajah, rasio sama dengan panel atas (1080 × 1920·cam_ratio)
