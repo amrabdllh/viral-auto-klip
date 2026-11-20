@@ -194,7 +194,7 @@ PAGES.live = { render(view, q) {
         ${UI.num("min_lift", "Lonjakan chat minimum", { value: 3, min: 1, max: 20, hint: "× baseline" })}
         ${UI.num("max_spikes", "Maks spike", { value: 0, min: 0, max: 999, hint: "0 = tanpa batas" })}
         ${UI.field("Preset campaign", `<select name="preset" id="livePreset"><option value="">(memuat…)</option></select>`, { hint: "Dipakai kalau template MotionKlip diaktifkan" })}</div>
-        <div class="switches">${UI.toggle("campaign", "Render spike pakai template MotionKlip", { checked: false, sub: "Banner + judul + subtitle + outro dari preset" })}</div>
+        <div class="switches">${UI.toggle("campaign", "Render pakai template MotionKlip", { checked: false, sub: "Berlaku untuk kedua mode: banner + judul + subtitle + outro dari preset" })}</div>
         <div class="fields">${UI.tri("speaker_cam", "Kamera ikut pembicara")}${UI.tri("broll", "B-roll otomatis")}${UI.tri("shake", "Layar goyang")}
         ${UI.tri("freeze", "Freeze frame")}${UI.tri("lower_third", "Kartu nama")}${UI.tri("censor", "Sensor kata kasar")}
         ${UI.text("speaker_names", "Nama pembicara", { placeholder: "Kosong = nama channel" })}</div>`),

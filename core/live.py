@@ -554,7 +554,7 @@ _PASS_KEYS = ("caption_style", "edit_style", "language", "whisper_device", "whis
               "enable_captions", "hook_card", "use_llm", "audio_enhance", "layout", "video_mode", "output_type",
               "cold_open", "sound_design", "caption_fx", "audio_master", "jump_cuts", "dynamic_zoom", "progress_bar",
               "sfx", "end_cta", "color_grade", "enable_face_reframe", "speaker_cam", "broll", "shake", "freeze",
-              "lower_third", "censor", "speaker_names")
+              "lower_third", "censor", "speaker_names", "campaign", "preset", "subtitle_provider", "intro_voice")
 
 
 def _clock(ts: float) -> str:
@@ -698,6 +698,50 @@ def live_clip(ctx: JobContext) -> Dict:
             "chat": chat.count() if chat else 0}
 
 
+def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
+                            p: Dict, wall0: float) -> List[Dict]:
+    """Render momen jendela live memakai template MotionKlip (preset campaign).
+
+    Satu momen gagal tidak menggagalkan seluruh jendela: dicatat lalu dilewati.
+    """
+    from . import campaign, ffx
+
+    preset = p.get("preset") or getattr(config, "CAMPAIGN_DEFAULT_PRESET", "") or "motion-klip-gtavi-split.json"
+    preset_path = Path(preset)
+    if not preset_path.is_absolute():
+        preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
+    overrides = {k: p[k] for k in ("subtitle_provider", "intro_voice", "layout") if p.get(k)}
+    # Live butuh cepat: narasi judul hanya kalau diminta eksplisit.
+    overrides.setdefault("intro_voice", "none")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    clips: List[Dict] = []
+    for index, moment in enumerate(picked, 1):
+        start, end = float(moment.get("start") or 0), float(moment.get("end") or 0)
+        title = str(moment.get("ai_title") or moment.get("hook_text") or "")
+        try:
+            review = campaign.render_campaign(
+                video, preset_path, start=start, end=end, output_dir=out_dir,
+                title=title, overrides=overrides)
+        except Exception as exc:  # noqa: BLE001 - satu momen gagal, lanjut
+            logger.warning(f"Campaign live momen {index} gagal: {str(exc)[:200]}")
+            continue
+        out = Path(review["output"])
+        thumb = out.with_suffix(".jpg")
+        try:
+            ffx.extract_frame(str(out), 1.0, str(thumb), 540)
+        except Exception:  # noqa: BLE001
+            thumb = None
+        clips.append({
+            "file_path": str(out), "thumbnail": str(thumb) if thumb else "",
+            "title": out.stem, "ai_title": title, "hook_text": moment.get("hook_text"),
+            "score": moment.get("score"), "duration": review.get("duration"),
+            "hashtags": review.get("hashtags"), "campaign": True,
+            "wall_span": [wall0 + start, wall0 + end],
+        })
+    return clips
+
+
 @handler("live_window")
 def live_window(ctx: JobContext) -> Dict:
     """Satu jendela rekaman live: transkrip → sinyal chat/suara → AI pilih momen → render klip."""
@@ -775,7 +819,10 @@ def live_window(ctx: JobContext) -> Dict:
 
     ctx.progress(55, "Render", f"Merender {len(picked)} klip (layout otomatis, cold open, sound design)…")
     out_dir = parent_dir / f"klip_{int(p.get('window', 0)):03d}"
-    clips = process_clips(video, picked, out_dir, **tools.render_options(p))
+    if p.get("campaign"):
+        clips = _render_campaign_window(video, picked, out_dir, p, wall0)
+    else:
+        clips = process_clips(video, picked, out_dir, **tools.render_options(p))
     tools.brand_clips(ctx, clips, p.get("brand_kit"))
     tools.register_clips(ctx, clips, "live")
     summary = []
