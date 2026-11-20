@@ -342,13 +342,26 @@ def brand_logo() -> Optional[Dict]:
 
 
 def apply_brand(ctx_path: str, out: str, force: Optional[bool] = None) -> str:
-    kit = brand_logo()
-    use = kit and (kit.get("auto", True) if force is None else force)
-    if not use:
+    """Brand Kit: logo/watermark gambar (posisi pilihan) lalu penutup klip (gambar/video pengguna) di akhir.
+    `force`: None = ikuti pengaturan 'otomatis' masing-masing, False = lewati semua, True = pasang semua."""
+    kit = db.kv_get("brand_kit", {}) or {}
+    has_logo = bool(kit.get("logo") and Path(kit["logo"]).exists())
+    has_outro = bool(kit.get("outro") and Path(kit["outro"]).exists())
+    want_logo = has_logo and (kit.get("auto", True) if force is None else force)
+    want_outro = has_outro and (kit.get("outro_auto", True) if force is None else force)
+    if not (want_logo or want_outro):
         return ctx_path
-    xy = (kit.get("x"), kit.get("y")) if kit.get("position") == "custom" and kit.get("x") is not None else None
-    ffx.apply_logo(ctx_path, out, kit["logo"], position=kit.get("position", "top-left"), size=float(kit.get("size", 0.22)),
-                   opacity=float(kit.get("opacity", 0.9)), custom_xy=xy)
+    cur = ctx_path
+    if want_logo:
+        dst = out if not want_outro else str(Path(out).with_name(Path(out).stem + "_logo.mp4"))
+        xy = (kit.get("x"), kit.get("y")) if kit.get("position") == "custom" and kit.get("x") is not None else None
+        ffx.apply_logo(cur, dst, kit["logo"], position=kit.get("position", "top-left"), size=float(kit.get("size", 0.22)),
+                       opacity=float(kit.get("opacity", 0.9)), custom_xy=xy)
+        cur = dst
+    if want_outro:
+        ffx.append_outro(cur, out, kit["outro"], image_sec=float(kit.get("outro_duration", 3.0)))
+        if cur != ctx_path:
+            Path(cur).unlink(missing_ok=True)
     return out
 
 
@@ -419,7 +432,7 @@ def render_job(ctx: JobContext) -> Dict:
         s["_words"] = res["words"]
         s["_dur"] = res["duration"] + 0.35
         voice_files.append(res["path"])
-    ctx.log(f"TTS: {res['provider']} / {res['voice']}")
+    ctx.log(f"TTS: {res['provider']} / {res.get('voice') or 'suara default'}")
 
     # 2. Visual per adegan
     scene_clips = []

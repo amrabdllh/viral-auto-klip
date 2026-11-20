@@ -159,3 +159,35 @@ Uji (transkrip yang sama, AI Moment Finder + Editor-AI 2 pass):
 - Perbaikan sampingan: Editor-AI `max_tokens` 1400 → 2200 (2 dari 24 penilaian gagal karena JSON terpotong).
 
 Batas: ekspresivitas ≠ viral. Isi tetap yang utama. Event tawa bergantung pada Scribe (hanya 6 di video ini). Belum dirender ulang untuk 8 klip penuh.
+
+---
+
+## Putaran 8 (v6.8): audit ulang + clickbait jujur + watermark gambar 9 posisi + penutup klip
+
+### Audit ulang
+| Lapisan | Hasil |
+|---|---|
+| Statis (pyflakes, semua .py) | 1 temuan semu (`prev_e` di TTS ElevenLabs), diberi nilai awal |
+| UI (29 halaman) | Tidak ada error JS/console. `favicon.ico` 404 di setiap halaman, diperbaiki dengan ikon inline |
+| Smoke test 10 jenis job (via API, klip 12–15 dtk) | Semua selesai: editor, gabung, loop, WA story, TTS, klip manual, split cam, konten tempel, highlight, transkrip |
+
+Bug yang ditemukan & diperbaiki:
+- **Highlight Bola**: sumber berbingkai (border + logo channel) tampil kecil di tengah. Sekarang `auto_crop` dipasang seperti di Editor/Gabung/WA Story.
+- **Transkrip**: label asal selalu "Whisper" walau memakai ElevenLabs/Groq. Sekarang nama mesin sebenarnya.
+- **Klip manual**: nama file `clip_001_viral0_manual1`. Sekarang `clip_001_manual1`.
+- Catatan lama: nama gaya caption tampil ramah ("Viral (kuning tebal)", "Gradasi"…), estimasi waktu "±3–5 menit per klip", log TTS "suara default".
+- Sebelumnya di sesi ini: form Tambah koneksi API menolak isian valid, dan Tes koneksi berputar terus / lolos lewat provider cadangan.
+
+### Clickbait yang jujur (Editor-AI)
+- Prompt paket upload memakai 5 teknik (celah penasaran, kontras, detail spesifik, pernyataan berani, tantangan ke penonton) dan melarang judul generik.
+- Field baru **`thumb_text`** (2–5 kata, khusus thumbnail) + 2 alternatif untuk thumbnail B.
+- Pemeriksaan keaslian tidak lagi menghukum kata pembingkai ("ternyata", "alasan", "rahasia"…), tapi **angka wajib diucapkan** di klip.
+- Thumbnail: teks ≤3 kata memakai huruf raksasa tebal (Arial Black/Impact), mengecil otomatis bila tidak muat.
+- Uji (deepseek-flash, 4 momen): "Keluar kuliah baru semester tujuh? Lucu.", "'Uang tidak bisa membeli kebahagiaan' — tapi siapa yang ngomong?", thumbnail "Privilege atau minus?". 1 caption gagal pemeriksaan → cadangan kini kutipan asli + pertanyaan (bukan "Setuju? Komen di bawah!").
+
+### Brand Kit
+- **Watermark gambar 9 posisi** (kisi 3×3) + geser bebas. Baris bawah ditaruh di atas ±13% tinggi bawah (area tombol & deskripsi TikTok/Reels).
+- **Penutup klip (end card)**: gambar (1–10 dtk) atau video ≤15 dtk milik pengguna, disambung dengan fade 0,4 dtk (video & audio), rasio bebas diberi latar blur. Saklar "Brand Kit (logo + penutup)" di semua proses.
+- Uji: klip 27,6 dtk + gambar 3 dtk = 30,2 dtk; + video 4 dtk = 31,2 dtk; klip manual 8 dtk + video 4 dtk = 11,6 dtk. Durasi di metadata klip ikut diperbarui.
+
+Belum diuji: penutup pada Content Creator/Highlight secara langsung (memakai fungsi yang sama); clickbait pada analisis penuh 8 klip.

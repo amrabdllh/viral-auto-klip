@@ -197,9 +197,13 @@ _FONT_CANDIDATES = [
 ]
 
 
-def _load_font(size: int):
+_HEAVY_FONTS = [str(Path(config.FONT_DIR) / "Montserrat-Black.ttf"), str(Path(config.FONT_DIR) / "Montserrat-ExtraBold.ttf"),
+                "C:/Windows/Fonts/ariblk.ttf", "C:/Windows/Fonts/impact.ttf"]
+
+
+def _load_font(size: int, heavy: bool = False):
     custom = Path(str(config.DEFAULT_FONT))
-    candidates = ([str(custom)] if custom.suffix.lower() in (".ttf", ".otf") else []) + _FONT_CANDIDATES
+    candidates = (_HEAVY_FONTS if heavy else []) + ([str(custom)] if custom.suffix.lower() in (".ttf", ".otf") else []) + _FONT_CANDIDATES
     for candidate in candidates:
         try:
             return ImageFont.truetype(candidate, size)
@@ -264,8 +268,18 @@ def create_thumbnail(video_path: str, timestamp: float, output_path: str, hook_t
         draw = ImageDraw.Draw(overlay)
         hook = re.sub(r"[\U0001F000-\U0001FAFF☀-➿️]", "", hook_text or "").strip()
         if hook:
-            font = _load_font(max(int(w * 0.085), 18))
-            lines = _wrap_text(draw, hook.upper(), font, int(w * 0.86), max_lines=4)
+            # (v6.8) teks pendek = huruf raksasa & tebal (gaya thumbnail kreator); teks panjang tetap muat 4 baris
+            n_words = len(hook.split())
+            scale = 0.15 if n_words <= 3 else 0.125 if n_words <= 5 else 0.085
+            font = _load_font(max(int(w * scale), 18), heavy=n_words <= 6)
+            lines = _wrap_text(draw, hook.upper(), font, int(w * 0.9), max_lines=3 if n_words <= 6 else 4)
+            def _overflow(ls):  # kata terpotong "…" atau satu kata panjang melebihi lebar gambar
+                return len(" ".join(ls).replace("…", "").split()) < n_words or "…" in ls[-1] or \
+                    any(draw.textlength(ln, font=font) > w * 0.94 for ln in ls)
+            while _overflow(lines) and scale > 0.06:  # tidak muat → kecilkan
+                scale -= 0.015
+                font = _load_font(max(int(w * scale), 18), heavy=True)
+                lines = _wrap_text(draw, hook.upper(), font, int(w * 0.9), max_lines=4)
             line_h = int(font.size * 1.16) if hasattr(font, "size") else 22
             block_h = line_h * len(lines)
             # Wajah di setengah atas -> teks di bawah (di atas zona caption/UI); selain itu teks di atas.

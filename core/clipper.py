@@ -262,7 +262,8 @@ def _process_single_clip(
     try:
         clip_info = _snap_clip_to_scene_cuts(clip_info, scene_cuts)
 
-        clip_name = f"clip_{idx+1:03d}_viral{int(clip_info['score'])}_{clip_info['category']}"
+        score = int(clip_info.get("score") or 0)
+        clip_name = f"clip_{idx+1:03d}_" + (f"viral{score}_" if score else "") + str(clip_info.get("category") or "klip")
         clip_dir = output_dir / clip_name
         clip_dir.mkdir(exist_ok=True)
 
@@ -679,11 +680,13 @@ def _process_single_clip(
         else:
             best = []
         first = best[0] if best else {"time": rel_thumb, "face": None}
+        # (v6.8) teks thumbnail khusus 2–5 kata dari Editor-AI (lebih besar & memancing); cadangan: hook layar
+        thumb_txt = clip_info.get("thumb_text") or clip_info.get("hook_text", "")
         create_thumbnail(thumb_src, first["time"], str(thumb_path),
-                         clip_info.get("hook_text", ""), clip_info.get("score", 0), face_box=first.get("face"))
+                         thumb_txt, clip_info.get("score", 0), face_box=first.get("face"))
         if len(best) > 1:
             thumb_alt_path = clip_dir / "thumbnail_b.jpg"
-            alt_hook = (clip_info.get("hook_alternatives") or [clip_info.get("hook_text", "")])[0]
+            alt_hook = (clip_info.get("thumb_alternatives") or clip_info.get("hook_alternatives") or [thumb_txt])[0]
             create_thumbnail(thumb_src, best[1]["time"], str(thumb_alt_path),
                              alt_hook, clip_info.get("score", 0), face_box=best[1].get("face"))
 
