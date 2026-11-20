@@ -1,24 +1,45 @@
 yt-dlp>=2024.12.0
 pytubefix>=8.12.0
-openai-whisper>=20231117
-faster-whisper>=1.0.0
-moviepy==1.0.3
-scenedetect[opencv]>=0.6.4
+# Transkripsi lokal (faster-whisper; openai-whisper dihapus — tidak dipakai & berat)
+faster-whisper>=1.1.0
+scenedetect[opencv]>=0.6.4,<0.7
 opencv-python>=4.9.0.80
-mediapipe==0.10.14
+mediapipe>=0.10.14,<1.0
 python-dotenv>=1.0.1
-streamlit>=1.32.0
+streamlit>=1.50.0
 tqdm>=4.66.2
 numpy>=1.26.4
 Pillow>=10.3.0
-textblob>=0.18.0
 vaderSentiment>=3.3.2
 ffmpeg-python>=0.2.0
-groq>=0.8.0
-openai>=1.30.0
 pydantic>=2.7.1
 rich>=13.7.1
 loguru>=0.7.2
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 requests>=2.31.0
+
+# ===== AI providers (v4) =====
+groq>=0.8.0            # Groq
+openai>=1.30.0         # OpenAI, DeepSeek, Mistral, OpenRouter, Custom (OpenAI-compatible)
+anthropic>=2.10.0      # Claude (SDK resmi)
+google-auth-oauthlib>=1.2.0   # Antigravity (login Google) + upload YouTube
+
+# ===== Studio v6 =====
+edge-tts>=7.0.0        # TTS gratis tanpa key (suara Indonesia/Jawa/Sunda/Melayu/Arab)
+python-multipart>=0.0.9  # upload file dari UI
+# GPU Whisper di Windows (CTranslate2 4.x butuh CUDA 12 + cuDNN 9):
+nvidia-cublas-cu12; sys_platform == "win32"
+nvidia-cudnn-cu12>=9,<10; sys_platform == "win32"
+# pypdf>=4.0.0         # opsional: baca PDF di Content Creator / Transcript
+
+# ===== Opsional: auto-upload YouTube (core/publisher.py) =====
+# google-api-python-client>=2.120.0
+# google-auth-httplib2>=0.2.0
+
+# ===== Opsional: auto-upload TikTok (core/publisher.py) =====
+# tiktok-uploader>=1.1.0  (butuh cookies.txt sesi TikTok -> TIKTOK_COOKIES_FILE)
+
+# Upscale + restorasi wajah AI (GPU NVIDIA). PyTorch CUDA dipasang start.bat bila ada GPU NVIDIA:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132
+spandrel>=0.4.2

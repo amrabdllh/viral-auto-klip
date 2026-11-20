@@ -15,26 +15,33 @@ def enhance_audio(
     noise_reduction: bool = True,
     normalize: bool = True,
     bass_boost: bool = True,
-    bass_gain: float = 4.0
+    bass_gain: float = 2.5,
+    compress: bool = True,
 ) -> str:
     """
     Enhance audio using FFmpeg filters.
+    v6.4: high-pass (buang dengung/getaran meja) → denoise ringan → EQ 'presence' agar suara
+    jelas di speaker HP → kompresor suara (volume pelan/keras lebih rata). Loudness akhir
+    (-14 LUFS) dikerjakan editing.master_audio setelah SFX dicampur, jadi normalize bisa dimatikan.
     Returns path to enhanced audio.
     """
-    filters = []
-    
+    filters = ["highpass=f=70"]
+
     if noise_reduction:
         # High-quality noise reduction (afftdn is good for speech)
-        filters.append("afftdn=nr=12:nf=-50")
-    
+        filters.append("afftdn=nr=10:nf=-48")
+
+    if bass_boost:
+        # sedikit 'badan' suara; dulu +4 dB di 80 Hz membuat suara berdengung di speaker HP
+        filters.append(f"equalizer=f=110:width_type=o:width=1.5:g={bass_gain}")
+    filters.append("equalizer=f=3200:width_type=o:width=1.2:g=2")  # presence / kejelasan kata
+
+    if compress:
+        filters.append("acompressor=threshold=-21dB:ratio=3:attack=8:release=160:makeup=2.5:knee=4")
+
     if normalize:
         # EBU R128 loudness normalization (broadcast standard)
         filters.append("loudnorm=I=-16:TP=-1.5:LRA=11")
-    
-    if bass_boost:
-        # Bass boost using equalizer (boost low frequencies)
-        filters.append(f"equalizer=f=80:width_type=o:width=2:g={bass_gain}")
-        filters.append(f"equalizer=f=150:width_type=o:width=2:g={bass_gain * 0.6}")
     
     if not filters:
         # Just copy
@@ -46,6 +53,8 @@ def enhance_audio(
         "ffmpeg", "-y",
         "-i", input_audio,
         "-af", filter_chain,
+        # FIX: loudnorm meng-upsample ke 192 kHz -> tanpa -ar output jadi 96 kHz (boros & tidak standar)
+        "-ar", "48000",
         "-c:a", "aac", "-b:a", "192k",
         output_audio
     ]
@@ -78,10 +87,13 @@ def add_background_music_with_duck(
             "ffmpeg", "-y", "-i", music_path, "-ac", "2", "-ar", "48000", str(music_only)
         ], check=True, capture_output=True)
 
+        # FIX: parameter `makeup` sidechaincompress hanya menerima 1-64. Nilai lama
+        # (duck_amount=0.35) selalu error -> ducking TIDAK PERNAH jalan, selalu fallback
+        # ke mix biasa. Level musik sudah diatur oleh `volume`, jadi makeup=1 (netral).
         duck_filter = (
             f"[1:a]volume={music_volume}[music];"
             f"[music][0:a]sidechaincompress=threshold=0.03:ratio=8:"
-            f"attack=50:release=300:makeup={duck_amount}[ducked];"
+            f"attack=50:release=300:makeup=1[ducked];"
             "[0:a][ducked]amix=inputs=2:duration=first:dropout_transition=2[aout]"
         )
         cmd = [

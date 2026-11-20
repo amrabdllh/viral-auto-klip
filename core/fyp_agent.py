@@ -73,7 +73,8 @@ def _build_platform_copy(clip: Dict, platform: str, profile: Dict) -> Dict:
     else:  # YouTube Shorts
         # YouTube: searchable + curiosity driven
         viral_caption = f"{base_caption}\n\n👇 { _get_viral_cta(niche, 'shorts') }"
-        title = _generate_youtube_title(hook, niche, category, score)
+        # v4: judul tulisan AI (bila ada) lebih natural daripada template
+        title = clip.get("ai_title") or _generate_youtube_title(hook, niche, category, score)
         hashtags = _boost_hashtags(hashtags, niche, "shorts")
     
     cta = profile.get("cta", "")
@@ -296,3 +297,36 @@ def get_best_upload_schedule(niche: str, platform: str = "Semua") -> Dict:
         "best_times": schedules[platform][niche],
         "note": "Waktu di atas adalah waktu lokal terbaik berdasarkan data engagement niche kamu. Upload 2-3x sehari di jam berbeda untuk hasil maksimal."
     }
+
+
+# ==================== A/B TEST VARIANTS (NEW v3) ====================
+
+def suggest_caption_variants(clip: Dict, platform: str = "TikTok") -> List[str]:
+    """Generate 3 alternatif caption untuk A/B test upload (hook-first, tanya-opini, POV)."""
+    hook = (clip.get("hook_text") or "").strip()
+    base = (clip.get("upload_caption") or "").strip()
+    niche = clip.get("niche", "general")
+    if platform == "TikTok":
+        cta = _get_viral_cta(niche, "tiktok")
+    elif platform == "Instagram Reels":
+        cta = _get_viral_cta(niche, "reels")
+    else:
+        cta = _get_viral_cta(niche, "shorts")
+
+    # v4: variasi hook dari AI (hook_alternatives) dipakai lebih dulu untuk A/B test
+    raw_variants = [
+        f"{alt} {cta}".strip() for alt in (clip.get("hook_alternatives") or [])
+    ] + [
+        f"{hook} {base}".strip(),
+        f"{hook} — kamu tim yang mana? 👀 {cta}".strip(),
+        f"POV: {base}".strip(),
+        f"{cta} {hook}".strip(),
+    ]
+    variants = []
+    for variant in raw_variants:
+        variant = variant[:config.UPLOAD_CAPTION_MAX_CHARS].strip()
+        if variant and variant not in variants:
+            variants.append(variant)
+        if len(variants) >= 3:
+            break
+    return variants

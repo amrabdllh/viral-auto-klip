@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Viral Auto Klip Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="/static/app.css?v=6.7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0532d'/%3E%3Cpath d='M12 9l11 7-11 7z' fill='white'/%3E%3C/svg%3E">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-top">
+      <a class="brand" href="#home">
+        <span class="brand-mark"><svg class="ic fill" viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z"/></svg></span>
+        <span class="brand-text">Viral Auto Klip<small>Studio v6</small></span>
+      </a>
+      <a class="btn primary block" href="#analisis" id="newBtn">Buat klip</a>
+    </div>
+    <nav class="nav" id="nav"></nav>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="btn icon sm ghost only-mobile" id="menuBtn" aria-label="Buka menu"></button>
+      <div class="crumb" id="pageTitle">Beranda</div>
+      <div class="topbar-right">
+        <a class="chip" id="jobChip" href="#jobs" hidden></a>
+        <a class="chip hide-sm" id="aiChip" href="#settings">AI</a>
+        <button class="btn icon sm" id="themeBtn" aria-label="Ganti tema terang/gelap"></button>
+      </div>
+    </header>
+    <main class="content" id="view"></main>
+  </div>
+</div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<div class="modal-backdrop" id="modal" hidden><div class="modal" id="modalBox" role="dialog" aria-modal="true"></div></div>
+<script src="/static/app.js?v=6.7"></script>
+<script src="/static/pages.js?v=6.7"></script>
+<script src="/static/studio.js?v=6.7"></script>
+</body>
+</html>
