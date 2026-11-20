@@ -117,7 +117,8 @@ def cleanup_orphan_recorders() -> int:
     """
     killed = 0
     try:
-        roots = list(Path(config.OUTPUT_DIR).glob("job_*/rec/ffmpeg.pid"))
+        roots = (list(Path(config.OUTPUT_DIR).glob("job_*/rec/ffmpeg.pid"))
+                 + list(Path(config.OUTPUT_DIR).glob("job_*/chat/chat.pid")))
     except OSError:
         return 0
     for pid_file in roots:
@@ -130,7 +131,8 @@ def cleanup_orphan_recorders() -> int:
                                  capture_output=True, text=True, timeout=10).stdout.lower()
         except Exception:
             out = ""
-        if "ffmpeg.exe" in out:
+        is_ours = "ffmpeg.exe" in out or "python.exe" in out
+        if is_ours:
             try:
                 subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=10)
                 killed += 1
@@ -458,6 +460,10 @@ class ChatReader:
 
     def stop(self) -> None:
         self._stop.set()
+        try:
+            (self.dir / "chat.pid").unlink(missing_ok=True)
+        except OSError:
+            pass
         if self._proc and self._proc.poll() is None:
             self._proc.kill()
         self._thread.join(timeout=10)
@@ -482,6 +488,10 @@ class ChatReader:
                 cmd[3:3] = ["--cookies", cookies]
             try:
                 self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    (self.dir / "chat.pid").write_text(str(self._proc.pid), encoding="utf-8")
+                except OSError:
+                    pass
             except OSError as exc:
                 self.log(f"Chat live tidak bisa dibaca: {exc}")
                 return
