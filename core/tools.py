@@ -899,13 +899,10 @@ def campaign_render_job(ctx: JobContext) -> Dict:
     for index, item in enumerate(ranges, 1):
         ctx.progress(5 + int(80 * (index - 1) / len(ranges)), "Campaign",
                      f"Merender {index}/{len(ranges)}…" if len(ranges) > 1 else "Merender campaign…")
-        review = campaign.render_campaign(
+        review = campaign.render_edited(
             video, preset_path,
             start=item["start"], end=item["end"],
-            output_dir=ctx.dir,
-            title=item["title"],
-            overrides=overrides,
-            caption_font=str(p.get("caption_font") or config.DEFAULT_FONT),
+            output_dir=ctx.dir, params=p, title=item["title"],
             model=p.get("whisper_model") or None,
         )
         reviews.append(review)
