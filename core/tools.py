@@ -810,7 +810,8 @@ def campaign_render_job(ctx: JobContext) -> Dict:
 
     p = ctx.params
     video = resolve_source(ctx, p)
-    preset = p.get("preset") or "motion-klip-gtavi-split.json"
+    # Preset default bisa diatur di Pengaturan (config.CAMPAIGN_DEFAULT_PRESET).
+    preset = p.get("preset") or getattr(config, "CAMPAIGN_DEFAULT_PRESET", "") or "motion-klip-gtavi-split.json"
     preset_path = Path(preset)
     if not preset_path.is_absolute() and not preset_path.exists():
         preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
@@ -819,62 +820,96 @@ def campaign_render_job(ctx: JobContext) -> Dict:
         "highlight", "intro_voice",
     ) if k in p and p[k] not in (None, "")}
 
-    ctx.progress(5, "Campaign", "Menyiapkan preset & aset…")
-    end = p.get("end")
-    review = campaign.render_campaign(
-        video, preset_path,
-        start=float(p.get("start") or 0),
-        end=float(end) if end not in (None, "") else None,
-        output_dir=ctx.dir,
-        title=str(p.get("title") or ""),
-        overrides=overrides,
-        caption_font=str(p.get("caption_font") or config.DEFAULT_FONT),
-        model=p.get("whisper_model") or None,
-    )
+    # ---- Rentang: satu cut, atau beberapa sekaligus (batch).
+    raw_ranges = p.get("ranges") or []
+    ranges = []
+    for item in raw_ranges:
+        try:
+            r_start = float(item.get("start") or 0)
+            r_end = item.get("end")
+            r_end = None if r_end in (None, "") else float(r_end)
+        except (TypeError, ValueError):
+            continue
+        if r_end is not None and r_end <= r_start:
+            continue
+        ranges.append({"start": r_start, "end": r_end,
+                       "title": str(item.get("title") or p.get("title") or "")})
+    if not ranges:
+        end = p.get("end")
+        ranges = [{"start": float(p.get("start") or 0),
+                   "end": float(end) if end not in (None, "") else None,
+                   "title": str(p.get("title") or "")}]
 
-    ctx.progress(92, "Thumbnail", "Mengambil frame sampul…")
-    out = Path(review["output"])
-    thumb = out.with_suffix(".jpg")
-    try:
-        ffx.extract_frame(str(out), 1.0, str(thumb), 540)
-    except Exception:  # noqa: BLE001 - thumbnail opsional
-        thumb = None
-    asset = ctx.asset("clip", out, name=out.stem, meta={
-        "source": "campaign", "thumbnail": str(thumb) if thumb else "",
-        "duration": ffx.probe(str(out))["duration"], "hashtags": review.get("hashtags", ""),
-        "layout": review.get("layout"),
-    })
+    from .jobs import submit
 
-    # ---- Auto-publish: kirim ke YouTube lewat browser (headless) dengan hashtag preset.
-    upload_job = None
-    if p.get("auto_upload"):
-        from .jobs import submit
+    clips: List[Dict] = []
+    reviews: List[Dict] = []
+    upload_jobs: List[str] = []
+    for index, item in enumerate(ranges, 1):
+        ctx.progress(5 + int(80 * (index - 1) / len(ranges)), "Campaign",
+                     f"Merender {index}/{len(ranges)}…" if len(ranges) > 1 else "Merender campaign…")
+        review = campaign.render_campaign(
+            video, preset_path,
+            start=item["start"], end=item["end"],
+            output_dir=ctx.dir,
+            title=item["title"],
+            overrides=overrides,
+            caption_font=str(p.get("caption_font") or config.DEFAULT_FONT),
+            model=p.get("whisper_model") or None,
+        )
+        reviews.append(review)
 
-        title = str(p.get("title") or "")
-        description = ""
-        preset_tags = str(review.get("hashtags") or "").strip()
-        if p.get("auto_meta"):
-            generated = _auto_upload_meta(review.get("transcript_text") or "", preset_tags)
-            title = title or generated.get("title") or ""
-            description = generated.get("description") or ""
-        title = (title or out.stem)[:100]
-        discord = str(review.get("discord_tag") or "").strip()
-        parts = [description, preset_tags, f"Discord: {discord}" if discord else ""]
-        description = " ".join(part for part in parts if part).strip()
-        ctx.progress(96, "Upload", "Mengirim ke antrean upload YouTube…")
-        upload_job = submit("upload_browser", {
-            "path": str(out), "title": title, "description": description,
-            "privacy": str(p.get("upload_privacy") or "private"), "parent": ctx.id,
-        }, title=f"Upload · {title[:50]}")["id"]
+        out = Path(review["output"])
+        thumb = out.with_suffix(".jpg")
+        try:
+            ffx.extract_frame(str(out), 1.0, str(thumb), 540)
+        except Exception:  # noqa: BLE001 - thumbnail opsional
+            thumb = None
+        asset = ctx.asset("clip", out, name=out.stem, meta={
+            "source": "campaign", "thumbnail": str(thumb) if thumb else "",
+            "duration": ffx.probe(str(out))["duration"], "hashtags": review.get("hashtags", ""),
+            "layout": review.get("layout"),
+        })
+        clips.append({"file_path": str(out), "thumbnail": str(thumb) if thumb else "",
+                      "asset_id": asset["id"], "title": out.stem})
 
+        # ---- Auto-publish per klip (YouTube headless, opsional TikTok juga).
+        if p.get("auto_upload"):
+            title = str(item["title"] or "")
+            description = ""
+            preset_tags = str(review.get("hashtags") or "").strip()
+            if p.get("auto_meta"):
+                generated = _auto_upload_meta(review.get("transcript_text") or "", preset_tags)
+                title = title or generated.get("title") or ""
+                description = generated.get("description") or ""
+            title = (title or out.stem)[:100]
+            discord = str(review.get("discord_tag") or "").strip()
+            parts = [description, preset_tags, f"Discord: {discord}" if discord else ""]
+            description = " ".join(part for part in parts if part).strip()
+            targets = p.get("upload_targets") or ["youtube"]
+            if isinstance(targets, str):
+                targets = [t.strip() for t in targets.split(",") if t.strip()]
+            ctx.progress(96, "Upload", f"Mengirim {out.name} ke antrean upload…")
+            if "youtube" in targets:
+                upload_jobs.append(submit("upload_browser", {
+                    "path": str(out), "title": title, "description": description,
+                    "privacy": str(p.get("upload_privacy") or "private"), "parent": ctx.id,
+                }, title=f"Upload · {title[:50]}")["id"])
+            if "tiktok" in targets:
+                upload_jobs.append(submit("upload_tiktok", {
+                    "path": str(out), "description": description, "parent": ctx.id,
+                }, title=f"TikTok · {title[:50]}")["id"])
+
+    ctx.progress(99, "Selesai", "Campaign selesai")
+    joined = ", ".join(Path(r["output"]).name for r in reviews[:3])
     return {
-        "_message": f"Campaign {review['layout']} siap: {out.name}"
-                    + (" · upload diantrekan" if upload_job else ""),
-        "clips": [{"file_path": str(out), "thumbnail": str(thumb) if thumb else "",
-                   "asset_id": asset["id"], "title": out.stem}],
-        "total_clips": 1,
-        "campaign": review,
-        "upload_job": upload_job,
+        "_message": f"{len(clips)} campaign siap ({joined}{'…' if len(reviews) > 3 else ''})"
+                    + (f" · {len(upload_jobs)} upload diantrekan" if upload_jobs else ""),
+        "clips": clips,
+        "total_clips": len(clips),
+        "campaign": reviews[0] if len(reviews) == 1 else reviews,
+        "upload_job": upload_jobs[0] if len(upload_jobs) == 1 else None,
+        "upload_jobs": upload_jobs,
     }
 
 
@@ -917,8 +952,8 @@ def upload_browser_job(ctx: JobContext) -> Dict:
 
 @handler("upload_tiktok", background=True)
 def upload_tiktok_job(ctx: JobContext) -> Dict:
-    """Upload satu klip ke TikTok lewat `tiktok-uploader` + cookies sesi."""
-    from . import publisher
+    """Upload satu klip ke TikTok lewat browser **headless** (tanpa popup/jendela)."""
+    from . import tiktok_browser
 
     p = ctx.params
     path = resolve_source(ctx, p)
@@ -929,17 +964,17 @@ def upload_tiktok_job(ctx: JobContext) -> Dict:
         hashtags = [t.strip().lstrip("#") for t in hashtags.replace(",", " ").split() if t.strip()]
     if hashtags:
         description = (description + " " + " ".join(f"#{t}" for t in hashtags)).strip()
-    ctx.progress(20, "Upload", "Mengirim ke TikTok…")
-    result = publisher.upload_to_tiktok(
-        str(path), description=description[:2000],
-        cookies_file=str(p.get("cookies_file") or ""))
-    status = str(result.get("status") or "")
-    if status == "failed":
-        raise RuntimeError(result.get("reason") or "Upload TikTok gagal")
+
+    def progress(stage: str, pct: int, message: str) -> None:
+        ctx.progress(max(5, min(99, pct)), stage, message)
+
+    result = tiktok_browser.upload_video(str(path), description=description[:2000],
+                                         progress=progress)
     return {
-        "_message": ("TikTok: " + (result.get("reason") or status or "selesai")),
+        "_message": "Upload TikTok selesai",
         "upload": result,
-        "clips": [{"file_path": str(path), "title": meta.get("title") or Path(path).stem, "upload": result}],
+        "clips": [{"file_path": str(path), "title": meta.get("title") or Path(path).stem,
+                   "upload": result}],
     }
 
 

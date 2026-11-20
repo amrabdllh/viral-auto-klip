@@ -104,6 +104,36 @@ def youtube_test():
     return _wrap(youtube_browser.test_session)
 
 
+class TikTokCookiesRequest(BaseModel):
+    text: str = ""
+
+
+@router.get("/tiktok/cookies")
+def tiktok_cookies_status():
+    """Status cookies TikTok — tidak pernah mengembalikan isi cookie."""
+    from core import tiktok_browser
+    return tiktok_browser.cookie_status()
+
+
+@router.post("/tiktok/cookies")
+def tiktok_cookies_save(req: TikTokCookiesRequest):
+    from core import tiktok_browser
+    return _wrap(tiktok_browser.save_cookies, req.text)
+
+
+@router.delete("/tiktok/cookies")
+def tiktok_cookies_clear():
+    from core import tiktok_browser
+    return _wrap(tiktok_browser.clear_cookies)
+
+
+@router.post("/tiktok/test")
+def tiktok_test():
+    """Cek sesi cookies TikTok tanpa upload (headless, tanpa popup)."""
+    from core import tiktok_browser
+    return _wrap(tiktok_browser.test_session)
+
+
 @router.get("/campaign/presets")
 def campaign_presets():
     """Daftar preset MotionKlip di presets/, lengkap dengan ringkasan isinya."""
@@ -129,7 +159,8 @@ def campaign_presets():
                 "watermark": Path(preset["watermark"]).name,
                 "outro": Path(preset["outro"]).name,
             })
-    return {"presets": out, "folder": str(folder)}
+    return {"presets": out, "folder": str(folder),
+            "default": getattr(config, "CAMPAIGN_DEFAULT_PRESET", "") or ""}
 
 
 @router.get("/tts/voices")

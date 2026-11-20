@@ -87,6 +87,8 @@ SCHEMA: List[Dict] = [
     {"key": "PROGRESS_BAR_COLOR", "group": "Gaya editing", "label": "Warna progress bar", "type": "color"},
     {"key": "END_SCREEN_TEXT", "group": "Gaya editing", "label": "Teks ajakan di akhir klip", "type": "str"},
     # --- Render
+    {"key": "CAMPAIGN_DEFAULT_PRESET", "group": "Render", "label": "Preset campaign default", "type": "text",
+     "help": "Nama file di folder presets/ yang dipakai otomatis oleh Campaign dan Live spike"},
     {"key": "USE_NVENC", "group": "Render", "label": "Render pakai GPU NVIDIA", "type": "bool"},
     {"key": "PARALLEL_CLIPS", "group": "Render", "label": "Klip dirender bersamaan", "type": "int", "min": 1, "max": 8},
     {"key": "SCENE_SNAP_ENABLED", "group": "Render", "label": "Potong tepat di pergantian scene", "type": "bool"},
