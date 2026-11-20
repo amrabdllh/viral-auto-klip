@@ -178,6 +178,9 @@ const WINDOWS = [{ v: 5, l: "Tiap 5 menit (klip lebih cepat)" }, { v: 10, l: "Ti
 // Panjang klip = min/max durasi yang dikirim ke analyzer. "Sedang" adalah
 // default baru: klip 15 dtk terasa terlalu pendek untuk konten GTA.
 const CLIP_LENGTHS = [{ v: "short", l: "Pendek · 15–30 dtk" }, { v: "medium", l: "Sedang · 25–50 dtk" }, { v: "long", l: "Panjang · 30–90 dtk (ala Clipper)" }];
+// Posisi subtitle klip campaign. "bottom" = di bawah gameplay, tepat di atas banner
+// (gaya Clipper). "seam" = di sambungan facecam/gameplay.
+const SUB_POSITIONS = [{ v: "bottom", l: "Bawah gameplay (di atas banner)" }, { v: "seam", l: "Sambungan facecam/gameplay" }];
 PAGES.live = { render(view, q) {
   view.innerHTML = toolPage({ id: "live", needs: ["llm", "ffmpeg"],
     desc: "Buat klip dari siaran YouTube yang masih berlangsung. Siaran direkam terus, dan tiap beberapa menit AI memilih momen terbaik dengan bantuan lonjakan chat penonton.",
@@ -185,7 +188,7 @@ PAGES.live = { render(view, q) {
         ${UI.select("live_mode", "Mode", [{ v: "window", l: "Jendela berkala (default)" }, { v: "spike", l: "Spike presisi (momen ramai chat)" }], "window", { hint: "Spike = potong tepat momen-25 dtk s.d. momen+20 dtk" })}
         ${UI.select("backlog_min", "Mulai rekam dari", BACKLOG, 20, { numeric: true, hint: "YouTube menyimpan ±1 jam siaran ke belakang." })}${UI.select("window_min", "Buat klip", WINDOWS, 10, { numeric: true })}
         ${UI.num("clips_per_window", "Maks klip per jendela", { value: 3, min: 1, max: 8 })}${UI.select("clip_length", "Panjang klip", CLIP_LENGTHS, "medium", { hint: "Panjang tiap klip yang dicari AI." })}${UI.select("language", "Bahasa siaran", LANGS, "id")}</div>`) +
-      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}</div>
+      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}${UI.select("subtitle_position", "Posisi subtitle", SUB_POSITIONS, "bottom", { hint: "Berlaku saat template MotionKlip aktif." })}</div>
         <div class="switches">${UI.toggle("use_chat", "Baca chat live", { sub: "Lonjakan chat & Super Chat jadi petunjuk momen seru" })}${UI.toggle("cold_open", "Cold open + rewind")}${UI.toggle("sound_design", "Sound design")}${UI.toggle("caption_fx", "Caption animasi + emoji")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
       UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 45, min: 0, max: 100 })}
         ${UI.num("max_hours", "Rekam paling lama", { value: 6, min: 1, max: 12, hint: "jam" })}

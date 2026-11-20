@@ -129,6 +129,12 @@ def campaign_settings(preset: Dict[str, Any], overrides: Optional[Dict[str, Any]
     if intro not in ("none", "auto", "elevenlabs", "edge", "edgetts", "openai", "gemini"):
         raise CampaignError(f"intro_voice tidak dikenal: {intro!r}")
 
+    # Posisi subtitle: "bottom" = di bawah area gameplay, tepat di atas banner
+    # (seperti renderer Clipper); "seam" = di sambungan facecam/gameplay.
+    subtitle_position = overrides.get("subtitle_position") or preset.get("subtitle_position") or "bottom"
+    if subtitle_position not in ("bottom", "seam"):
+        raise CampaignError(f"subtitle_position tidak dikenal: {subtitle_position!r}")
+
     return {
         "layout": layout,
         "facecam_rect": face,
@@ -136,6 +142,7 @@ def campaign_settings(preset: Dict[str, Any], overrides: Optional[Dict[str, Any]
         "subtitle_provider": provider,
         "highlight": highlight,
         "intro_voice": intro,
+        "subtitle_position": subtitle_position,
         "fps": int(preset.get("fps", CAMPAIGN_FPS)),
         "facecam_height": int(preset.get("facecam_height", DEFAULT_FACECAM_HEIGHT)),
         "subtitle_height": int(preset.get("subtitle_height", DEFAULT_SUBTITLE_HEIGHT)),
@@ -143,6 +150,21 @@ def campaign_settings(preset: Dict[str, Any], overrides: Optional[Dict[str, Any]
 
 
 # ==================== Geometry ====================
+def caption_margin(settings: Dict, preset: Dict) -> Optional[int]:
+    """Margin bawah (px) untuk caption klip campaign; None = pakai posisi sambungan.
+
+    "bottom" menaruh subtitle di bawah area gameplay, tepat di atas banner —
+    seperti renderer Clipper. "seam" menaruh di sambungan facecam/gameplay.
+    """
+    if settings.get("subtitle_position", "bottom") != "bottom":
+        return None
+    strip_top = preset.get("watermark_top")
+    if isinstance(strip_top, int) and 0 < strip_top < 1920:
+        return max(120, 1920 - strip_top + 24)
+    sub_h = int(settings.get("subtitle_height") or preset.get("subtitle_height") or 188)
+    return max(120, sub_h + 60)
+
+
 def campaign_rectangle(value: Any, name: str) -> Tuple[float, float, float, float]:
     if isinstance(value, str):
         value = value.split(",")
@@ -392,7 +414,8 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
     params = params or {}
     preset = load_preset(preset_path)
     settings = campaign_settings(preset, {k: params[k] for k in (
-        "layout", "facecam_rect", "gameplay_rect", "subtitle_provider", "highlight") if params.get(k)})
+        "layout", "facecam_rect", "gameplay_rect", "subtitle_provider", "highlight",
+        "subtitle_position") if params.get(k)})
     out_dir = Path(output_dir); out_dir.mkdir(parents=True, exist_ok=True)
     info = ffx.probe(str(video_path))
     total = float(info.get("duration") or 0)
@@ -420,15 +443,21 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
     layout = None
     if settings["layout"] == "split":
         cam, game = settings["facecam_rect"], settings["gameplay_rect"]
-        if not cam:
-            try:
-                det = detect_stream_layout(str(cut))
-                if det:
-                    cam, game = det["cam_box"], _gameplay_rect_from_cam(det["cam_box"])
-            except Exception:  # noqa: BLE001
-                pass
+        face = None
+        try:
+            det = detect_stream_layout(str(cut))
+        except Exception:  # noqa: BLE001
+            det = None
+        if det:
+            # Preset tetap pemilik kotak crop; deteksi hanya memberi posisi wajah
+            # supaya panel bisa memusatkannya (padding di sisi yang kosong).
+            face = [det["face"][0], det["face"][1]]
+            if not cam:
+                cam, game = det["cam_box"], _gameplay_rect_from_cam(det["cam_box"])
+            logger.info(f"Campaign face: box {cam}, wajah {face[0]:.3f},{face[1]:.3f}")
         layout = {"cam_box": list(cam), "game_box": list(game),
-                  "cam_ratio": settings["facecam_height"] / 1920.0}
+                  "cam_ratio": settings["facecam_height"] / 1920.0,
+                  "face": face, "caption_y": caption_margin(settings, preset)}
 
     clip = {"start": 0.0, "end": duration, "title": title or Path(video_path).stem,
             "hook_text": title, "score": 100, "subtitle_segments": segments,

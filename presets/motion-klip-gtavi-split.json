@@ -14,6 +14,7 @@
     1.0
   ],
   "subtitle_provider": "elevenlabs",
+  "subtitle_position": "bottom",
   "intro_voice": "auto",
   "highlight": true,
   "watermark": "../assets/campaign/motionklip-watermark.png",

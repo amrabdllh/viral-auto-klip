@@ -166,9 +166,15 @@ def process_clips(
             logger.warning(f"Deteksi layout facecam gagal: {exc}")
     if stream_layout:
         logger.info(f"  Layout gaming: facecam {stream_layout['cam_box']} → split wajah/gameplay")
-        # caption di sambungan facecam/gameplay (gaya klip streamer)
-        seam = int(1920 * float(stream_layout.get("cam_ratio", 0.38)))
-        style["vertical_position"] = max(200, 1920 - seam - 150)
+        # Posisi caption: layout campaign boleh menetapkan sendiri (mis. di bawah
+        # gameplay, tepat di atas banner). Default: di sambungan facecam/gameplay.
+        caption_y = stream_layout.get("caption_y")
+        if caption_y is not None:
+            style["vertical_position"] = max(80, min(1800, int(caption_y)))
+            logger.info(f"  Caption Y (margin bawah): {style['vertical_position']}px")
+        else:
+            seam = int(1920 * float(stream_layout.get("cam_ratio", 0.38)))
+            style["vertical_position"] = max(200, 1920 - seam - 150)
 
     content_rect = None
     if not stream_layout:  # sumber berbingkai (kartu video + border hitam + branding) → crop hanya gambarnya
@@ -367,7 +373,8 @@ def _process_single_clip(
             # (v6.4) streamer: facecam di atas, gameplay di bawah (tanpa tracking wajah per frame)
             from . import ffx
             ffx.split_cam(str(working_clip_path), str(reframed_path), tuple(layout["cam_box"]), tuple(layout["game_box"]),
-                          cam_ratio=layout["cam_ratio"], cam_top=True)
+                          cam_ratio=layout["cam_ratio"], cam_top=True,
+                          face=tuple(layout["face"][:2]) if layout.get("face") else None)
         elif opts["enable_face_reframe"]:
             face_bboxes = detect_faces_in_clip(
                 str(working_clip_path),
