@@ -205,7 +205,7 @@ PAGES.live = { render(view, q) {
       "Klip muncul di bawah satu per satu. Tekan \u201cSelesai rekam\u201d kapan saja — sisa rekaman tetap dijadikan klip."],
       UI.banner("info", "Rekaman jalan di background. Job lain tetap bisa dipakai, dan halaman ini boleh ditutup — pantau dari <a href='#jobs'>Antrean Job</a>.")) });
   if (q.job) attachJob($("#job"), q.job, {});
-  api("/campaign/presets").then((r) => {
+  api("/api/campaign/presets").then((r) => {
     const sel = $("#livePreset");
     if (!sel) return;
     const list = r.presets || [];
@@ -898,7 +898,7 @@ function mountYouTube() {
       const text = document.getElementById("ytText").value.trim();
       if (!text) { document.getElementById("ytRes").textContent = "Tempel cookies dulu."; return; }
       try {
-        const r = await api("/youtube/cookies", { body: { text } });
+        const r = await api("/api/youtube/cookies", { body: { text } });
         document.getElementById("ytRes").innerHTML = UI.pill(`${r.count} cookie tersimpan`, "ok");
         paint(r);
       } catch (err) { document.getElementById("ytRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
@@ -906,18 +906,18 @@ function mountYouTube() {
     document.getElementById("ytTest").onclick = (e) => busy(e.currentTarget, async () => {
       document.getElementById("ytRes").innerHTML = `<span class="ink2">Memeriksa sesi (headless, ±15 dtk)…</span>`;
       try {
-        const r = await api("/youtube/test", { body: {} });
+        const r = await api("/api/youtube/test", { body: {} });
         document.getElementById("ytRes").innerHTML = r.ok
           ? UI.pill("Sesi valid", "ok") + ` <span class="ink2">${esc(r.channel || "channel terdeteksi")}</span>`
           : UI.pill("Tidak valid", "bad") + " " + esc(r.error || "");
       } catch (err) { document.getElementById("ytRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
     });
     document.getElementById("ytClear").onclick = (e) => busy(e.currentTarget, async () => {
-      try { paint(await api("/youtube/cookies", { method: "DELETE" })); toast("Cookies YouTube dihapus"); }
+      try { paint(await api("/api/youtube/cookies", { method: "DELETE" })); toast("Cookies YouTube dihapus"); }
       catch (err) { fail(err); }
     });
   };
-  api("/youtube/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
+  api("/api/youtube/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
 }
 
 
@@ -943,7 +943,7 @@ function mountTikTok() {
       const text = document.getElementById("ttText").value.trim();
       if (!text) { document.getElementById("ttRes").textContent = "Tempel cookies dulu."; return; }
       try {
-        const r = await api("/tiktok/cookies", { body: { text } });
+        const r = await api("/api/tiktok/cookies", { body: { text } });
         document.getElementById("ttRes").innerHTML = UI.pill(`${r.count} cookie tersimpan`, "ok");
         paint(r);
       } catch (err) { document.getElementById("ttRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
@@ -951,18 +951,18 @@ function mountTikTok() {
     document.getElementById("ttTest").onclick = (e) => busy(e.currentTarget, async () => {
       document.getElementById("ttRes").innerHTML = `<span class="ink2">Memeriksa sesi (headless, ±15 dtk)…</span>`;
       try {
-        const r = await api("/tiktok/test", { body: {} });
+        const r = await api("/api/tiktok/test", { body: {} });
         document.getElementById("ttRes").innerHTML = r.ok
           ? UI.pill("Sesi valid", "ok") + ` <span class="ink2">${esc(r.username || "akun terdeteksi")}</span>`
           : UI.pill("Tidak valid", "bad") + " " + esc(r.error || "");
       } catch (err) { document.getElementById("ttRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
     });
     document.getElementById("ttClear").onclick = (e) => busy(e.currentTarget, async () => {
-      try { paint(await api("/tiktok/cookies", { method: "DELETE" })); toast("Cookies TikTok dihapus"); }
+      try { paint(await api("/api/tiktok/cookies", { method: "DELETE" })); toast("Cookies TikTok dihapus"); }
       catch (err) { fail(err); }
     });
   };
-  api("/tiktok/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
+  api("/api/tiktok/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
 }
 
 PAGES.settings = { render(view) {
@@ -1171,7 +1171,7 @@ PAGES.campaign = { render(view) {
     $("#ed").hidden = false;
     toast("Sumber siap — atur preset lalu export");
   };
-  api("/campaign/presets").then((r) => {
+  api("/api/campaign/presets").then((r) => {
     const sel = $("#presetSel");
     const list = r.presets || [];
     sel.innerHTML = list.map((p) => p.error
