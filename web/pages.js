@@ -179,6 +179,7 @@ PAGES.live = { render(view, q) {
   view.innerHTML = toolPage({ id: "live", needs: ["llm", "ffmpeg"],
     desc: "Buat klip dari siaran YouTube yang masih berlangsung. Siaran direkam terus, dan tiap beberapa menit AI memilih momen terbaik dengan bantuan lonjakan chat penonton.",
     main: UI.panel({ id: "f", body: UI.section("Siaran", `<div class="fields">${UI.text("url", "Link siaran live", { type: "url", placeholder: "https://www.youtube.com/watch?v=…", value: q.url || "", cls: "span-all" })}
+        ${UI.select("live_mode", "Mode", [{ v: "window", l: "Jendela berkala (default)" }, { v: "spike", l: "Spike presisi (momen ramai chat)" }], "window", { hint: "Spike = potong tepat momen-25 dtk s.d. momen+20 dtk" })}
         ${UI.select("backlog_min", "Mulai rekam dari", BACKLOG, 20, { numeric: true, hint: "YouTube menyimpan ±1 jam siaran ke belakang." })}${UI.select("window_min", "Buat klip", WINDOWS, 10, { numeric: true })}
         ${UI.num("clips_per_window", "Maks klip per jendela", { value: 3, min: 1, max: 8 })}${UI.select("language", "Bahasa siaran", LANGS, "id")}</div>`) +
       UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}</div>
@@ -187,6 +188,11 @@ PAGES.live = { render(view, q) {
         ${UI.num("max_duration", "Durasi maksimum", { value: 60, min: 10, max: 180, hint: "detik" })}${UI.num("max_hours", "Rekam paling lama", { value: 6, min: 1, max: 12, hint: "jam" })}
         ${UI.select("layout", "Layout", [{ v: "", l: "Otomatis (facecam → split)" }, { v: "gaming", l: "Selalu split facecam + gameplay" }, { v: "face", l: "Ikuti wajah (crop 9:16)" }], "")}
         ${UI.select("whisper_device", "Mesin transkripsi", WHISPER_DEVICES, "")}${aiSelects()}</div>
+        <div class="fields"><span class="section-title span-all">Mode spike presisi</span>
+        ${UI.num("pre_sec", "Detik sebelum momen", { value: 25, min: 5, max: 120 })}
+        ${UI.num("post_sec", "Detik sesudah momen", { value: 20, min: 5, max: 120 })}
+        ${UI.num("min_lift", "Lonjakan chat minimum", { value: 3, min: 1, max: 20, hint: "× baseline" })}
+        ${UI.num("max_spikes", "Maks spike", { value: 0, min: 0, max: 999, hint: "0 = tanpa batas" })}</div>
         <div class="fields">${UI.tri("speaker_cam", "Kamera ikut pembicara")}${UI.tri("broll", "B-roll otomatis")}${UI.tri("shake", "Layar goyang")}
         ${UI.tri("freeze", "Freeze frame")}${UI.tri("lower_third", "Kartu nama")}${UI.tri("censor", "Sensor kata kasar")}
         ${UI.text("speaker_names", "Nama pembicara", { placeholder: "Kosong = nama channel" })}</div>`),
@@ -200,6 +206,16 @@ PAGES.live = { render(view, q) {
   $("#go").onclick = (e) => {
     const p = dropEmpty(formValues($("#f")), ["whisper_device", "edit_style", "layout", "ai_provider", "ai_model", "speaker_names"]);
     if (!/^https?:\/\//.test(p.url || "")) return toast("Tempel link siaran YouTube dulu", true);
+    if (p.live_mode === "spike") {
+      const spike = {
+        url: p.url, use_chat: true,
+        pre_sec: p.pre_sec ?? 25, post_sec: p.post_sec ?? 20,
+        min_lift: p.min_lift ?? 3, max_spikes: p.max_spikes ?? 0,
+        poll_interval: 4, max_hours: p.max_hours ?? 6,
+      };
+      return runJob($("#job"), "live_spike", spike, { title: "Klip Live · spike", btn: e.currentTarget });
+    }
+    delete p.live_mode;
     runJob($("#job"), "live_clip", p, { title: "Klip Live", btn: e.currentTarget });
   };
 } };

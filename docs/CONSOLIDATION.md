@@ -34,8 +34,9 @@ tidak ada di vak.
 | Aset campaign | `C:/Users/ipank/Downloads/*` | `assets/campaign/` | **selesai** |
 | Preset campaign | `motion-klip-gtavi*.json` | `presets/`, path relatif + `schema_version` | **selesai** |
 | Spike detector | `chat_spikes.py` (119 baris) | `core/chat_spikes.py` + dipakai di `core/live.py` | **selesai** |
-| YouTube browser uploader | `upload_youtube_browser.py` (748) | `core/youtube_browser.py` | belum |
-| Cookie refresher | `refresh_youtube_cookies.py` (191) | `core/youtube_browser.py` | belum |
+| YouTube browser uploader | `upload_youtube_browser.py` (748) | `core/youtube_browser.py` (headless) + `upload_browser` job + UI cookies | **selesai** |
+| Cookie refresher | `refresh_youtube_cookies.py` (191) | `core/youtube_browser.py` (`save_cookies`/`test_session`) | **selesai** |
+| Buffer live presisi | `live_media.py` (692) | `core/live_media.py` + `core/live_spike.py` | **selesai** |
 | Test terpilih | 17 suite | `tests/` | sebagian (`test_campaign.py`) |
 
 ---
