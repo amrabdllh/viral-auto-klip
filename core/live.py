@@ -828,6 +828,8 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
             "title": out.stem, "ai_title": title, "hook_text": moment.get("hook_text"),
             "score": moment.get("score"), "duration": review.get("duration"),
             "hashtags": review.get("hashtags"), "campaign": True,
+            # start/end relatif jendela: dipakai ringkasan & _clock di live_window
+            "start": start, "end": end,
             "wall_span": [wall0 + start, wall0 + end],
         })
     return clips
