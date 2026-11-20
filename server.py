@@ -206,10 +206,14 @@ async def list_providers():
 
 @app.post("/test-ai")
 def test_ai(req: AITestRequest):
-    with PIPELINE_LOCK:
-        if req.api_key or req.base_url:
+    if req.api_key or req.base_url:  # hanya mengganti kredensial yang perlu dikunci dari pipeline lama
+        if not PIPELINE_LOCK.acquire(timeout=5):
+            return {"valid": False, "message": "Sedang ada proses klip berjalan — coba tes lagi setelah selesai."}
+        try:
             ai.set_credentials(req.provider, api_key=req.api_key or "", base_url=req.base_url or "", model=req.model)
-        ok, message = ai.test_connection(req.provider, ai.resolve_model(req.provider, req.model))
+        finally:
+            PIPELINE_LOCK.release()
+    ok, message = ai.test_connection(req.provider, ai.resolve_model(req.provider, req.model))
     return {"valid": ok, "message": message}
 
 

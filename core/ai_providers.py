@@ -14,6 +14,7 @@ Fitur:
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -272,14 +273,47 @@ def complete(
     raise AIError(" | ".join(errors) or "Tidak ada provider AI yang aktif")
 
 
-def test_connection(provider: str, model: str = "") -> Tuple[bool, str]:
-    """Tes singkat provider (untuk tombol 'Tes koneksi' di UI)."""
+# batas waktu klien per thread (tes koneksi memakai batas pendek tanpa coba ulang)
+_CLIENT_LIMITS = threading.local()
+
+
+def _client_timeout(default: float = 180.0) -> float:
+    return float(getattr(_CLIENT_LIMITS, "timeout", default))
+
+
+def _client_retries(default: int = 2) -> int:
+    return int(getattr(_CLIENT_LIMITS, "retries", default))
+
+
+def test_connection(provider: str, model: str = "", timeout: float = 45.0) -> Tuple[bool, str]:
+    """Tes singkat provider (tombol 'Tes koneksi' di UI).
+
+    HANYA provider yang dipilih — tanpa rantai cadangan (dulu tes provider yang mati bisa tampil "OK" karena
+    dijawab DeepSeek/OpenAI cadangan) — dan batas waktu pendek tanpa coba ulang (dulu 180 dtk × 3 percobaan,
+    tombol tampak berputar terus bila endpoint diam)."""
+    model = model or default_model(provider)
+    if provider not in PROVIDER_INFO:
+        return False, f"Provider tidak dikenal: {provider}"
+    if not is_configured(provider):
+        return False, f"{provider} belum dikonfigurasi (API key/base URL kosong)"
+    if not model:
+        return False, "Model belum dipilih — klik 'Deteksi model' dulu"
+    t0 = time.time()
+    _CLIENT_LIMITS.timeout, _CLIENT_LIMITS.retries = float(timeout), 0
     try:
-        text = complete('Balas hanya JSON: {"ok": true}', max_tokens=256, provider=provider,
-                        model=model or default_model(provider))
-        return True, f"OK — {text.strip()[:80]}"
+        text = _dispatch(provider, model, 'Balas hanya JSON: {"ok": true}', "", 256, True, None)
+        if not text or not text.strip():
+            return False, f"{provider}/{model}: respons kosong"
+        return True, f"OK ({time.time() - t0:.1f} dtk) — {text.strip()[:80]}"
     except Exception as exc:
-        return False, str(exc)[:300]
+        msg = str(exc)
+        if "timed out" in msg.lower() or "timeout" in type(exc).__name__.lower():
+            msg = f"Tidak ada jawaban dalam {timeout:.0f} dtk — endpoint hidup tapi tidak merespons, atau model terlalu lambat. {msg[:150]}"
+        elif "connection" in msg.lower() and ("refused" in msg.lower() or "error" in msg.lower()):
+            msg = f"Tidak bisa terhubung ke server provider (cek base URL / server lokal menyala). {msg[:150]}"
+        return False, f"{provider}/{model}: {msg[:300]}"
+    finally:
+        del _CLIENT_LIMITS.timeout, _CLIENT_LIMITS.retries
 
 
 def _looks_rate_limited(exc: Exception) -> bool:
@@ -317,7 +351,8 @@ def _call_anthropic(model, prompt, system, max_tokens, json_schema, provider: st
     client = anthropic.Anthropic(
         api_key=_api_key(provider),
         base_url=(conn["base_url"] if conn else config.ANTHROPIC_BASE_URL) or None,
-        timeout=180.0,
+        timeout=_client_timeout(),
+        max_retries=_client_retries(),
     )
     if conn:  # gateway pihak ketiga: hanya parameter standar (fitur beta/effort belum tentu diteruskan)
         kwargs = {"model": model, "max_tokens": max(int(max_tokens), 4000), "messages": [{"role": "user", "content": prompt}]}
@@ -420,7 +455,8 @@ def _call_openai_compat(provider, model, prompt, system, max_tokens, json_mode) 
     base_url = _base_url(provider)
     if provider == "Custom" and not base_url:
         raise AIError("Custom AI butuh CUSTOM_AI_BASE_URL")
-    client = openai.OpenAI(api_key=_api_key(provider), base_url=base_url, timeout=180.0, max_retries=2)
+    client = openai.OpenAI(api_key=_api_key(provider), base_url=base_url, timeout=_client_timeout(),
+                           max_retries=_client_retries())
     return _run_attempts(client.chat.completions.create, model, prompt, system, max_tokens, json_mode)
 
 
@@ -429,7 +465,7 @@ def _call_groq(model, prompt, system, max_tokens, json_mode) -> str:
         from groq import Groq
     except ImportError as exc:
         raise AIError("Library groq belum terpasang: pip install groq") from exc
-    client = Groq(api_key=_api_key("Groq"), timeout=120.0)
+    client = Groq(api_key=_api_key("Groq"), timeout=_client_timeout(120.0), max_retries=_client_retries())
     return _run_attempts(client.chat.completions.create, model, prompt, system, max_tokens, json_mode)
 
 
