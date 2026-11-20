@@ -191,3 +191,19 @@ Bug yang ditemukan & diperbaiki:
 - Uji: klip 27,6 dtk + gambar 3 dtk = 30,2 dtk; + video 4 dtk = 31,2 dtk; klip manual 8 dtk + video 4 dtk = 11,6 dtk. Durasi di metadata klip ikut diperbarui.
 
 Belum diuji: penutup pada Content Creator/Highlight secara langsung (memakai fungsi yang sama); clickbait pada analisis penuh 8 klip.
+
+---
+
+## Putaran 9 (v6.8): pacing & caption yang lebih menahan penonton
+| Upgrade | Sebelum | Sekarang |
+|---|---|---|
+| Kata pengisi | daftar kaku: "eeeh", "hmmm", "ehmmm" lolos (di video uji: "hmm" 13×, "ah" 7×, "eeeh" 3×) | pola (`e+h`, `hm+`, `a+h`, `u+hm`, `e+rm`); kata asli ("emang", "umur", "hem", "era") tidak tersentuh |
+| Tempo | tidak ada | **tempo adaptif**: kata/detik setelah jump cut diukur; di bawah 3,15 dipercepat halus ≤1,08× (`setpts`+`atempo`, nada tetap). Data uji: median 2,93 kata/dtk. Klip cepat tidak diubah |
+| Caption: kata yang ditekan | warna aksen dari daftar kata teks saja; data tekanan suara hilang saat kata dipecah per layar | kata yang benar-benar ditekan (audio) → warna aksen + "pop" 128% (biasa 120%); gaya baris (Modern dll.) juga menyorotnya |
+| Caption: pemecahan layar | tiap 5 kata / tanda titik → kata yatim ("tujuh.") & layar menyeberang jeda/pembicara | potong di jeda >0,45 dtk, ganti pembicara, ≤30 karakter; kata yatim digabung tanpa menyeberang kalimat. 6 klip uji: kata yatim 21 → 8 (sisanya kalimat satu kata), 0 layar menyeberang kalimat |
+| Animasi gaya baris | fade 0,15 dtk | pop masuk 86%→100% + fade |
+| Headline hook vs caption | caption menempel di bawah headline (dua blok teks berdesakan) | selama headline tampil caption digeser turun dengan jarak 40 px, lalu kembali normal |
+| Default gaya caption API | `modern` (beda dengan form UI) | `viral`, sama dengan UI |
+| Durasi di metadata | `end - start` (tidak menghitung cold open/freeze/tempo) | durasi nyata file akhir |
+
+Uji: klip 2470–2493 dirender penuh: jump cut 0,6 dtk, tempo 1,06×, 15 kata ditekan dengan pop besar, headline & caption terpisah; ±4 menit per klip (sama seperti sebelumnya, tempo +±10 dtk).

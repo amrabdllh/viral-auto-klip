@@ -427,7 +427,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 for j, token in enumerate(tokens):
                     raw = str(seg_words[j].get("word", ""))
                     if j == i:
-                        grow = "\\fscx92\\fscy92\\t(0,70,\\fscx120\\fscy120)\\t(70,160,\\fscx112\\fscy112)" if fx else \
+                        big = int(seg_words[j].get("stress") or 0) >= 2  # v6.8: kata yang benar-benar ditekan pembicara
+                        peak, rest = (128, 116) if big else (120, 112)
+                        grow = f"\\fscx92\\fscy92\\t(0,70,\\fscx{peak}\\fscy{peak})\\t(70,160,\\fscx{rest}\\fscy{rest})" if fx else \
                             "\\fscx100\\fscy100\\t(0,90,\\fscx116\\fscy116)\\t(90,170,\\fscx110\\fscy110)"
                         pieces.append("{\\c" + active_colour + "&" + grow + "}" + token)
                     elif fx and _is_power(raw):
@@ -472,6 +474,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             lines.append(current_line.strip())
         
         line_duration = max((end - start) / max(len(lines), 1), 1.2)
+        # v6.8: kata yang benar-benar ditekan pembicara (audio) diutamakan untuk disorot
+        stressed = {re.sub(r"[^A-Za-zÀ-ÖØ-öø-ÿ0-9]", "", str(w.get("word", ""))).lower()
+                    for w in (seg.get("words") or []) if int(w.get("stress") or 0) >= 2}
         for idx, line in enumerate(lines):
             # Add emoji if enabled (rich keyword->emoji mapping dari config)
             if style.get("emoji", False):
@@ -485,10 +490,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # Simple effect: {\an2} for bottom center, etc.
             effect = ""
             if style.get("animation") == "pop":
-                effect = r"{\fad(150,150)}"  # fade in/out
+                # v6.8: "pop" sungguhan — baris masuk dari 86% ke 100% + fade (dulu hanya fade 0,15 dtk)
+                effect = r"{\fad(110,90)\fscx86\fscy86\t(0,130,\fscx100\fscy100)}"
             
             if style.get("highlight_keywords", True):
-                line = _highlight_caption_keywords(line, reset_colour=primary_colour)
+                line = _highlight_caption_keywords(line, reset_colour=primary_colour, boost=stressed)
             ass_content += f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{effect}{line}\n"
     
     # v6.4: posisi caption per rentang waktu (mis. di sambungan saat layar dibagi dua orang)
@@ -538,7 +544,7 @@ def _ass_colour(rgb) -> str:
     return f"&H00{b:02X}{g:02X}{r:02X}"
 
 
-def _highlight_caption_keywords(line: str, reset_colour: str = "&H00FFFFFF") -> str:
+def _highlight_caption_keywords(line: str, reset_colour: str = "&H00FFFFFF", boost=frozenset()) -> str:
     keywords = [
         "tidak", "nggak", "gak", "belum", "jangan", "harus", "kenapa", "rahasia",
         "tumbuh", "dewasa", "model", "betul", "bener", "ada", "karena", "ternyata",
@@ -558,6 +564,8 @@ def _highlight_caption_keywords(line: str, reset_colour: str = "&H00FFFFFF") -> 
             score += 1
         if word.isupper() and len(clean) > 2:
             score += 1
+        if clean in boost:  # ditekan pembicara (audio)
+            score += 4
         if score:
             scored.append((score, index))
 

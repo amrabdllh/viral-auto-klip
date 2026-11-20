@@ -235,6 +235,9 @@ AI_MAX_CANDIDATES = int(os.getenv("AI_MAX_CANDIDATES", "24"))  # cap AI calls pe
 # AI membaca SELURUH transkrip (bertimestamp) lalu mengusulkan momen terbaik sendiri —
 # bukan hanya menilai ulang potongan hasil sliding-window.
 AI_UPSCALE = os.getenv("AI_UPSCALE", "1").lower() in ("1", "true", "yes")  # Real-ESRGAN: PyTorch CUDA (tools/models) atau ncnn (tools/realesrgan)
+AUTO_TEMPO = os.getenv("AUTO_TEMPO", "1").lower() in ("1", "true", "yes")  # percepat halus pembicara lambat
+AUTO_TEMPO_TARGET_WPS = float(os.getenv("AUTO_TEMPO_TARGET_WPS", "3.15"))  # kata/detik yang dituju
+AUTO_TEMPO_MAX = float(os.getenv("AUTO_TEMPO_MAX", "1.08"))  # batas atas (lebih dari ±1,1× terdengar dipercepat)
 AUDIO_SIGNALS = os.getenv("AUDIO_SIGNALS", "1").lower() in ("1", "true", "yes")  # energi/nada/tawa dari suara → skor, AI, punch-in
 AI_FACE_RESTORE = os.getenv("AI_FACE_RESTORE", "1").lower() in ("1", "true", "yes")  # GFPGAN v1.4 (tools/models), butuh PyTorch CUDA
 AI_FACE_WEIGHT = max(0.0, min(1.0, float(os.getenv("AI_FACE_WEIGHT", "0.6"))))  # 0 = asli, 1 = penuh GFPGAN

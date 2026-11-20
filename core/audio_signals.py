@@ -31,7 +31,7 @@ _LAUGH = re.compile(r"laugh|tawa|ketawa|ngakak|chuckl|giggl|applause|tepuk|sorak
 _STOP = set("""aku kamu kau lu lo gue gua gw saya dia kita kami mereka itu ini yang dan atau kalau kalo tapi tetapi
 terus trus lalu jadi jd nah ya yah iya sih tuh deh dong kan kok loh lho eh ee eeh eeeh em emm hmm ah oh udah sudah
 ada di ke dari untuk buat sama dengan karena soalnya gitu gini begitu begini aja saja juga lagi masih mau bisa
-kek kayak kaya kayaknya akan apa gimana emang memang tentu yaitu adalah nih tadi pun
+kek kayak kaya kayaknya akan apa gimana emang memang tentu yaitu adalah nih tadi pun lah kah dah toh
 the a an and or but so to of in is it i you we he she they that this like""".split())
 _EDITORIAL = re.compile(r"keyboard|ketik|efek|sound effect|whoosh|transisi|music|musik|jingle|intro", re.I)
 

@@ -99,7 +99,7 @@ def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> No
 def render_options(params: Dict) -> Dict:
     aspect = params.get("output_type", "Vertical")
     return dict(
-        style_name=params.get("caption_style", "modern"),
+        style_name=params.get("caption_style") or "viral",  # sama dengan default form UI
         caption_overrides={k: params[k] for k in ("font_size", "vertical_position") if params.get(k)},
         enable_face_reframe=params.get("enable_face_reframe", True),
         add_watermark=bool(params.get("watermark_text")),
@@ -115,7 +115,7 @@ def render_options(params: Dict) -> Dict:
         edit_opts={k: params.get(k) for k in ("jump_cuts", "dynamic_zoom", "progress_bar", "sfx", "color_grade",
                                                "smart_thumbnail", "end_cta", "cold_open", "sound_design",
                                                "caption_fx", "audio_master", "speaker_cam", "broll", "shake", "freeze",
-                                               "lower_third", "censor", "pro_fx")} | {"style": params.get("edit_style", "")},
+                                               "lower_third", "censor", "pro_fx", "auto_tempo")} | {"style": params.get("edit_style", "")},
         # v6.4: "auto" = facecam streamer terdeteksi → split wajah/gameplay; podcast/grup tetap reframe wajah
         layout=params.get("layout") or ("face" if params.get("video_mode") in ("podcast", "group") else "auto"),
         lower_third=params.get("_lower_third") or None,
