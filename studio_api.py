@@ -69,8 +69,12 @@ def status():
 
 @router.get("/catalog")
 def catalog():
+    from core import viral_standard
+
     return {**creator.catalog(), "edit_styles": ["minimal", "dinamis", "maksimal"],
-            "color_grades": ["none", "natural", "vibrant", "cinematic"], "job_kinds": sorted(jobs.HANDLERS)}
+            "color_grades": ["none", "natural", "vibrant", "cinematic"],
+            "job_kinds": sorted(jobs.HANDLERS),
+            "viral_standard": viral_standard.summary()}
 
 
 class YouTubeCookiesRequest(BaseModel):

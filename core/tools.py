@@ -189,7 +189,11 @@ def clip_quick(ctx: JobContext) -> Dict:
     from .analyzer import analyze_viral_potential
     from .clipper import process_clips
     from .utils import get_video_info
+    from . import viral_standard
+
     p = ctx.params
+    if p.get("viral_standard", True):
+        p = viral_standard.apply_to_params(p)   # skill make-clip: 15-45 dtk, skor 55
     config.MIN_VIRAL_SCORE = max(0.0, min(float(p.get("min_score", 55)), 100.0))
     config.MIN_CLIP_DURATION = max(5, int(p.get("min_duration", 15)))
     config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(p.get("max_duration", 60)))
