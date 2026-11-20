@@ -506,6 +506,7 @@ function mediaCard(c, { selectable = false } = {}) {
   const title = c.ai_title || meta.ai_title || c.title || meta.title || c.hook_text || c.name || baseName(path);
   const rawTags = c.hashtags ?? meta.hashtags ?? [];
   const tags = (Array.isArray(rawTags) ? rawTags : String(rawTags).split(/\s+/)).filter(Boolean);
+  const tagText = tags.slice(0, 3).map((t) => (String(t).startsWith("#") ? String(t) : "#" + String(t))).join(" ");
   const baseCaption = c.upload_caption || meta.upload_caption || meta.description || "";
   const caption = [baseCaption, tags.filter((t) => !baseCaption.includes("#" + String(t).replace(/^#/, ""))).join(" ")]
     .join(" ").trim();
@@ -520,7 +521,7 @@ function mediaCard(c, { selectable = false } = {}) {
   else if (isImage(path)) media = `<div class="m-thumb"><img src="${fileUrl(path)}" alt="" loading="lazy">`;
   else media = `<div class="m-thumb audio">${icon("doc")}`;
   if (!isAudio(path)) media += `<div class="m-badges">${score ? `<span class="m-badge score">${Math.round(score)}</span>` : ""}${dur ? `<span class="m-badge">${fmtDur(dur)}</span>` : ""}</div></div>`;
-  const metaLine = [c.clock ? "Live " + c.clock : "", (c.category || meta.category) && !String(c.category || meta.category).startsWith("manual") ? (c.category || meta.category) : "", c.fyp_grade ? "FYP " + c.fyp_grade : "", c.size ? fmtBytes(c.size) : "", c.size_mb ? c.size_mb + " MB" : "", meta.provider || ""].filter(Boolean).join(" · ");
+  const metaLine = [c.clock ? "Live " + c.clock : "", (c.category || meta.category) && !String(c.category || meta.category).startsWith("manual") ? (c.category || meta.category) : "", tagText, c.fyp_grade ? "FYP " + c.fyp_grade : "", c.size ? fmtBytes(c.size) : "", c.size_mb ? c.size_mb + " MB" : "", meta.provider || ""].filter(Boolean).join(" · ");
   return `<article class="media" data-asset="${esc(id)}" data-path="${esc(path)}" data-cap="${esc(caption)}">${media}
     ${selectable ? `<input type="checkbox" class="m-sel" aria-label="Pilih">` : ""}
     <div class="m-body"><div class="m-title" title="${esc(title)}">${esc(title)}</div><div class="m-meta">${esc(metaLine) || "&nbsp;"}</div></div>
