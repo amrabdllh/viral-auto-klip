@@ -256,7 +256,15 @@ class Recorder:
             return 0.0
 
     def _run_ffmpeg(self, v_url: str, a_url: Optional[str], headers: Dict, backlog: float) -> None:
-        n = max(3, int(round(backlog)))
+        # -live_start_index menghitung SEGMEN, bukan detik. Dulu backlog detik
+        # dipakai langsung: 180 dtk -> 180 segmen (~15 menit pada segmen 5 dtk),
+        # sehingga recorder selalu mengejar siaran dan segment pertama lama.
+        try:
+            _, durs = _playlist_timing(v_url, headers)
+            avg = (sum(durs) / len(durs)) if durs else 5.0
+        except Exception:
+            avg = 5.0
+        n = max(3, int(round(backlog / max(avg, 1.0))))
         run_no = len(self.runs)
         csv_path = self.dir / f"list_{run_no:02d}.csv"
         hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k.lower() in ("user-agent", "referer", "origin", "cookie"))
