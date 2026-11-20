@@ -852,6 +852,20 @@ def live_window(ctx: JobContext) -> Dict:
     if p.get("hook_card") is False:
         for c in picked:
             c["no_hook_card"] = True
+    if not picked and clips_data:
+        # Fallback ala Clipper: jangan pulangkan jendela kosong. Ambil kandidat
+        # terbaik yang masih menghormati batas durasi & wilayah baru, walau
+        # skornya di bawah ambang. Tanpa ini, ambang tinggi = nol klip.
+        allowed = [c for c in clips_data
+                   if c["end"] > new_from + 4 and (final or c["end"] < dur - 2.5)]
+        if allowed:
+            best = dict(max(allowed, key=lambda c: float(c.get("score") or 0)))
+            ws, we = wall0 + best["start"], wall0 + best["end"]
+            best["wall_span"] = [ws, we]
+            best["fallback"] = True
+            picked = [best]
+            ctx.log(f"Tidak ada kandidat di atas ambang — memakai yang terbaik "
+                    f"(skor {float(best.get('score') or 0):.0f}) seperti mode Clipper")
     if not picked:
         Path(video).unlink(missing_ok=True)
         return {"_message": "Tidak ada momen yang cukup kuat di jendela ini", "clips": [], "total_clips": 0,
