@@ -26,18 +26,21 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
-def feed(detector: SpikeDetector, start: float, rate: float, seconds: float, prefix: str) -> float:
+def feed(detector: SpikeDetector, start: float, rate: float, seconds: float, prefix: str,
+         text_fn=None):
     """Kirim `rate` pesan/detik mulai `start` selama `seconds`.
 
     `advance()` dipanggil tiap pesan — sama seperti pemanggil sungguhan yang
     melakukan polling, dan seperti adapter batch `chat_spike_moments`.
+    `text_fn(n)` menghasilkan isi pesan; default unik (tidak berulang).
     """
     t = start
     n = 0
     got = []
     while t < start + seconds:
         n += 1
-        detector.add_message(f"{prefix}-{n}", t, t)
+        text = text_fn(n) if text_fn else f"pesan unik nomor {n}"
+        detector.add_message(f"{prefix}-{n}", t, t, text)
         got.extend(detector.advance(t))
         t += 1.0 / rate
     return t, got
@@ -81,6 +84,27 @@ _, _ = feed(d, 0.0, 1.0, 60.0, "calm")
 _, before = feed(d, 60.0, 15.0, 3.0, "last")
 rest = before + d.finish(85.0)
 check("finish mengembalikan spike yang tertahan", len(rest) >= 1, rest)
+
+# ---------- 5b. chat cepat: laju sama, isi memusat ----------
+d = SpikeDetector(0.0)
+_, _ = feed(d, 0.0, 8.0, 60.0, "fast", text_fn=lambda n: f"kalimat acak {n} topik {n % 7}")
+# momen heboh: laju TETAP 8/detik, tapi semua orang mengetik hal yang sama
+end, spikes = feed(d, 60.0, 8.0, 6.0, "spam", text_fn=lambda n: "wkwk anjir gila")
+spikes += d.finish(end + 16)
+check("chat cepat: momen spam tetap terdeteksi", len(spikes) >= 1, spikes)
+if spikes:
+    s0 = spikes[0]
+    check("chat cepat: lift rendah (laju tidak naik)", s0.lift < 1.8, s0.lift)
+    check("chat cepat: repetisi tinggi", s0.repetition >= 0.5, s0.repetition)
+    check("chat cepat: alasan = content", s0.reason == "content", s0.reason)
+    check("chat cepat: reaction menonjol", s0.reaction >= 3, s0.reaction)
+
+# kontrol: chat cepat dengan isi bervariasi tidak boleh memicu
+d = SpikeDetector(0.0)
+_, _ = feed(d, 0.0, 8.0, 60.0, "fast", text_fn=lambda n: f"kalimat acak {n} topik {n % 7}")
+_, calm = feed(d, 60.0, 8.0, 6.0, "same", text_fn=lambda n: f"kalimat acak {n + 1000} topik {n % 5}")
+calm += d.finish(82.0)
+check("chat cepat tanpa perubahan isi tidak memicu", calm == [], calm)
 
 # ---------- 6. adapter batch ----------
 events = []
