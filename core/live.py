@@ -965,7 +965,8 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
         if cam and game:
             layout = {"cam_box": list(cam), "game_box": list(game),
                       "cam_ratio": settings["facecam_height"] / 1920.0,
-                      "face": face, "caption_y": campaign.caption_margin(settings, preset)}
+                      "face": face, "caption_y": campaign.caption_margin(settings, preset),
+                      "caption_font_size": campaign.caption_font_size(settings)}
 
     opts = tools.render_options(p)
     opts["stream_layout"] = layout

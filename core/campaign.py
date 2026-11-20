@@ -165,6 +165,13 @@ def caption_margin(settings: Dict, preset: Dict) -> Optional[int]:
     return max(120, sub_h + 60)
 
 
+def caption_font_size(settings: Dict) -> Optional[int]:
+    """Ukuran font caption untuk posisi bawah (sedikit lebih kecil dari default)."""
+    if settings.get("subtitle_position", "bottom") != "bottom":
+        return None
+    return 62
+
+
 def campaign_rectangle(value: Any, name: str) -> Tuple[float, float, float, float]:
     if isinstance(value, str):
         value = value.split(",")
@@ -458,10 +465,40 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
         if cam and game:
             layout = {"cam_box": list(cam), "game_box": list(game),
                       "cam_ratio": settings["facecam_height"] / 1920.0,
-                      "face": face, "caption_y": caption_margin(settings, preset)}
+                      "face": face, "caption_y": caption_margin(settings, preset),
+                      "caption_font_size": caption_font_size(settings)}
+
+    # Kategori klip (humor/shocking/emotional/…) + kartu nama pembicara, supaya
+    # jalur campaign VOD setara dengan klip live (analisis AI memberi kategori).
+    category = "klip"
+    text = " ".join(str(s.get("text") or "") for s in segments).strip()
+    if text:
+        try:
+            from core import analyzer
+            seg = {"text": text[:4000], "start": 0.0, "end": duration}
+            scored = analyzer._score_segment(seg, {"duration": duration}, None, False)
+            category = str(scored.get("category") or "klip")
+            # Heuristik lokal tidak menemukan kata kunci/sentimen → minta LLM
+            # (hanya saat ambigu, supaya render VOD tidak selalu kena biaya/latency).
+            if category in ("general", "klip") and params.get("use_llm", True):
+                scored = analyzer._score_segment(seg, {"duration": duration}, None, True)
+                category = str(scored.get("category") or category)
+        except Exception:  # noqa: BLE001
+            pass
+    if params.get("lower_third", True):
+        try:
+            channel = str(params.get("channel") or "").strip()
+            if not channel and params.get("url"):
+                channel = str(tools.source_channel(str(params["url"])) or "").strip()
+            params["_lower_third"] = tools.build_lower_third(
+                params, segments, default_name=channel or title or Path(video_path).stem,
+                subtitle=str(params.get("lower_third_subtitle") or ""))
+        except Exception:  # noqa: BLE001
+            pass
 
     clip = {"start": 0.0, "end": duration, "title": title or Path(video_path).stem,
             "hook_text": title, "score": 100, "subtitle_segments": segments,
+            "category": category,
             "words": [w for seg in segments for w in seg.get("words") or []]}
     fields = {**tools.render_options(params), "stream_layout": layout, "enable_captions": True}
     if layout is None:
