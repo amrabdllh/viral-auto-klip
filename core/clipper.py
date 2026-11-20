@@ -763,6 +763,11 @@ def _process_single_clip(
         logger.exception(f"Failed to process clip {idx+1}: {e}")
         return idx, None
 
+# Lebar wajah maksimum (fraksi lebar frame) yang masih dianggap facecam streamer.
+# 0.32 memberi ruang untuk facecam besar; wajah podcast biasanya >= 0.35 dan di tengah.
+FACE_CAM_MAX_WIDTH = 0.32
+
+
 def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = None, samples: int = 14,
                          force: bool = False, cam_ratio: float = 0.38) -> Optional[Dict]:
     """Deteksi facecam streamer (wajah kecil yang posisinya tetap di pinggir layar gameplay).
@@ -791,9 +796,13 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
                 continue
             read += 1
             faces = detector.detect(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            # wajah 'facecam': lebar < 14% frame
-            small = [((x + w / 2) / vw, (y + h / 2) / vh, w / vw, h / vh) for (x, y, w, h), s in faces if s >= 0.6 and w / vw < 0.14]
-            big = [1 for (x, y, w, h), s in faces if s >= 0.6 and w / vw >= 0.14]
+            # Wajah 'facecam' streamer bisa cukup besar: facecam Windah ±22% lebar
+            # frame (preset campaign: 0.225). Ambang lama 14% membuat facecam seperti
+            # itu dianggap "wajah besar" -> deteksi gagal -> jatuh ke reframe wajah
+            # penuh dan gameplay hilang. Podcast tetap terpisah karena wajahnya
+            # >= 35% dan biasanya di tengah.
+            small = [((x + w / 2) / vw, (y + h / 2) / vh, w / vw, h / vh) for (x, y, w, h), s in faces if s >= 0.6 and w / vw < FACE_CAM_MAX_WIDTH]
+            big = [1 for (x, y, w, h), s in faces if s >= 0.6 and w / vw >= FACE_CAM_MAX_WIDTH]
             if big and not force:
                 found.append((-1, -1, 0, 0))  # ada wajah besar = kemungkinan bukan gameplay
             found.extend(small)
