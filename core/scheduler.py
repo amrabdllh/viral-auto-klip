@@ -21,6 +21,8 @@ _LOCK = threading.Lock()
 
 
 def platform_status() -> Dict:
+    from . import tiktok_browser, youtube_browser
+
     yt_secret = config.YOUTUBE_CLIENT_SECRET_FILE or ""
     token = config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE
     try:
@@ -28,35 +30,49 @@ def platform_status() -> Dict:
         yt_lib = True
     except ImportError:
         yt_lib = False
-    try:
-        import tiktok_uploader  # noqa: F401
-        tt_lib = True
-    except ImportError:
-        tt_lib = False
     cookies = config.TIKTOK_COOKIES_FILE or ""
+    yt_cookie_ok = bool(youtube_browser.cookie_status().get("configured"))
+    tt_cookie_ok = bool(tiktok_browser.cookie_status().get("configured"))
     return {
-        "youtube": {"label": "YouTube Shorts", "ready": bool(yt_secret and Path(yt_secret).exists() and yt_lib),
-                    "logged_in": token.exists(), "library": yt_lib,
-                    "hint": "Isi YOUTUBE_CLIENT_SECRET_FILE (OAuth Desktop) + pip install google-api-python-client"},
-        "tiktok": {"label": "TikTok", "ready": bool(cookies and Path(cookies).exists() and tt_lib), "library": tt_lib,
-                   "hint": "pip install tiktok-uploader + isi TIKTOK_COOKIES_FILE (cookies.txt sesi TikTok)"},
+        "youtube": {"label": "YouTube Shorts",
+                    "ready": bool(yt_cookie_ok or (yt_secret and Path(yt_secret).exists() and yt_lib)),
+                    "browser": yt_cookie_ok, "logged_in": token.exists(), "library": yt_lib,
+                    "hint": "Tempel cookies di Pengaturan → YouTube (browser headless), atau isi YOUTUBE_CLIENT_SECRET_FILE"},
+        "tiktok": {"label": "TikTok", "ready": bool(tt_cookie_ok or (cookies and Path(cookies).exists())),
+                   "browser": tt_cookie_ok, "library": True,
+                   "hint": "Tempel cookies di Pengaturan → TikTok (browser headless)"},
     }
 
 
 def upload_now(item: Dict) -> Dict:
+    """Upload satu jadwal. YouTube memakai browser headless kalau cookies ada
+    (bebas kuota API); kalau tidak, jatuh ke API. TikTok selalu browser."""
+    from . import tiktok_browser, youtube_browser
     from .publisher import upload_to_tiktok, upload_to_youtube
+
     report: Dict = {}
     path = item["file_path"]
     if not Path(path).exists():
         return {"error": f"File tidak ada: {path}"}
     tags = re.findall(r"#(\w+)", item.get("description", ""))
+    title = (item.get("title") or Path(path).stem)[:100]
+    description = item.get("description", "")
+
     for platform in item.get("platforms") or []:
         try:
             if platform == "youtube":
-                report["youtube"] = upload_to_youtube(path, title=(item.get("title") or Path(path).stem)[:100],
-                                                      description=item.get("description", ""), tags=tags)
+                if youtube_browser.cookie_status().get("configured"):
+                    res = youtube_browser.upload_video(path, title=title, description=description,
+                                                       tags=tags, privacy="private")
+                    report["youtube"] = {"status": "done", **res}
+                else:
+                    report["youtube"] = upload_to_youtube(path, title=title,
+                                                          description=description, tags=tags)
             elif platform == "tiktok":
-                report["tiktok"] = upload_to_tiktok(path, description=f"{item.get('title', '')} {item.get('description', '')}".strip())
+                if tiktok_browser.cookie_status().get("configured"):
+                    report["tiktok"] = tiktok_browser.upload_video(str(path), description=f"{title} {description}".strip())
+                else:
+                    report["tiktok"] = upload_to_tiktok(path, description=f"{title} {description}".strip())
         except Exception as exc:
             report[platform] = {"status": "failed", "reason": str(exc)[:400]}
     return report

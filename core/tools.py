@@ -96,12 +96,19 @@ def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> No
             ctx.log(f"Logo Brand Kit gagal di {Path(c['file_path']).name}: {exc}")
 
 
-def enforce_clip_duration(clips: List[Dict], *, tolerance: float = 0.75) -> List[Dict]:
-    """Buang kandidat di luar MIN/MAX_CLIP_DURATION.
+def enforce_clip_duration(clips: List[Dict], *, tolerance: float = 0.75,
+                          max_available: float = 0.0) -> List[Dict]:
+    """Buang kandidat di luar MIN/MAX_CLIP_DURATION; panjangkan yang terlalu pendek bila bisa.
 
     AI kadang mengembalikan momen lebih pendek dari batas (mis. 12 dtk padahal
-    minimum 15). Kalau semua kandidat gugur, ambil yang paling panjang supaya
-    jendela tidak kosong.
+    minimum 15). Perilaku sekarang:
+      1. kandidat >= minimum - tolerance  -> lolos apa adanya
+      2. kandidat pendek -> `end` digeser sampai minimum, selama masih muat di
+         sumber (max_available) dan tidak melewati maksimum
+      3. kalau tetap tidak memenuhi -> DIBUANG (jangan kirim klip di bawah standar)
+
+    Catatan: tidak ada lagi fallback "ambil yang terpanjang" — fallback itulah
+    yang dulu meloloskan klip 12 dtk saat minimum 15 dtk.
     """
     lo, hi = float(config.MIN_CLIP_DURATION), float(config.MAX_CLIP_DURATION)
 
@@ -111,9 +118,27 @@ def enforce_clip_duration(clips: List[Dict], *, tolerance: float = 0.75) -> List
         except (TypeError, ValueError):
             return 0.0
 
-    kept = [c for c in clips if lo - tolerance <= dur(c) <= hi + tolerance]
-    if not kept and clips:
-        kept = [max(clips, key=dur)]
+    kept: List[Dict] = []
+    for c in clips:
+        d = dur(c)
+        if d <= 0:
+            continue
+        if d < lo - tolerance:
+            try:
+                start = float(c.get("start") or 0)
+            except (TypeError, ValueError):
+                continue
+            target = lo
+            if max_available and max_available > 0:
+                # Jangan melewati ujung rekaman.
+                target = min(target, float(max_available) - start)
+            if target >= lo - tolerance and target > d:
+                fixed = dict(c)
+                fixed["end"] = round(start + min(target, hi), 3)
+                fixed["duration_extended"] = True
+                c, d = fixed, dur(fixed)
+        if lo - tolerance <= d <= hi + tolerance:
+            kept.append(c)
     return kept
 
 
@@ -241,7 +266,7 @@ def clip_quick(ctx: JobContext) -> Dict:
     p["_lower_third"] = build_lower_third(p, transcript)
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
     clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video)
-    clips_data = enforce_clip_duration(clips_data)
+    clips_data = enforce_clip_duration(clips_data, max_available=float(info.get("duration") or 0))
     if p.get("categories"):
         clips_data = [c for c in clips_data if c.get("category") in p["categories"]]
     if p.get("keyword"):

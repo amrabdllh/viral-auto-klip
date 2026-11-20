@@ -789,7 +789,7 @@ def live_window(ctx: JobContext) -> Dict:
     config.AI_RERANK_LIMIT = int(p.get("rerank_limit", 4))
     try:
         clips_data = analyzer.analyze_viral_potential(transcript, info, use_llm=llm)
-        clips_data = tools.enforce_clip_duration(clips_data)
+        clips_data = tools.enforce_clip_duration(clips_data, max_available=dur)
     finally:
         analyzer.SIGNAL_HINTS = []
         config.AI_RERANK_LIMIT = None
