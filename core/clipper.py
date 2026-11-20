@@ -787,7 +787,9 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
         return None
     if clips_data:
         spans = [(float(c["start"]), float(c["end"])) for c in clips_data[:8]]
-        times = [s + (e - s) * k / 3 for s, e in spans for k in (1, 2)]
+        # Minimal 3 sampel per klip: dulu 2 sampel/klip, jadi jendela dengan 1 klip
+        # hanya membaca 2 frame -> `read < 3` -> deteksi SELALU gagal tanpa log.
+        times = [s + (e - s) * k / 4 for s, e in spans for k in (1, 2, 3)]
     else:
         times = [dur * (0.05 + 0.9 * k / max(samples - 1, 1)) for k in range(samples)]
     times = sorted(t for t in times if 0 < t < dur)[:samples]
@@ -822,6 +824,7 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     pts = [f for f in found if f[0] >= 0]
     big_frames = sum(1 for f in found if f[0] < 0)
     if read < 3 or not pts:
+        logger.info(f"Layout probe: frames={read} wajah_kecil={len(pts)} → kurang sampel, tanpa split")
         return None
     # kluster posisi wajah: facecam = posisi yang muncul di sebagian besar frame
     best: List[Tuple[float, float, float, float]] = []
@@ -836,13 +839,16 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     logger.info(f"Layout probe: frames={read} small={len(pts)} big={big_frames} "
                 f"share={share:.2f} face_w={fw:.3f} mx={mx:.2f} my={my:.2f} at_edge={at_edge} force={force}")
     if not force and (share < 0.55 or big_frames > read * 0.3 or not at_edge):
+        logger.info(f"Layout probe: share={share:.2f} big={big_frames} at_edge={at_edge} → bukan layout streamer")
         return None
-    # kotak facecam: ±2.9× tinggi wajah, rasio sama dengan panel atas (1080 × 1920·cam_ratio)
+    # kotak facecam: ±1,9× tinggi wajah (Clipper memakai ±2×) dan rasio sama
+    # dengan panel atas (1080 × 1920·cam_ratio). Dulu 2,9× → wajah hanya 17%
+    # lebar kotak, jadi tampak kecil dan tidak di tengah setelah di-scale.
     panel_ratio = 1080 / (1920 * cam_ratio)
     span_x = max(p[0] for p in best) - min(p[0] for p in best)  # streamer bergerak di dalam cam
-    ch = min(0.9, max(fh * 2.9, 0.22))
+    ch = min(0.9, max(fh * 1.9, 0.18))
     cw = ch * vh * panel_ratio / vw
-    cw = max(cw, min(0.6, span_x + fw * 2.4))
+    cw = max(cw, min(0.32, span_x + fw * 2.4))
     ch = cw * vw / (panel_ratio * vh)
     x = min(max(mx - cw / 2, 0.0), 1 - cw)
     y = min(max(my + fh * 0.35 - ch / 2, 0.0), 1 - ch)

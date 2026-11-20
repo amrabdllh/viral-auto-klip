@@ -19,6 +19,7 @@ bisa dicocokkan ke video.
 from __future__ import annotations
 
 import csv
+import math
 import os
 import json
 import re
@@ -26,8 +27,9 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -89,22 +91,69 @@ def _pick_streams(info: Dict, max_height: int = 1080) -> Tuple[str, Optional[str
 
 def _playlist_timing(url: str, headers: Dict) -> Tuple[Optional[float], List[float]]:
     """(jam dinding potongan pertama, durasi tiap potongan) dari playlist HLS."""
+    pdt, _seq, segs = _fetch_segments(url, headers)
+    return pdt, [d for _, d in segs]
+
+
+def _fetch_segments(url: str, headers: Dict) -> Tuple[Optional[float], int, List[Tuple[str, float]]]:
+    """Baca playlist HLS: (PDT potongan pertama, media-sequence, [(url absolut, durasi)])."""
     req = urllib.request.Request(url, headers={k: v for k, v in headers.items() if k.lower() != "accept-encoding"})
     with urllib.request.urlopen(req, timeout=20) as resp:
         text = resp.read().decode("utf-8", "replace")
-    pdt, durs = None, []
+    pdt: Optional[float] = None
+    seq = 0
+    segs: List[Tuple[str, float]] = []
+    dur = 1.0
     for line in text.splitlines():
-        if line.startswith("#EXT-X-PROGRAM-DATE-TIME:") and pdt is None and not durs:
+        s = line.strip()
+        if s.startswith("#EXT-X-PROGRAM-DATE-TIME:") and pdt is None:
             try:
-                pdt = datetime.fromisoformat(line.split(":", 1)[1].strip().replace("Z", "+00:00")).timestamp()
+                pdt = datetime.fromisoformat(s.split(":", 1)[1].strip().replace("Z", "+00:00")).timestamp()
             except ValueError:
                 pdt = None
-        elif line.startswith("#EXTINF:"):
+        elif s.startswith("#EXT-X-MEDIA-SEQUENCE:"):
             try:
-                durs.append(float(line[8:].split(",")[0]))
+                seq = int(s.split(":", 1)[1].strip())
             except ValueError:
-                durs.append(1.0)
-    return pdt, durs
+                pass
+        elif s.startswith("#EXTINF:"):
+            try:
+                dur = float(s[8:].split(",")[0])
+            except ValueError:
+                dur = 1.0
+        elif s and not s.startswith("#"):
+            segs.append((urllib.parse.urljoin(url, s), dur))
+            dur = 1.0
+    return pdt, seq, segs
+
+
+def _segment_starts(pdt: float, segs: List[Tuple[str, float]]) -> List[float]:
+    out, t = [], pdt
+    for _, d in segs:
+        out.append(t)
+        t += d
+    return out
+
+
+def _iso(wall: float) -> str:
+    return datetime.fromtimestamp(wall, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _write_mirror(path: Path, segs: List[Tuple[str, float]], seq0: int, wall0: float) -> None:
+    """Tulis playlist HLS lokal yang menunjuk langsung ke segmen remote.
+
+    FFmpeg membacanya seperti playlist live biasa (file ini diperbarui terus),
+    tetapi kita yang menentukan segmen pertama — tidak ada lagi balapan
+    "playlist bergeser satu segmen" antara pembacaan kita dan pembukaan FFmpeg.
+    """
+    maxdur = max((d for _, d in segs), default=1.0)
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{math.ceil(maxdur)}",
+             f"#EXT-X-MEDIA-SEQUENCE:{seq0}", f"#EXT-X-PROGRAM-DATE-TIME:{_iso(wall0)}"]
+    for u, d in segs:
+        lines.extend((f"#EXTINF:{d:.6f},", u))
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def cleanup_orphan_recorders() -> int:
@@ -281,66 +330,131 @@ class Recorder:
             backlog = min(MAX_BACKLOG_SEC, max(4.0, time.time() - last + 6)) if last else 30.0
         self.refresh()
 
-    @staticmethod
-    def _audio_offset(v_url: str, a_url: str, headers: Dict, n: int) -> float:
-        """Selisih titik mulai video vs audio untuk jendela `-live_start_index -n`.
+    # ---- playlist cermin: titik mulai deterministik, tanpa balapan segmen
+    def _mirror_inputs(self, v_url: str, a_url: Optional[str], headers: Dict, backlog: float) -> Optional[Dict]:
+        """Tulis playlist HLS lokal dari segmen yang KITA pilih.
 
-        Positif = audio harus digeser maju. 0 bila playlist tidak terbaca.
+        Masalah lama: `-live_start_index -n` dihitung per playlist, tetapi playlist
+        live bergeser tiap detik. Antara pembacaan kita dan pembukaan FFmpeg, satu
+        playlist bisa sudah bergeser satu segmen (1 dtk) sementara yang lain belum —
+        hasilnya audio bergeser ±1 dtk dan offset yang kita hitung justru menambah
+        kesalahan. Dengan playlist cermin, segmen pertama yang dibaca FFmpeg adalah
+        segmen yang sama yang kita pakai untuk menghitung offset.
         """
         try:
-            v_pdt, v_durs = _playlist_timing(v_url, headers)
-            a_pdt, a_durs = _playlist_timing(a_url, headers)
-            if not (v_pdt and a_pdt):
-                return 0.0
+            v_pdt, v_seq, v_segs = _fetch_segments(v_url, headers)
+            a_pdt, a_seq, a_segs = _fetch_segments(a_url, headers) if a_url else (None, 0, [])
+            if not v_segs or v_pdt is None:
+                return None
+            target = time.time() - max(0.0, backlog)
 
-            def start(pdt: float, durs: List[float]) -> float:
-                idx = max(0, len(durs) - n)
-                return pdt + sum(durs[:idx])
+            def pick(pdt: float, segs: List[Tuple[str, float]]) -> Tuple[int, float]:
+                starts = _segment_starts(pdt, segs)
+                for i, start in enumerate(starts):
+                    if start + segs[i][1] > target:
+                        return i, start
+                return max(0, len(segs) - 1), starts[-1]
 
-            # Audio harus DIGESER sebesar selisih titik mulainya:
-            #   itsoffset = audio_start - video_start
-            # (dulu dibalik, sehingga audio bergeser ke arah yang salah dan
-            #  segment muxer sempat macet karena timestamp negatif)
-            delta = start(a_pdt, a_durs) - start(v_pdt, v_durs)
-            # Selisih > 5 menit hampir pasti salah baca, jangan diterapkan.
-            return delta if abs(delta) <= 300 else 0.0
-        except Exception:
-            return 0.0
+            vi, v_wall0 = pick(v_pdt, v_segs)
+            ai, a_wall0 = pick(a_pdt, a_segs) if (a_segs and a_pdt is not None) else (0, v_wall0)
+            v_path, a_path = self.dir / "v_live.m3u8", self.dir / "a_live.m3u8"
+            _write_mirror(v_path, v_segs[vi:], v_seq + vi, v_wall0)
+            state = {"v": {"path": str(v_path), "url": v_url, "headers": headers,
+                           "segs": list(v_segs[vi:]), "seq": v_seq + vi, "wall0": v_wall0},
+                     "a": None}
+            if a_url and a_segs:
+                _write_mirror(a_path, a_segs[ai:], a_seq + ai, a_wall0)
+                state["a"] = {"path": str(a_path), "url": a_url, "headers": headers,
+                              "segs": list(a_segs[ai:]), "seq": a_seq + ai, "wall0": a_wall0}
+            return {"v": v_wall0, "a": a_wall0, "state": state}
+        except Exception as exc:  # noqa: BLE001 - fallback ke mode -live_start_index
+            self.log(f"Playlist cermin gagal ({str(exc)[:140]}); memakai mode lama")
+            return None
+
+    @staticmethod
+    def _refresh_mirrors(items: List[Dict], stop: threading.Event) -> None:
+        """Tambahkan segmen baru ke playlist cermin selama FFmpeg membaca.
+
+        Harus APPEND, bukan tulis-ulang: di Windows FFmpeg memegang file
+        playlist yang sedang dibaca, sehingga `os.replace` gagal dan playlist
+        cermin tidak pernah bertambah — FFmpeg berhenti di ujung playlist awal.
+        """
+        while not stop.is_set():
+            for item in items:
+                try:
+                    _pdt, seq, segs = _fetch_segments(item["url"], item["headers"])
+                    last = item["seq"] + len(item["segs"]) - 1
+                    fresh = [(u, d) for j, (u, d) in enumerate(segs) if seq + j > last]
+                    if fresh:
+                        if seq > last + 1:
+                            logger.warning(f"Playlist cermin kehilangan {seq - last - 1} segmen")
+                        chunk = "".join(f"#EXTINF:{d:.6f},\n{u}\n" for u, d in fresh)
+                        with open(item["path"], "a", encoding="utf-8") as fh:
+                            fh.write(chunk)
+                            fh.flush()
+                        item["segs"].extend(fresh)
+                except Exception:  # noqa: BLE001 - dicoba lagi 2 dtk kemudian
+                    pass
+            stop.wait(2)
 
     def _run_ffmpeg(self, v_url: str, a_url: Optional[str], headers: Dict, backlog: float) -> None:
-        # -live_start_index menghitung SEGMEN, bukan detik. Dulu backlog detik
-        # dipakai langsung: 180 dtk -> 180 segmen (~15 menit pada segmen 5 dtk),
-        # sehingga recorder selalu mengejar siaran dan segment pertama lama.
-        try:
-            _, durs = _playlist_timing(v_url, headers)
-            avg = (sum(durs) / len(durs)) if durs else 5.0
-        except Exception:
-            avg = 5.0
-        n = max(3, int(round(backlog / max(avg, 1.0))))
-        self.log(f"Backlog {backlog:.0f} dtk, segmen rata-rata {avg:.1f} dtk → mulai {n} segmen ke belakang")
         run_no = len(self.runs)
         csv_path = self.dir / f"list_{run_no:02d}.csv"
         hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k.lower() in ("user-agent", "referer", "origin", "cookie"))
-        def inp(u):
-            args = ["-live_start_index", str(-n)]
-            if hdr:
-                args += ["-headers", hdr]
-            return args + ["-i", u]
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inp(v_url)]
-        if a_url:
-            # Video dan audio datang dari rendition HLS terpisah. Kalau kedua
-            # playlist mulai di detik berbeda, FFmpeg menormalkan masing-masing
-            # ke 0 -> audio bergeser. Offset-nya dihitung eksplisit dari PDT
-            # playlist, lalu audio digeser dengan -itsoffset.
-            # (Jangan pakai -copyts: timestamp absolut membuat segmen pertama
-            #  menjadi raksasa dan akuntansi durasi ikut rusak.)
-            offset = self._audio_offset(v_url, a_url, headers, n) if AUDIO_OFFSET_ENABLED else 0.0
-            if abs(offset) > 0.05:
-                self.log(f"Offset audio {offset:+.2f} dtk dikoreksi")
-                cmd += ["-itsoffset", f"{offset:.3f}"]
-            cmd += [*inp(a_url), "-map", "0:v:0", "-map", "1:a:0"]
+        mirror = self._mirror_inputs(v_url, a_url, headers, backlog) if v_url.startswith("http") else None
+        stop_refresh = threading.Event()
+        if mirror:
+            v_wall0 = float(mirror["v"])
+            offset = 0.0
+            if a_url and mirror["state"]["a"] and AUDIO_OFFSET_ENABLED:
+                offset = float(mirror["a"]) - float(mirror["v"])
+            def inp(path: str):
+                # Tanpa -live_start_index, demuxer HLS mulai di "live edge"
+                # (3 segmen dari akhir) dan titik mulai kita diabaikan; 0 = mulai
+                # dari segmen pertama playlist cermin — segmen yang kita pilih.
+                args = ["-live_start_index", "0",
+                        "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+                        "-allowed_extensions", "ALL"]
+                return args + ["-f", "hls", "-i", path]
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inp(mirror["state"]["v"]["path"])]
+            if a_url:
+                if abs(offset) > 0.05:
+                    self.log(f"Offset audio {offset:+.2f} dtk dikoreksi")
+                    cmd += ["-itsoffset", f"{offset:.3f}"]
+                cmd += [*inp(mirror["state"]["a"]["path"]), "-map", "0:v:0", "-map", "1:a:0"]
+            else:
+                cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
+            items = [mirror["state"]["v"]] + ([mirror["state"]["a"]] if a_url and mirror["state"]["a"] else [])
+            threading.Thread(target=self._refresh_mirrors, args=(items, stop_refresh),
+                             name="live-mirror", daemon=True).start()
+            self.log("Merekam dari playlist cermin (titik mulai pasti)")
         else:
-            cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
+            # Fallback: perilaku lama dengan -live_start_index (bisa meleset 1 segmen).
+            try:
+                _, durs = _playlist_timing(v_url, headers)
+                avg = (sum(durs) / len(durs)) if durs else 5.0
+            except Exception:
+                avg = 5.0
+            n = max(3, int(round(backlog / max(avg, 1.0))))
+            self.log(f"Backlog {backlog:.0f} dtk, segmen rata-rata {avg:.1f} dtk → mulai {n} segmen ke belakang")
+            def inp(u):
+                args = ["-live_start_index", str(-n)]
+                if hdr:
+                    args += ["-headers", hdr]
+                return args + ["-i", u]
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inp(v_url)]
+            if a_url:
+                cmd += [*inp(a_url), "-map", "0:v:0", "-map", "1:a:0"]
+            else:
+                cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
+            v_wall0 = time.time() - n
+            try:
+                pdt, durs = _playlist_timing(v_url, headers)
+                if pdt and durs:
+                    idx = max(0, len(durs) - n)
+                    v_wall0 = pdt + sum(durs[:idx])
+            except Exception as exc:
+                self.log(f"Jam playlist tidak terbaca, pakai perkiraan: {exc}")
         cmd += ["-c", "copy", "-f", "segment", "-segment_time", str(SEGMENT_SEC), "-reset_timestamps", "1",
                 "-segment_start_number", str(self._next_number), "-segment_list", str(csv_path),
                 "-segment_list_type", "csv", str(self.dir / "seg_%05d.ts")]
@@ -351,22 +465,18 @@ class Recorder:
             (self.dir / "ffmpeg.pid").write_text(str(self._proc.pid), encoding="utf-8")
         except OSError:
             pass
-        # jam dinding potongan awal: hitung dari playlist yang sama yang dibaca FFmpeg (selisih ±1 dtk)
-        wall_base = time.time() - n
-        try:
-            pdt, durs = _playlist_timing(v_url, headers)
-            if pdt and durs:
-                idx = max(0, len(durs) - n)
-                wall_base = pdt + sum(durs[:idx])
-        except Exception as exc:
-            self.log(f"Jam playlist tidak terbaca, pakai perkiraan: {exc}")
+        wall_base = v_wall0
         self.runs.append({"csv": str(csv_path), "wall_base": wall_base})
-        self.log(f"Merekam siaran (mulai {int(n // 60)} mnt {int(n % 60)} dtk ke belakang)…")
+        if mirror:
+            self.log(f"Merekam siaran (mulai {max(0, int((time.time() - wall_base) // 60))} mnt ke belakang)…")
+        else:
+            self.log(f"Merekam siaran (mulai {int(n // 60)} mnt {int(n % 60)} dtk ke belakang)…")
         try:
             while self._proc.poll() is None and not self._stop.is_set():
                 self._stop.wait(2)
                 self.refresh()
         finally:
+            stop_refresh.set()
             if self._stop.is_set():
                 self._kill()
             err.close()
@@ -808,7 +918,7 @@ def _gameplay_from_cam(cam: List[float]) -> List[float]:
     x, y, w, h = cam
     cx, cy = x + w / 2, y + h / 2
     if cx > 0.55:            # cam di kanan
-        return [0.0, 0.0, round(max(0.2, x), 4), 1.0]
+        return [0.0, 0.0, round(max(0.55, min(0.79, x)), 4), 1.0]
     if cx < 0.45:            # cam di kiri
         return [round(min(0.8, x + w), 4), 0.0, round(max(0.2, 1.0 - (x + w)), 4), 1.0]
     if cy > 0.5:             # cam di bawah
