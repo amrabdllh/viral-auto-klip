@@ -40,6 +40,12 @@ SEGMENT_SEC = 60
 CHAT_LAG_SEC = 12.0
 MAX_BACKLOG_SEC = 3500  # playlist YouTube menyimpan ±3600 potongan 1 dtk
 
+# Koreksi offset audio antar-rendition HLS. Default MATI: -itsoffset negatif
+# membuat timestamp audio mundur dan segment muxer berhenti merotasi (rekaman
+# macet di segmen pertama). Nyalakan hanya untuk sumber yang terbukti desync:
+#   set LIVE_AUDIO_OFFSET=1 di .env
+AUDIO_OFFSET_ENABLED = os.getenv("LIVE_AUDIO_OFFSET", "0").lower() in ("1", "true", "yes")
+
 
 # ============================================================================ info siaran
 
