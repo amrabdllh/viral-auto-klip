@@ -943,25 +943,30 @@ def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
     if not preset_path.is_absolute():
         preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
     preset = campaign.load_preset(preset_path)
-    overrides = {k: p[k] for k in ("subtitle_provider", "intro_voice", "layout") if p.get(k)}
+    overrides = {k: p[k] for k in ("subtitle_provider", "intro_voice", "layout", "subtitle_position") if p.get(k)}
     settings = campaign.campaign_settings(preset, overrides)
 
     layout = None
     if settings["layout"] == "split":
         cam, game = settings["facecam_rect"], settings["gameplay_rect"]
-        # Bila preset sudah menentukan koordinat tetap (ala Clipper), pakai langsung.
-        # Auto-deteksi hanya jalan bila preset tidak punya facecam_rect.
-        if not cam and p.get("auto_facecam", True):
-            try:
-                det = detect_stream_layout(video, picked)
-                if det:
-                    cam = det["cam_box"]
-                    game = _gameplay_from_cam(cam)
-                    logger.info(f"Campaign live: facecam {cam} → gameplay {game}")
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"Deteksi facecam campaign dilewati: {str(exc)[:160]}")
+        face = None
+        try:
+            det = detect_stream_layout(video, picked)
+        except Exception as exc:  # noqa: BLE001
+            det = None
+            logger.warning(f"Deteksi facecam campaign dilewati: {str(exc)[:160]}")
+        if det:
+            # Preset tetap pemilik kotak crop; deteksi memusatkan wajah di panel.
+            face = [det["face"][0], det["face"][1]]
+            if not cam:
+                cam = det["cam_box"]
+                game = _gameplay_from_cam(cam)
+                logger.info(f"Campaign live: facecam {cam} → gameplay {game}")
+            else:
+                logger.info(f"Campaign live: preset {cam}, wajah {face[0]:.3f},{face[1]:.3f}")
         layout = {"cam_box": list(cam), "game_box": list(game),
-                  "cam_ratio": settings["facecam_height"] / 1920.0}
+                  "cam_ratio": settings["facecam_height"] / 1920.0,
+                  "face": face, "caption_y": campaign.caption_margin(settings, preset)}
 
     opts = tools.render_options(p)
     opts["stream_layout"] = layout

@@ -398,8 +398,14 @@ def append_outro(src: str, out: str, outro: str, image_sec: float = 3.0, fade: f
 
 
 def split_cam(src: str, out: str, cam: Tuple[float, float, float, float], game: Tuple[float, float, float, float],
-              cam_ratio: float = 0.38, cam_top: bool = True, start: float = 0, end: float = 0) -> str:
-    """Split-Cam gaming: area facecam & gameplay (x,y,w,h relatif 0..1) ditumpuk vertikal 9:16."""
+              cam_ratio: float = 0.38, cam_top: bool = True, start: float = 0, end: float = 0,
+              face: Optional[Tuple[float, float]] = None) -> str:
+    """Split-Cam gaming: area facecam & gameplay (x,y,w,h relatif 0..1) ditumpuk vertikal 9:16.
+
+    `face` = pusat wajah (x, y relatif 0..1 pada frame sumber). Bila wajah tidak
+    tepat di tengah kotak (mis. webcam menempel tepi kanan layar), panel diberi
+    padding hitam di sisi yang kosong supaya wajah tetap di tengah panel.
+    """
     info = probe(src)
     vw, vh = info["width"], info["height"]
     cam_h = int(H * max(0.2, min(0.6, cam_ratio))) // 2 * 2
@@ -410,6 +416,26 @@ def split_cam(src: str, out: str, cam: Tuple[float, float, float, float], game: 
         return (f"crop={max(2, int(vw * w)) // 2 * 2}:{max(2, int(vh * h)) // 2 * 2}:"
                 f"{int(vw * x)}:{int(vh * y)}")
 
+    # Panel atas: crop facecam; bila wajah berada di tepi, padding hitam di sisi
+    # seberang agar wajah di tengah panel (Clipper mencapai ini lewat koordinat
+    # yang sudah dikurasi; di sini kita hitung otomatis dari posisi wajah).
+    cam_w = max(2, int(vw * cam[2])) // 2 * 2
+    cam_h_px = max(2, int(vh * cam[3])) // 2 * 2
+    panel_ratio = W / cam_h
+    total_w = max(cam_w, int(round(cam_h_px * panel_ratio)) // 2 * 2)
+    pad_left = pad_right = 0
+    if face and total_w > cam_w:
+        fx = float(face[0]) * vw - int(vw * cam[0])  # posisi wajah di dalam crop (px)
+        pad_left = max(0, int(round(total_w / 2 - fx))) // 2 * 2
+        pad_right = max(0, total_w - cam_w - pad_left)
+        if pad_left == 0 and pad_right == 0:
+            pad_right = total_w - cam_w
+    if pad_left or pad_right:
+        cam_chain = (f"{crop(cam)},pad={total_w}:{cam_h_px}:{pad_left}:0:color=black,"
+                     f"scale={W}:{cam_h}:force_divisible_by=2:reset_sar=1:flags=lanczos")
+    else:
+        cam_chain = f"{crop(cam)},scale={W}:{cam_h}:force_original_aspect_ratio=increase,crop={W}:{cam_h}"
+
     top, bottom = ("c", "g") if cam_top else ("g", "c")
     # Panel gameplay: frame utuh (contain) di atas latar blur — sama seperti
     # renderer campaign Clipper. Dulu 'increase' (cover) memotong sisi kiri/kanan
@@ -417,7 +443,7 @@ def split_cam(src: str, out: str, cam: Tuple[float, float, float, float], game: 
     bg_w = max(2, W // 4)
     bg_h = max(2, (game_h // 8) * 2)
     fc = (f"[0:v]split[c0][g0];"
-          f"[c0]{crop(cam)},scale={W}:{cam_h}:force_original_aspect_ratio=increase,crop={W}:{cam_h}[c];"
+          f"[c0]{cam_chain}[c];"
           f"[g0]{crop(game)},split=2[gf][gb];"
           f"[gf]scale={W}:{game_h}:force_original_aspect_ratio=decrease:force_divisible_by=2:"
           f"reset_sar=1:flags=lanczos[gfit];"
