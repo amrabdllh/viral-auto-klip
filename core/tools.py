@@ -317,6 +317,15 @@ def clip_quick(ctx: JobContext) -> Dict:
     p = ctx.params
     if p.get("viral_standard", True):
         p = viral_standard.apply_to_params(p)   # skill make-clip: 15-45 dtk, skor 55
+    # Subtitle provider dari form (opsional): "none" mematikan caption; cloud memakai engine cloud.
+    subtitle_provider = str(p.get("subtitle_provider") or "").lower()
+    if subtitle_provider in ("none", "off", "tanpa"):
+        p["enable_captions"] = False
+    elif subtitle_provider == "whisper" and not p.get("whisper_device"):
+        p["whisper_device"] = "auto"
+    elif subtitle_provider in ("elevenlabs", "scribe", "elevenlabs-scribe", "groq", "cloud", "groq-whisper") \
+            and not p.get("whisper_device"):
+        p["whisper_device"] = subtitle_provider
     config.MIN_VIRAL_SCORE = max(0.0, min(float(p.get("min_score", 55)), 100.0))
     config.MIN_CLIP_DURATION = max(5, int(p.get("min_duration", 15)))
     config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(p.get("max_duration", 60)))
@@ -360,6 +369,23 @@ def clip_quick(ctx: JobContext) -> Dict:
         for c in clips_data:
             c["no_hook_card"] = True
     selected = clips_data[:num]
+    # Metadata eksplisit dari form (opsional): override judul/deskripsi/hashtag AI.
+    title_override = str(p.get("title_override") or "").strip()
+    description_override = str(p.get("description_override") or "").strip()
+    hashtags_override = str(p.get("hashtags_override") or "").strip()
+    tags_override: List[str] = []
+    if hashtags_override:
+        for tag in re.split(r"[\s,]+", hashtags_override):
+            clean = "#" + re.sub(r"[^\w]", "", tag.lstrip("#"), flags=re.UNICODE)
+            if len(clean) > 1 and clean.lower() not in {t.lower() for t in tags_override}:
+                tags_override.append(clean)
+    for c in selected:
+        if title_override:
+            c["ai_title"] = title_override[:95]
+        if description_override:
+            c["upload_caption"] = description_override[:config.UPLOAD_CAPTION_MAX_CHARS]
+        if tags_override:
+            c["hashtags"] = tags_override[:config.MAX_HASHTAGS]
     if p.get("streamer_only", True):
         # Filter per klip (transkrip 15 menit terlalu panjang untuk satu panggilan LLM):
         # buang dialog game dari caption, biarkan kategori & durasi dari analyzer.
