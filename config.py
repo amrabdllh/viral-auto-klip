@@ -116,6 +116,11 @@ GEMINI_API_KEY = _secret("GEMINI_API_KEY")
 OPENROUTER_API_KEY = _secret("OPENROUTER_API_KEY")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
+# Magpie: gateway lokal OpenAI-compatible (Claude/GPT via newapi).
+MAGPIE_BASE_URL = os.getenv("MAGPIE_BASE_URL", "http://127.0.0.1:3425/v1")
+MAGPIE_API_KEY = _secret("MAGPIE_API_KEY") or "magpie"
+MAGPIE_MODEL = os.getenv("MAGPIE_MODEL", "https-newapi-deepwisdom-ai/claude-haiku-5-5")
+
 # Top-tier providers (v4 AI upgrade — semua dipakai lewat core/ai_providers.py)
 ANTHROPIC_API_KEY = _secret("ANTHROPIC_API_KEY")
 ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
@@ -211,12 +216,19 @@ AI_PROVIDER_MODELS = {
         "llama3.1:8b",
         "gemma3:4b",
     ],
+    "Magpie": [
+        MAGPIE_MODEL,
+        "auto/claude-sonnet-5-5",
+        "auto/claude-opus-5-5",
+        "https-newapi-deepwisdom-ai/claude-sonnet-5-5",
+        "https-newapi-deepwisdom-ai/claude-opus-5-5",
+    ],
     "Custom": [],
 }
 
 ALL_AI_PROVIDERS = [
     "Groq", "OpenAI", "Anthropic", "Gemini", "Antigravity",
-    "DeepSeek", "Mistral", "OpenRouter", "Ollama", "Custom",
+    "DeepSeek", "Mistral", "OpenRouter", "Ollama", "Magpie", "Custom",
 ]
 
 AI_PROVIDER = os.getenv("AI_PROVIDER", "Groq")

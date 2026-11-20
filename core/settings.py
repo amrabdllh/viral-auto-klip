@@ -21,7 +21,7 @@ ENV_PATH = config.BASE_DIR / ".env"
 EXAMPLE_PATH = config.BASE_DIR / ".env.example"
 _LOCK = threading.Lock()
 
-_PROVIDERS = ["Groq", "OpenAI", "Anthropic", "Gemini", "Antigravity", "DeepSeek", "Mistral", "OpenRouter", "Ollama", "Custom"]
+_PROVIDERS = ["Groq", "OpenAI", "Anthropic", "Gemini", "Antigravity", "DeepSeek", "Mistral", "OpenRouter", "Ollama", "Magpie", "Custom"]
 
 # key, grup, label, tipe, opsi/rentang, bantuan
 SCHEMA: List[Dict] = [
@@ -110,6 +110,10 @@ SCHEMA: List[Dict] = [
     {"key": "CUSTOM_AI_API_KEY", "group": "Lanjutan", "label": "Custom AI: API key", "type": "secret"},
     {"key": "CUSTOM_AI_MODEL", "group": "Lanjutan", "label": "Custom AI: nama model", "type": "str"},
     {"key": "OLLAMA_BASE_URL", "group": "Lanjutan", "label": "Alamat Ollama", "type": "url"},
+    {"key": "MAGPIE_BASE_URL", "group": "Lanjutan", "label": "Alamat Magpie (gateway lokal)", "type": "url",
+     "help": "Default http://127.0.0.1:3425/v1 — Claude/GPT lewat Magpie."},
+    {"key": "MAGPIE_MODEL", "group": "Lanjutan", "label": "Model Magpie default", "type": "str",
+     "help": "Contoh: https-newapi-deepwisdom-ai/claude-haiku-5-5"},
     {"key": "ANTHROPIC_BASE_URL", "group": "Lanjutan", "label": "Alamat API Anthropic", "type": "url", "help": "Biarkan default kecuali memakai proxy"},
     {"key": "GOOGLE_AI_PROJECT_ID", "group": "Lanjutan", "label": "Google project ID (Antigravity)", "type": "str", "help": "Opsional. Default diambil dari client_secret.json"},
 ]
