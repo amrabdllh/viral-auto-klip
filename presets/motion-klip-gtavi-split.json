@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "layout": "split",
+  "facecam_rect": [0.775, 0.703, 0.225, 0.297],
+  "gameplay_rect": [0, 0, 0.79, 1],
+  "subtitle_provider": "elevenlabs",
+  "intro_voice": "auto",
+  "highlight": true,
+  "watermark": "../assets/campaign/motionklip-watermark.png",
+  "outro": "../assets/campaign/gtavi-outro.mov",
+  "watermark_width": 1080,
+  "watermark_strip": [1414, 1600],
+  "watermark_top": 1584,
+  "outro_seconds": 3,
+  "facecam_height": 730,
+  "subtitle_height": 188,
+  "fps": 60,
+  "hashtags": "#windahbasudara #GTAVI #windahGTAVI #motionklip #ezklip",
+  "discord_tag": "MKLP"
+}

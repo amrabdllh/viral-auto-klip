@@ -542,6 +542,7 @@ def update_state(job_dir: Path, fn) -> Dict:
 # ============================================================================ job
 
 from . import db  # noqa: E402
+from .chat_spikes import chat_spike_moments, merge_hints  # noqa: E402
 from .jobs import JobCancelled, JobContext, handler, submit  # noqa: E402
 
 STOP_REQUESTS: set = set()   # "Selesai rekam": proses sisa rekaman lalu berhenti dengan rapi
@@ -727,7 +728,10 @@ def live_window(ctx: JobContext) -> Dict:
         events = json.loads(Path(p["chat_file"]).read_text(encoding="utf-8"))
     except (OSError, ValueError, KeyError):
         events = []
-    hints = chat_signals(events, wall0, wall0 + dur) + audio_signals(video)
+    hints = merge_hints(
+        chat_signals(events, wall0, wall0 + dur),
+        chat_spike_moments(events, wall0, wall0 + dur, lag=CHAT_LAG_SEC),
+    ) + audio_signals(video)
     for h in hints:
         h["label"] = describe_signal(h)
     ctx.log(f"Sinyal: {sum(h['kind'] == 'chat' for h in hints)} lonjakan chat, {sum(h['kind'] == 'audio' for h in hints)} lonjakan suara")
