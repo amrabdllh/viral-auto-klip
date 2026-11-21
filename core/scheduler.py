@@ -58,7 +58,14 @@ def upload_now(item: Dict) -> Dict:
     title = (item.get("title") or Path(path).stem)[:100]
     description = item.get("description", "")
 
+    # Coba ulang setelah gagal sebagian (mis. TikTok sukses, YouTube kedaluwarsa):
+    # jangan unggah ulang platform yang sudah berhasil.
+    done_before = item.get("result") or {}
     for platform in item.get("platforms") or []:
+        prev = done_before.get(platform) or {}
+        if str(prev.get("status", "")).lower() == "done" or prev.get("ok") is True:
+            report[platform] = prev
+            continue
         try:
             if platform == "youtube":
                 method = str(getattr(config, "YOUTUBE_UPLOAD_METHOD", "auto") or "auto").lower()
