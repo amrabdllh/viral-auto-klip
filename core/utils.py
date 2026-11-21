@@ -5,12 +5,17 @@ import os
 import json
 import subprocess
 import re
+import time
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import Callable, List, Dict, Tuple, Optional
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from loguru import logger
 import config
+
+SOURCE_CACHE_DIR = config.BASE_DIR / "data" / "source_cache"
+_VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".flv", ".avi"}
+
 
 def _safe_print(msg) -> None:
     """Cetak log tanpa pernah crash: konsol/pipa Windows (cp1252) tidak bisa memuat emoji."""
@@ -49,11 +54,70 @@ def get_video_info(video_path: str) -> Dict:
         logger.error(f"Error getting video info: {e}")
         return {"duration": 0, "width": 1920, "height": 1080, "path": video_path}
 
+
+def _cookie_opts(cookies_from_browser: str = "", cookies_file: str = "") -> Dict:
+    """Opsi cookiefile/cookiesfrombrowser untuk yt-dlp."""
+    opts: Dict = {}
+    if cookies_file:
+        opts["cookiefile"] = cookies_file
+    elif cookies_from_browser:
+        opts["cookiesfrombrowser"] = (cookies_from_browser,)
+    elif config.YTDLP_COOKIES:
+        env_cookie_path = Path(config.YTDLP_COOKIES)
+        if not env_cookie_path.is_absolute():
+            env_cookie_path = config.BASE_DIR / env_cookie_path
+        if env_cookie_path.exists():
+            opts["cookiefile"] = str(env_cookie_path)
+            logger.info(f"Using yt-dlp cookies from .env: {env_cookie_path}")
+        else:
+            logger.warning(f"YTDLP_COOKIES is set but file was not found: {env_cookie_path}")
+    return opts
+
+
+def _find_cached_source(cache_dir: Path, video_id: str) -> Optional[Path]:
+    """Unduhan selesai untuk video_id (abaikan .part dan file per-format seperti <id>.f137.mp4)."""
+    if not video_id:
+        return None
+    for path in Path(cache_dir).glob(f"{video_id}.*"):
+        if path.is_file() and path.stem == video_id and path.suffix.lower() in _VIDEO_EXTS:
+            return path
+    return None
+
+
+def _best_format_height(info: Dict) -> int:
+    heights = [int(f.get("height") or 0) for f in info.get("formats") or []
+               if (f.get("vcodec") or "none") != "none"]
+    return max(heights, default=0)
+
+
+def _progress_hook(cb: Callable[[float, float, Optional[float]], None]):
+    """Throttle progres yt-dlp (maks ~1 update/detik) untuk pesan job."""
+    state = {"t": 0.0, "pct": -1.0}
+
+    def hook(data: Dict) -> None:
+        status = data.get("status")
+        if status == "downloading":
+            total = data.get("total_bytes") or data.get("total_bytes_estimate") or 0
+            done = data.get("downloaded_bytes") or 0
+            pct = (done * 100.0 / total) if total else 0.0
+            now = time.monotonic()
+            if pct - state["pct"] < 1.0 and now - state["t"] < 1.0:
+                return
+            state["t"], state["pct"] = now, pct
+            cb(pct, float(data.get("speed") or 0.0), data.get("eta"))
+        elif status == "finished":
+            cb(100.0, float(data.get("speed") or 0.0), 0)
+    return hook
+
+
 def download_video(
     url: str,
     output_path: Path = None,
     cookies_from_browser: str = "",
     cookies_file: str = "",
+    progress_cb: Optional[Callable[[float, float, Optional[float]], None]] = None,
+    cache_dir: Optional[Path] = None,
+    max_height: Optional[int] = None,
 ) -> str:
     """Download video using yt-dlp. 
     Saves to 'mentahan/' folder inside project (easy to find + auto cleanup).
@@ -67,65 +131,114 @@ def download_video(
     if output_path is None:
         base_dir = P(__file__).parent.parent
         output_path = base_dir / "mentahan"
-        output_path.mkdir(exist_ok=True)
+    output_path = P(output_path)
+    output_path.mkdir(parents=True, exist_ok=True)
+    if cache_dir is not None:
+        cache_dir = P(cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    # Kualitas sumber: None/0 = tertinggi, angka = batas tinggi (1080/1440/2160).
+    if max_height is None:
+        max_height = getattr(config, "DOWNLOAD_MAX_HEIGHT", 1080)
+    try:
+        max_height = int(max_height)
+    except (TypeError, ValueError):
+        max_height = 1080
+    if max_height <= 0:
+        max_height = None
+    res_pref = [f"res:{max_height}"] if max_height else ["res"]
     
     # FIX v4: dulu dipaksa player_client android,web,ios -> YouTube hanya memberi format 18 (360p),
     # hasil klip 9:16 jadi sangat buram (crop ~200px di-upscale 5x). Default yt-dlp memberi hingga 4K.
     # FFmpegVideoConvertor juga dihapus (meng-encode ulang video = turun kualitas); merge ke mp4 cukup.
     base_opts = {
-        "outtmpl": str(output_path / "%(title).60s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
+        "noprogress": True,  # progres dikirim lewat progress_hooks ke UI, bukan ke log konsol
         "merge_output_format": "mp4",
         "windowsfilenames": True,
-        # pilih resolusi terbaik s.d. 1080p (cukup untuk 9:16 1080x1920), utamakan h264 + m4a
-        "format_sort": ["res:1080", "fps:60", "vcodec:h264", "acodec:m4a"],
+        # Kualitas sumber mengikuti pilihan user (default 1080p60).
+        "format_sort": [*res_pref, "fps:60", "vcodec:h264", "acodec:m4a"],
+        # Fragmen DASH diunduh paralel: default 1 koneksi adalah penyebab utama download lambat.
+        "concurrent_fragment_downloads": 8,
+        "http_chunk_size": 10 * 1024 * 1024,
+        "retries": 10,
+        "fragment_retries": 10,
     }
-    if cookies_file:
-        base_opts["cookiefile"] = cookies_file
-    elif cookies_from_browser:
-        base_opts["cookiesfrombrowser"] = (cookies_from_browser,)
-    elif config.YTDLP_COOKIES:
-        env_cookie_path = Path(config.YTDLP_COOKIES)
-        if not env_cookie_path.is_absolute():
-            env_cookie_path = config.BASE_DIR / env_cookie_path
-        if env_cookie_path.exists():
-            base_opts["cookiefile"] = str(env_cookie_path)
-            logger.info(f"Using yt-dlp cookies from .env: {env_cookie_path}")
-        else:
-            logger.warning(f"YTDLP_COOKIES is set but file was not found: {env_cookie_path}")
+    if progress_cb is not None:
+        base_opts["progress_hooks"] = [_progress_hook(progress_cb)]
+    base_opts.update(_cookie_opts(cookies_from_browser, cookies_file))
 
-    # Percobaan client YouTube: default yt-dlp dulu (paling lengkap), lalu alternatif bila
-    # hasilnya < 720p atau gagal. Hasil terbaik yang didapat tetap dipakai.
-    client_attempts = [
-        ("default", None),
-        ("tv+web_safari", ["tv", "web_safari"]),
-        ("mweb", ["mweb"]),
-    ]
+    # Client YouTube: default dulu, lalu alternatif. Client dipilih dari format yang
+    # tersedia SEBELUM mengunduh — dulu file diunduh penuh, dicek resolusinya, lalu
+    # diunduh ulang bila < 720p (bisa 3x unduh untuk satu video).
+    client_attempts = [("default", None)]
+    if "youtu" in url.lower():
+        client_attempts += [("tv+web_safari", ["tv", "web_safari"]), ("mweb", ["mweb"])]
+
     last_error = None
-    best_file, best_height = None, 0
-
+    chosen: Optional[Tuple[str, Optional[List[str]]]] = None
+    info: Optional[Dict] = None
+    best_height = -1
     for label, clients in client_attempts:
+        probe_opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True,
+                      **{k: v for k, v in base_opts.items() if k != "progress_hooks"}}
+        if clients:
+            probe_opts["extractor_args"] = {"youtube": {"player_client": clients}}
+        try:
+            with yt_dlp.YoutubeDL(probe_opts) as ydl:
+                probe = ydl.extract_info(url, download=False)
+        except Exception as exc:  # DownloadError / ExtractorError
+            last_error = exc
+            logger.warning(f"Probe yt-dlp gagal dengan client={label}: {str(exc)[:160]}")
+            continue
+        height = _best_format_height(probe)
+        logger.info(f"Probe yt-dlp client={label}: hingga {height}p")
+        if chosen is None or height > best_height:
+            chosen, info, best_height = (label, clients), probe, height
+        if best_height >= 720 or "youtu" not in url.lower():
+            break
+
+    if info is None:
+        raise RuntimeError(
+            "yt-dlp gagal membaca format video ini. Coba update yt-dlp "
+            "(`python -m pip install -U yt-dlp`) atau pakai cookies.txt yang valid."
+        ) from last_error
+
+    if 0 < best_height < 720:
+        logger.warning(
+            f"⚠️ Video sumber hanya {best_height}p — hasil 9:16 akan buram. "
+            "Coba update yt-dlp (python -m pip install -U yt-dlp) atau pakai cookies.txt."
+        )
+
+    video_id = str(info.get("id") or "")
+    cache_key = f"{video_id}_{max_height or 'max'}" if video_id else ""
+    cached = _find_cached_source(cache_dir, cache_key) if (cache_dir is not None and cache_key) else None
+    if cached is not None:
+        logger.info(f"Menggunakan sumber dari cache: {cached}")
+        return str(cached)
+
+    # Unduh sekali dengan client terbaik; client lain hanya dicoba bila unduhan GAGAL.
+    ordered = [chosen] + [a for a in client_attempts if a[0] != chosen[0]]
+    filename = None
+    for label, clients in ordered:
         ydl_opts = dict(base_opts)
         ydl_opts["format"] = "bv*+ba/b"
+        if cache_dir is not None and cache_key:
+            ydl_opts["outtmpl"] = str(cache_dir / f"{cache_key}.%(ext)s")
+        else:
+            ydl_opts["outtmpl"] = str(output_path / "%(title).60s.%(ext)s")
         if clients:
             ydl_opts["extractor_args"] = {"youtube": {"player_client": clients}}
         try:
-            logger.info(f"Downloading video with yt-dlp (client={label}, max 1080p)")
+            logger.info(f"Downloading video with yt-dlp (client={label}, {max_height or 'highest'}p)")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
-                if not Path(filename).exists():
-                    filename = filename.rsplit(".", 1)[0] + ".mp4"
-            height = int(get_video_info(filename).get("height") or 0)
-            logger.info(f"Downloaded video resolution: {height}p (client={label})")
-            if height > best_height:
-                if best_file and best_file != filename:
-                    Path(best_file).unlink(missing_ok=True)
-                best_file, best_height = filename, height
-            if best_height >= 720 or "youtu" not in url.lower():
+                downloaded = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(downloaded)
+            if not Path(filename).exists():
+                filename = filename.rsplit(".", 1)[0] + ".mp4"
+            if Path(filename).exists():
                 break
-            logger.warning(f"Hanya {height}p dengan client={label}; mencoba client YouTube lain untuk kualitas lebih baik...")
+            filename = None
         except DownloadError as exc:
             last_error = exc
             message = str(exc)
@@ -135,15 +248,17 @@ def download_video(
                     "atau export cookies YouTube ke cookies.txt dan upload lewat opsi cookies.txt."
                 ) from exc
             logger.warning(f"yt-dlp gagal dengan client={label}: {message[:160]}")
+            filename = None
             continue
 
-    if best_file:
-        if best_height and best_height < 720:
-            logger.warning(
-                f"⚠️ Video sumber hanya {best_height}p — hasil 9:16 akan buram. "
-                "Coba update yt-dlp (python -m pip install -U yt-dlp) atau pakai cookies.txt."
-            )
-        return best_file
+    if filename:
+        if cache_dir is not None and cache_key:
+            cached = _find_cached_source(cache_dir, cache_key)
+            if cached is not None:
+                filename = str(cached)
+        height = int(get_video_info(filename).get("height") or 0)
+        logger.info(f"Downloaded video resolution: {height}p")
+        return filename
 
     pytubefix_result = _download_video_with_pytubefix(url, output_path)
     if pytubefix_result:

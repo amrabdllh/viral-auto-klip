@@ -556,6 +556,8 @@ def _ai_moment_candidates(transcript: List[Dict], video_duration: float) -> List
     per_chunk = max(3, min(10, config.MAX_CLIPS_PER_VIDEO))
 
     def _ask(index: int, chunk: List[str]):
+        from . import viral_standard
+
         rules = [
             f"Durasi tiap momen {config.MIN_CLIP_DURATION}-{config.MAX_CLIP_DURATION} detik; start/end harus jatuh di batas kalimat dari transkrip.",
             "Momen harus utuh: ada hook/konteks di awal, inti, dan payoff/ending. Jangan mulai di tengah kalimat.",
@@ -563,6 +565,7 @@ def _ai_moment_candidates(transcript: List[Dict], video_duration: float) -> List
             "score 0-100 = peluang viral nyata (jangan murah memberi >85).",
             f"category salah satu: {', '.join(CATEGORIES)}.",
             "reason 1 kalimat; hook = teks pembuka layar maks 10 kata, bahasa sama dengan video.",
+            viral_standard.SELECTION_RULES,
         ] + ([GAMING_RULE] if CONTENT_TYPE == "gaming_stream" else [])
         prompt = (
             f"Transkrip video (format [mulai-selesai detik] teks), bagian {index}/{len(chunks)}:\n"

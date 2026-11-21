@@ -40,11 +40,29 @@ def resolve_source(ctx: JobContext, params: Dict, key: str = "") -> str:
         return str(p)
     if not url:
         raise ValueError("Masukkan link video atau upload file")
-    from .utils import download_video
+    from .utils import SOURCE_CACHE_DIR, download_video
     ctx.progress(4, "Download", "Mengunduh video sumber (yt-dlp)…")
     src_dir = ctx.dir / "source"
     src_dir.mkdir(exist_ok=True)
-    video = download_video(url, src_dir, cookies_from_browser=params.get("cookies_browser", ""))
+    last = {"t": 0.0, "pct": -1.0}
+
+    def on_progress(pct: float, speed: float, eta) -> None:
+        now = time.monotonic()
+        if pct < 100 and pct - last["pct"] < 1.0 and now - last["t"] < 2.0:
+            return
+        last["t"], last["pct"] = now, pct
+        mb = (speed or 0) / 1_000_000
+        eta_txt = f"sisa {int(eta)} dtk" if eta else "sisa ?"
+        ctx.progress(4 + int(max(0.0, min(pct, 100.0)) * 0.14), "Download",
+                     f"{pct:.0f}% · {mb:.1f} MB/s · {eta_txt}")
+
+    raw_height = params.get("source_max_height")
+    try:
+        max_height = int(raw_height) if raw_height not in (None, "") else None
+    except (TypeError, ValueError):
+        max_height = None
+    video = download_video(url, src_dir, cookies_from_browser=params.get("cookies_browser", ""),
+                           progress_cb=on_progress, cache_dir=SOURCE_CACHE_DIR, max_height=max_height)
     ctx.log(f"Sumber: {Path(video).name}")
     return video
 
@@ -96,6 +114,52 @@ def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> No
             ctx.log(f"Logo Brand Kit gagal di {Path(c['file_path']).name}: {exc}")
 
 
+def enforce_clip_duration(clips: List[Dict], *, tolerance: float = 0.75,
+                          max_available: float = 0.0) -> List[Dict]:
+    """Buang kandidat di luar MIN/MAX_CLIP_DURATION; panjangkan yang terlalu pendek bila bisa.
+
+    AI kadang mengembalikan momen lebih pendek dari batas (mis. 12 dtk padahal
+    minimum 15). Perilaku sekarang:
+      1. kandidat >= minimum - tolerance  -> lolos apa adanya
+      2. kandidat pendek -> `end` digeser sampai minimum, selama masih muat di
+         sumber (max_available) dan tidak melewati maksimum
+      3. kalau tetap tidak memenuhi -> DIBUANG (jangan kirim klip di bawah standar)
+
+    Catatan: tidak ada lagi fallback "ambil yang terpanjang" — fallback itulah
+    yang dulu meloloskan klip 12 dtk saat minimum 15 dtk.
+    """
+    lo, hi = float(config.MIN_CLIP_DURATION), float(config.MAX_CLIP_DURATION)
+
+    def dur(c: Dict) -> float:
+        try:
+            return float(c.get("end") or 0) - float(c.get("start") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    kept: List[Dict] = []
+    for c in clips:
+        d = dur(c)
+        if d <= 0:
+            continue
+        if d < lo - tolerance:
+            try:
+                start = float(c.get("start") or 0)
+            except (TypeError, ValueError):
+                continue
+            target = lo
+            if max_available and max_available > 0:
+                # Jangan melewati ujung rekaman.
+                target = min(target, float(max_available) - start)
+            if target >= lo - tolerance and target > d:
+                fixed = dict(c)
+                fixed["end"] = round(start + min(target, hi), 3)
+                fixed["duration_extended"] = True
+                c, d = fixed, dur(fixed)
+        if lo - tolerance <= d <= hi + tolerance:
+            kept.append(c)
+    return kept
+
+
 def render_options(params: Dict) -> Dict:
     aspect = params.get("output_type", "Vertical")
     return dict(
@@ -136,6 +200,65 @@ def build_lower_third(params: Dict, transcript: List[Dict], default_name: str = 
                 order.append(spk)
     by_speaker = {spk: names[i] for i, spk in enumerate(order[:len(names)])} if len(names) >= 2 else {}
     return {"names": names, "by_speaker": by_speaker, "subtitle": subtitle} if names else {}
+
+
+def filter_streamer_segments(segments: List[Dict], context: str = "") -> List[Dict]:
+    """Buang dialog game dari caption. LLM memilah segmen yang benar-benar diucapkan streamer.
+
+    Audio siaran mencampur mikrofon streamer + suara game. Whisper bisa ikut menulis
+    dialog game, bahkan menerjemahkannya ke Bahasa Indonesia saat tidak ada ucapan
+    streamer di jendela itu. Filter kata fungsi (drop_foreign_segments) tidak bisa
+    menangkap versi terjemahan, jadi LLM memilah berdasarkan isi/kalimat.
+    """
+    if not segments:
+        return segments
+    if len(segments) > 50:
+        # Transkrip panjang (live window / VOD): panggil per potongan agar jawaban
+        # LLM tidak terpotong dan setiap segmen tetap punya nomor yang jelas.
+        kept: List[Dict] = []
+        for start in range(0, len(segments), 40):
+            kept.extend(filter_streamer_segments(segments[start:start + 40], context))
+        return kept
+    lines = []
+    for index, seg in enumerate(segments, 1):
+        text = " ".join(str(seg.get("text") or "").split())
+        if text:
+            lines.append(f"{index}. [{float(seg.get('start') or 0):.1f}-{float(seg.get('end') or 0):.1f}] {text}")
+    if not lines:
+        return segments
+    prompt = (
+        "Kamu memilah transkrip klip streamer Indonesia yang sedang bermain game. "
+        "Audio klip mencampur mikrofon streamer dengan suara game, jadi dialog karakter game "
+        "(bahasa Inggris) bisa ikut tertranskripsi atau diterjemahkan ke Bahasa Indonesia.\n"
+        "Pilih HANYA nomor segmen yang benar-benar diucapkan streamer. Buang dialog game/NPC.\n"
+        "Ciri dialog game: formal, terjemahan kaku, membahas toko/misi/karakter/instruksi. "
+        "Ciri streamer: bahasa gaul, reaksi, menyapa penonton, komentar bebas.\n"
+        f"Konteks klip: {context[:300] or '-'}\n"
+        "Balas HANYA JSON: {\"keep\": [nomor segmen], \"reason\": \"singkat\"}.\n"
+        "Kalau tidak ada ucapan streamer sama sekali, keep: [].\n\n"
+        "Transkrip:\n" + "\n".join(lines)
+    )
+    try:
+        raw = ai.complete(prompt, max_tokens=min(3000, 300 + 12 * len(segments)), json_mode=True)
+        data = ai.parse_json(raw)
+        keep = data.get("keep")
+        if not isinstance(keep, list):
+            return segments
+        picked, seen = [], set()
+        for value in keep:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= index <= len(segments) and index not in seen:
+                seen.add(index)
+                picked.append(segments[index - 1])
+        logger.info(f"Filter dialog game: {len(segments)} → {len(picked)} segmen "
+                    f"({str(data.get('reason') or '')[:120]})")
+        return picked
+    except Exception as exc:  # noqa: BLE001 - filter opsional, jangan gagalkan render
+        logger.warning(f"Filter dialog game gagal ({str(exc)[:120]}); memakai semua segmen")
+        return segments
 
 
 def _source_title(params: Dict, video: str) -> str:
@@ -204,7 +327,23 @@ def clip_quick(ctx: JobContext) -> Dict:
     from .analyzer import analyze_viral_potential
     from .clipper import process_clips
     from .utils import get_video_info
+    from . import viral_standard
+
     p = ctx.params
+
+    # Standar MotionKlip (15-45 dtk, skor 55) hanya untuk kampanye / bila diminta eksplisit — selain itu mode
+    # Otomatis (isian kosong = AI menentukan) tetap berlaku. [gabungan PR #5 muhifn + v6.8]
+    if p.get("viral_standard") is True or (p.get("campaign") and p.get("viral_standard") is not False):
+        p = viral_standard.apply_to_params(p)   # skill make-clip: 15-45 dtk, skor 55
+    # Subtitle provider dari form (opsional): "none" mematikan caption; cloud memakai engine cloud.
+    subtitle_provider = str(p.get("subtitle_provider") or "").lower()
+    if subtitle_provider in ("none", "off", "tanpa"):
+        p["enable_captions"] = False
+    elif subtitle_provider == "whisper" and not p.get("whisper_device"):
+        p["whisper_device"] = "auto"
+    elif subtitle_provider in ("elevenlabs", "scribe", "elevenlabs-scribe", "groq", "cloud", "groq-whisper") \
+            and not p.get("whisper_device"):
+        p["whisper_device"] = subtitle_provider
 
     def _auto(v) -> bool:  # isian dikosongkan / "auto" = AI yang menentukan (v6.8)
         return v is None or str(v).strip().lower() in ("", "0", "auto", "otomatis")
@@ -247,11 +386,17 @@ def clip_quick(ctx: JobContext) -> Dict:
         ctx.log(f"Mode otomatis{' farming' if farm else ''}: video {minutes:.0f} menit → hingga {num} klip (jumlah akhir ditentukan kualitas)"
                 + (f", durasi {config.MIN_CLIP_DURATION}–{config.MAX_CLIP_DURATION} dtk" if auto_dur else ""))
     transcript, tinfo = transcribe(ctx, video, p, 18)
+    streamer_only = bool(p.get("streamer_only", info.get("content_type") == "gaming_stream"))
+    if streamer_only and transcript:
+        # Caption/analisis hanya dari ucapan streamer, bukan dialog game.
+        from .transcriber import drop_foreign_segments
+        transcript = drop_foreign_segments(transcript, str(p.get("language") or config.WHISPER_LANGUAGE or "id"))
     # Nama channel bukan nama pembicara: di podcast ia menempel pada tamu/host yang sedang tampil.
     # Kartu nama hanya muncul bila pengguna mengisi "Nama pembicara".
     p["_lower_third"] = build_lower_third(p, transcript)
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
     clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video, auto_count=auto_mode)
+    clips_data = enforce_clip_duration(clips_data, max_available=float(info.get("duration") or 0))
     if p.get("categories"):
         clips_data = [c for c in clips_data if c.get("category") in p["categories"]]
     if p.get("keyword"):
@@ -272,9 +417,48 @@ def clip_quick(ctx: JobContext) -> Dict:
         for c in clips_data:
             c["no_hook_card"] = True
     n_render = len(clips_data) if auto_n else min(len(clips_data), num)
+    selected = clips_data[:n_render]
+    # Metadata eksplisit dari form (opsional): override judul/deskripsi/hashtag AI.
+    title_override = str(p.get("title_override") or "").strip()
+    description_override = str(p.get("description_override") or "").strip()
+    hashtags_override = str(p.get("hashtags_override") or "").strip()
+    tags_override: List[str] = []
+    if hashtags_override:
+        for tag in re.split(r"[\s,]+", hashtags_override):
+            clean = "#" + re.sub(r"[^\w]", "", tag.lstrip("#"), flags=re.UNICODE)
+            if len(clean) > 1 and clean.lower() not in {t.lower() for t in tags_override}:
+                tags_override.append(clean)
+    for c in selected:
+        if title_override:
+            c["ai_title"] = title_override[:95]
+        if description_override:
+            c["upload_caption"] = description_override[:config.UPLOAD_CAPTION_MAX_CHARS]
+        if tags_override:
+            c["hashtags"] = tags_override[:config.MAX_HASHTAGS]
+    if streamer_only:
+        # Filter per klip (transkrip 15 menit terlalu panjang untuk satu panggilan LLM):
+        # buang dialog game dari caption, biarkan kategori & durasi dari analyzer.
+        # Tetap jalan walau pemilihan momen memakai skor lokal; gagal → segmen apa adanya.
+        for c in selected:
+            segs = c.get("subtitle_segments") or []
+            if not segs:
+                continue
+            try:
+                kept = filter_streamer_segments(
+                    segs, context=str(c.get("ai_title") or c.get("hook_text") or info.get("title") or ""))
+                c["subtitle_segments"] = kept
+                c["words"] = [w for s in kept for w in (s.get("words") or [])]
+            except Exception:  # noqa: BLE001 - filter opsional
+                pass
     ctx.progress(58, "Render", f"Merender {n_render} klip (reframe wajah, caption, editing)"
                  + (f" — mode otomatis, perkiraan ±{max(1, round(n_render * 4))} menit…" if auto_n else "…"))
-    clips = process_clips(video, clips_data[:n_render], ctx.dir, **render_options(p))
+    if p.get("campaign"):
+        # Hasil akhir hanya template MotionKlip (banner + judul + subtitle + outro),
+        # dengan kategori & durasi tetap dari analyzer per klip.
+        from . import live
+        clips = live._render_campaign_window(video, selected, ctx.dir, p, 0.0)
+    else:
+        clips = process_clips(video, selected, ctx.dir, **render_options(p))
     brand_clips(ctx, clips, p.get("brand_kit"))
     ctx.progress(92, "Publish", "Paket upload & metadata")
     publish = _publish(ctx, clips, p)
@@ -900,5 +1084,171 @@ def viral_analytics(params: Dict) -> Dict:
     return result
 
 
+# ============================================================================ Campaign (MotionKlip)
+
+@handler("campaign_render", background=True)
+def campaign_render_job(ctx: JobContext) -> Dict:
+    """Export satu cut MotionKlip (split/full + banner + judul + subtitle + outro).
+
+    Didaftarkan sebagai `background=True`: render 60 fps bisa puluhan menit dan
+    tidak boleh memblokir antrian job lain.
+    """
+    from . import campaign
+
+    p = ctx.params
+    video = resolve_source(ctx, p)
+    # Preset default bisa diatur di Pengaturan (config.CAMPAIGN_DEFAULT_PRESET).
+    preset = p.get("preset") or getattr(config, "CAMPAIGN_DEFAULT_PRESET", "") or "motion-klip-gtavi-split.json"
+    preset_path = Path(preset)
+    if not preset_path.is_absolute() and not preset_path.exists():
+        preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
+    overrides = {k: p[k] for k in (
+        "layout", "facecam_rect", "gameplay_rect", "subtitle_provider",
+        "highlight", "intro_voice",
+    ) if k in p and p[k] not in (None, "")}
+
+    # ---- Rentang: satu cut, atau beberapa sekaligus (batch).
+    raw_ranges = p.get("ranges") or []
+    ranges = []
+    for item in raw_ranges:
+        try:
+            r_start = float(item.get("start") or 0)
+            r_end = item.get("end")
+            r_end = None if r_end in (None, "") else float(r_end)
+        except (TypeError, ValueError):
+            continue
+        if r_end is not None and r_end <= r_start:
+            continue
+        ranges.append({"start": r_start, "end": r_end,
+                       "title": str(item.get("title") or p.get("title") or "")})
+    if not ranges:
+        end = p.get("end")
+        ranges = [{"start": float(p.get("start") or 0),
+                   "end": float(end) if end not in (None, "") else None,
+                   "title": str(p.get("title") or "")}]
+
+    from .jobs import submit
+
+    clips: List[Dict] = []
+    reviews: List[Dict] = []
+    upload_jobs: List[str] = []
+    for index, item in enumerate(ranges, 1):
+        ctx.progress(5 + int(80 * (index - 1) / len(ranges)), "Campaign",
+                     f"Merender {index}/{len(ranges)}…" if len(ranges) > 1 else "Merender campaign…")
+        review = campaign.render_edited(
+            video, preset_path,
+            start=item["start"], end=item["end"],
+            output_dir=ctx.dir, params=p, title=item["title"],
+            model=p.get("whisper_model") or None,
+        )
+        reviews.append(review)
+
+        out = Path(review["output"])
+        thumb = out.with_suffix(".jpg")
+        try:
+            ffx.extract_frame(str(out), 1.0, str(thumb), 540)
+        except Exception:  # noqa: BLE001 - thumbnail opsional
+            thumb = None
+        preset_tags = str(review.get("hashtags") or "").strip() if p.get("use_preset_hashtags") else ""
+        # Judul & deskripsi dibuat di sini (bukan hanya saat auto-upload) supaya
+        # tombol upload manual di Library juga punya metadata — sama seperti klip biasa.
+        generated: Dict = {}
+        if p.get("auto_meta", True):
+            generated = _auto_upload_meta(review.get("transcript_text") or "", preset_tags)
+        title = str(item["title"] or generated.get("title") or "")
+        name = title[:100] or out.stem
+        asset = ctx.asset("clip", out, name=name, meta={
+            "source": "campaign", "thumbnail": str(thumb) if thumb else "",
+            "duration": ffx.probe(str(out))["duration"],
+        # Simpan sebagai list: UI memanggil .join(), dan klip biasa juga list.
+        "hashtags": [t for t in preset_tags.split() if t],
+            "layout": review.get("layout"),
+            "category": review.get("category") or "",
+            "title": name,
+            "description": generated.get("description") or "",
+            "upload_caption": generated.get("description") or "",
+        })
+        clips.append({"file_path": str(out), "thumbnail": str(thumb) if thumb else "",
+                      "asset_id": asset["id"], "title": name,
+                      "ai_title": generated.get("title") or "",
+                      "upload_caption": generated.get("description") or ""})
+
+        # ---- Auto-publish per klip (YouTube headless, opsional TikTok juga).
+        if p.get("auto_upload"):
+            title = (title or out.stem)[:100]
+            description = (generated.get("description") or "") if p.get("auto_meta", True) else ""
+            discord = str(review.get("discord_tag") or "").strip()
+            missing = [t for t in preset_tags.split() if t and t.lstrip("#") not in description]
+            parts = [description, " ".join(missing), f"Discord: {discord}" if discord else ""]
+            description = " ".join(part for part in parts if part).strip()
+            targets = p.get("upload_targets") or ["youtube"]
+            if isinstance(targets, str):
+                targets = [t.strip() for t in targets.split(",") if t.strip()]
+            ctx.progress(96, "Upload", f"Mengirim {out.name} ke antrean upload…")
+            # Lewat penjadwal resmi (YouTube Data API / tiktok-uploader) + pencegah upload ganda — bukan browser headless.
+            from . import autopublish
+            ready = autopublish.ready_platforms([t for t in targets if t in ("youtube", "tiktok")])
+            if ready:
+                upload_jobs.append(db.add_schedule(str(out), title, description, ready, time.time())["id"])
+            else:
+                ctx.log("Auto-upload dilewati: platform tujuan belum tersambung (Jadwal Upload)")
+
+    ctx.progress(99, "Selesai", "Campaign selesai")
+    joined = ", ".join(Path(r["output"]).name for r in reviews[:3])
+    return {
+        "_message": f"{len(clips)} campaign siap ({joined}{'…' if len(reviews) > 3 else ''})"
+                    + (f" · {len(upload_jobs)} upload diantrekan" if upload_jobs else ""),
+        "clips": clips,
+        "total_clips": len(clips),
+        "campaign": reviews[0] if len(reviews) == 1 else reviews,
+        "upload_job": upload_jobs[0] if len(upload_jobs) == 1 else None,
+        "upload_jobs": upload_jobs,
+    }
+
+
+# ============================================================================ Metadata upload otomatis (campaign)
+
+def _auto_upload_meta(transcript: str, preset_hashtags: str = "") -> Dict:
+    """Buat judul + deskripsi upload dari transkrip klip. Tidak melempar."""
+    if not (transcript or "").strip():
+        return {}
+    prompt = (
+        "Buat metadata upload YouTube Shorts untuk klip berikut.\n"
+        "Balas HANYA JSON: {\"title\": str, \"description\": str}\n"
+        "- title: maksimal 60 karakter, memancing rasa penasaran, tanpa emoji berlebihan.\n"
+        "- description: 2 kalimat + 5 hashtag relevan di akhir.\n"
+        f"- Hashtag wajib ikut kalau ada: {preset_hashtags or '(bebas)'}\n\n"
+        f"Transkrip:\n{transcript[:4000]}"
+    )
+    try:
+        from . import ai_providers as _ai
+
+        raw = _ai.complete(prompt, json_mode=True, max_tokens=500)
+        data = _ai.parse_json(raw)
+        title = str(data.get("title") or "").strip()[:100]
+        description = str(data.get("description") or "").strip()[:4500]
+        return {"title": title, "description": description} if title or description else {}
+    except Exception as exc:  # noqa: BLE001 - metadata opsional, jangan gagalkan render
+        logger.warning(f"auto metadata gagal ({str(exc)[:160]}); memakai nama file")
+        return {}
+
+
+def _asset_meta(path: str) -> Dict:
+    """Metadata aset untuk path ini (judul, caption, hashtag), kalau ada."""
+    try:
+        target = str(Path(path))
+        for asset in db.list_assets(kind="clip", limit=500):
+            if str(Path(asset.get("path") or "")) == target:
+                meta = dict(asset.get("meta") or {})
+                meta.setdefault("title", asset.get("name") or "")
+                return meta
+    except Exception:  # noqa: BLE001 - metadata opsional
+        pass
+    return {}
+
+
 # Mode Live (v6.4): daftarkan handler live_clip & live_window
 from . import live  # noqa: E402,F401
+
+# Live spike presisi: buffer HLS + rolling-median chat detector (dari Clipper)
+from . import live_spike  # noqa: E402,F401

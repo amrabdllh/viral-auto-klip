@@ -5,6 +5,7 @@ import gc
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -437,6 +438,42 @@ def _transcribe_in_subprocess(
             Path(result_path).unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def drop_foreign_segments(segments: List[Dict], language: str = "id") -> List[Dict]:
+    """Buang segmen yang jelas bukan bahasa siaran (mis. dialog game berbahasa Inggris).
+
+    Audio siaran adalah satu campuran mikrofon streamer + suara game, jadi Whisper
+    ikut menuliskan dialog game. Tanpa diarisasi, cara paling andal yang tersedia
+    adalah membuang segmen yang kosakatanya didominasi kata fungsi bahasa lain.
+    Kalimat streamer (Indonesia) tetap lolos; dialog game Inggris dibuang.
+    """
+    lang = str(language or "").split("-")[0].lower()
+    if lang not in ("id", "ms"):
+        return segments
+    id_words = {
+        "aku", "kamu", "yang", "dan", "di", "ke", "dari", "ini", "itu", "tidak", "nggak", "gak", "ga",
+        "apa", "saya", "kita", "dia", "untuk", "dengan", "bisa", "sudah", "mau", "aja", "sih",
+        "dong", "ya", "kan", "kok", "banget", "jadi", "kalau", "tapi", "lagi", "juga", "sama", "ada",
+        "buat", "nih", "deh", "lah", "pakai", "pake", "terus", "gimana", "kenapa", "bener", "beneran",
+        "anjir", "wkwk", "wkwkwk", "nya", "punya", "orang", "banyak", "masih", "belum", "harus",
+    }
+    en_words = {
+        "the", "you", "i", "to", "and", "is", "it", "that", "what", "we", "they", "he", "she", "my",
+        "your", "have", "can", "not", "of", "in", "on", "with", "for", "this", "was", "are", "be",
+        "do", "don't", "it's", "i'm", "we're", "you're", "got", "just", "like", "know", "here",
+        "there", "all", "so", "no", "yes", "come", "go", "look", "get", "them", "our", "his", "her",
+        "will", "would", "could", "should", "there's", "let's", "out", "up", "down", "at", "by",
+    }
+    kept = []
+    for seg in segments:
+        words = re.findall(r"[a-z']+", str(seg.get("text") or "").lower())
+        en = sum(1 for w in words if w in en_words)
+        idn = sum(1 for w in words if w in id_words)
+        if len(words) >= 4 and en >= 2 and en > idn:
+            continue
+        kept.append(seg)
+    return kept
 
 
 def _transcribe_direct_worker(video_path, model_name, word_timestamps, device, compute_type):

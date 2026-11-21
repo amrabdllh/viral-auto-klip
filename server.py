@@ -1,6 +1,6 @@
 """
 Viral Auto Klip v3 — FastAPI backend (bug-fixed & upgraded)
-Run with: uvicorn server:app --reload --host 0.0.0.0 --port 8000
+Run with: uvicorn server:app --reload --host 127.0.0.1 --port 8000
 
 Changelog v3 (backend):
 - FIX: configure_llm_clients dipanggil dengan keyword argument yang benar
@@ -579,4 +579,4 @@ def _run_pipeline(job_id: str, req: ProcessRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)  # localhost saja: tidak ada auth

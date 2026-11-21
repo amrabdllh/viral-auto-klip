@@ -33,7 +33,7 @@ nvidia-cublas-cu12; sys_platform == "win32"
 nvidia-cudnn-cu12>=9,<10; sys_platform == "win32"
 # pypdf>=4.0.0         # opsional: baca PDF di Content Creator / Transcript
 
-# ===== Opsional: auto-upload YouTube (core/publisher.py) =====
+# Alternatif API (opsional, kuota ~6 upload/hari):
 # google-api-python-client>=2.120.0
 # google-auth-httplib2>=0.2.0
 

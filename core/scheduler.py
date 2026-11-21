@@ -28,12 +28,12 @@ def platform_status() -> Dict:
         yt_lib = True
     except ImportError:
         yt_lib = False
+    cookies = config.TIKTOK_COOKIES_FILE or ""
     try:
         import tiktok_uploader  # noqa: F401
         tt_lib = True
     except ImportError:
         tt_lib = False
-    cookies = config.TIKTOK_COOKIES_FILE or ""
     return {
         "youtube": {"label": "YouTube Shorts", "ready": bool(yt_secret and Path(yt_secret).exists() and yt_lib),
                     "logged_in": token.exists(), "library": yt_lib,
@@ -44,21 +44,34 @@ def platform_status() -> Dict:
 
 
 def upload_now(item: Dict) -> Dict:
+    """Upload satu jadwal lewat jalur resmi (YouTube Data API / tiktok-uploader).
+    Pencegah upload ganda (publish_guard, dari PR #5): klip yang sudah pernah diupload ke platform yang sama dilewati."""
+    from . import publish_guard
     from .publisher import upload_to_tiktok, upload_to_youtube
+
     report: Dict = {}
     path = item["file_path"]
     if not Path(path).exists():
         return {"error": f"File tidak ada: {path}"}
     tags = re.findall(r"#(\w+)", item.get("description", ""))
+    title = (item.get("title") or Path(path).stem)[:100]
+    description = item.get("description", "")
+
     for platform in item.get("platforms") or []:
+        previous = publish_guard.check_or_raise(path, platform, force=bool(item.get("force")))
+        if previous:
+            report[platform] = {"status": "done", "duplicate": True, "previous": previous}
+            continue
         try:
             if platform == "youtube":
-                report["youtube"] = upload_to_youtube(path, title=(item.get("title") or Path(path).stem)[:100],
-                                                      description=item.get("description", ""), tags=tags)
+                report["youtube"] = upload_to_youtube(path, title=title, description=description, tags=tags)
             elif platform == "tiktok":
-                report["tiktok"] = upload_to_tiktok(path, description=f"{item.get('title', '')} {item.get('description', '')}".strip())
+                report["tiktok"] = upload_to_tiktok(path, description=f"{title} {description}".strip())
         except Exception as exc:
             report[platform] = {"status": "failed", "reason": str(exc)[:400]}
+        res = report.get(platform) or {}
+        if str(res.get("status", "")).lower() not in ("failed", "error", "skipped"):
+            publish_guard.record_upload(path, platform, {"title": title, **{k: v for k, v in res.items() if k in ("video_id", "url")}})
     return report
 
 

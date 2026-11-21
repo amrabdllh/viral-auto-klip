@@ -61,6 +61,10 @@ GROQ_WHISPER_AUDIO_BITRATE = os.getenv("GROQ_WHISPER_AUDIO_BITRATE", "64k")
 # Optional cookies.txt path for YouTube videos that require login/bot verification.
 # Relative paths are resolved from the project root, e.g. YTDLP_COOKIES=cookies.txt
 YTDLP_COOKIES = os.getenv("YTDLP_COOKIES", "").strip()
+# Kualitas maksimum download sumber: 1080/1440/2160, 0 = tertinggi.
+DOWNLOAD_MAX_HEIGHT = int(os.getenv("DOWNLOAD_MAX_HEIGHT", "1080") or "1080")
+# Override CQ/CRF encoder. 0 = ikut codebase (CQ 14 untuk file antara, crf-1 untuk final).
+ENCODE_CQ = int(os.getenv("ENCODE_CQ", "0") or "0")
 
 # ==================== VIRAL SCORING ====================
 MIN_CLIP_DURATION = 15  # seconds
@@ -115,6 +119,7 @@ OPENAI_API_KEY = _secret("OPENAI_API_KEY")
 GEMINI_API_KEY = _secret("GEMINI_API_KEY")
 OPENROUTER_API_KEY = _secret("OPENROUTER_API_KEY")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
 
 # Top-tier providers (v4 AI upgrade — semua dipakai lewat core/ai_providers.py)
 ANTHROPIC_API_KEY = _secret("ANTHROPIC_API_KEY")
@@ -483,6 +488,7 @@ YOUTUBE_CLIENT_SECRET_FILE = os.getenv("YOUTUBE_CLIENT_SECRET_FILE", "")
 YOUTUBE_PRIVACY = os.getenv("YOUTUBE_PRIVACY", "public")  # public | unlisted | private
 YOUTUBE_CATEGORY_ID = os.getenv("YOUTUBE_CATEGORY_ID", "22")  # 22 = People & Blogs
 YOUTUBE_OAUTH_TOKEN_FILE = ".yt_upload_token.json"  # tersimpan di BASE_DIR (jangan di-commit!)
+CAMPAIGN_DEFAULT_PRESET = os.getenv("CAMPAIGN_DEFAULT_PRESET", "motion-klip-gtavi-split.json")
 TIKTOK_UPLOADER_PATH = os.getenv("TIKTOK_UPLOADER_PATH", "")  # opsional, path ke executable tiktok-uploader
 TIKTOK_COOKIES_FILE = os.getenv("TIKTOK_COOKIES_FILE", "")    # cookies.txt sesi TikTok untuk tiktok-uploader
 

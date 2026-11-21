@@ -1,6 +1,58 @@
 # 🚀 Viral Auto Klip Studio v6
 
-> **Baru di v6:** studio konten lengkap di **http://localhost:8000/app**: Analisis AI, Atur Manual, Split Cam, Highlight Bola, Konten Tempel, Content Creator / Story Studio / Motion Graphic, TTS & clone suara, musik/SFX, Editor, Merge, Loop, WA Story, Analitik Viral, Optimasi Judul, Transcript, Auto Upload terjadwal, dan Brand Kit. Detail: [CHANGELOG_V6.md](CHANGELOG_V6.md). UI lama: `/legacy`.
+> **Repo ini adalah hasil konsolidasi**: viral-auto-klip v6.8 dipakai sebagai codebase,
+> lalu fitur yang hanya ada di proyek **Clipper** dipindahkan masuk. Detail lengkap ada di
+> [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).
+
+## Yang ditambahkan dari Clipper
+
+| Fitur | Di mana |
+|---|---|
+| **Campaign / MotionKlip** — facecam + gameplay, banner, judul bernarasi, subtitle karaoke, outro, hashtag | `core/campaign.py`, **Analisis AI → Template campaign** |
+| **Live spike presisi** — rolling-median chat detector + capture `[momen−25s, momen+20s]` | `core/chat_spikes.py`, `core/live_media.py`, `core/live_spike.py` |
+| **Template MotionKlip di mode live** (jendela & spike) | `core/live.py` `_render_campaign_window` |
+| **Penjaga publish** — cegah upload dobel (dipakai penjadwal resmi) | `core/publish_guard.py` |
+| **Standar viral MotionKlip** — 15–45 dtk, headline 5–7 kata, safe zone, watermark 864px | `core/viral_standard.py`, `docs/MAKE_CLIP_SKILL.md` |
+| **Judul & deskripsi otomatis** — dari transkrip, untuk upload | `_auto_upload_meta()` |
+
+## Menjalankan
+
+```powershell
+.venv\Scripts\python.exe -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+Buka **http://127.0.0.1:8000/app**.
+
+Server **sengaja hanya listen di 127.0.0.1** — aplikasi ini tidak punya auth, jadi
+jangan di-bind ke `0.0.0.0`.
+
+## Test
+
+```powershell
+python tests\test_campaign.py
+python tests\test_live_media.py     # 24 test buffer HLS
+python tests\test_chat_spikes.py    # 13 cek spike detector
+```
+
+## Kebutuhan
+
+`requirements.txt`.
+
+ffmpeg: pakai `tools/ffmpeg` bila ada, kalau tidak dari PATH.
+
+### Dependensi opsional (di-import lazy, tidak wajib untuk start)
+
+| Paket | Dibutuhkan untuk |
+|---|---|
+| `google-api-python-client` + `google-auth-httplib2` | upload YouTube (YouTube Data API) |
+| `tiktok-uploader` | upload TikTok (sesi cookies.txt) |
+| `pypdf` | membaca PDF di Transcript / Content Creator |
+| `torch` | upscale Real-ESRGAN / face restore (dipasang `start.bat` bila ada GPU) |
+
+Tanpa paket ini aplikasi tetap jalan; hanya fitur tersebut yang memberi pesan "belum terpasang".
+
+
+> **Baru di v6:** studio konten lengkap di **http://localhost:8000/app**: Analisis AI, Atur Manual, Split Cam, Highlight Bola, Konten Tempel, Content Creator / Story Studio / Motion Graphic, TTS & clone suara, musik/SFX, Editor, Merge, Loop, WA Story, Analitik Viral, Optimasi Judul, Transcript, Auto Upload terjadwal, dan Brand Kit. UI lama: `/legacy`.
 
 **AI-Powered Viral Video Clipper — Inspired by Klipers.pro & OpusClip**
 
@@ -20,7 +72,7 @@
 | ⬆️ **Upload tanpa render ulang** | `python cli.py --upload-from output/klip_xxx --upload-youtube --upload-tiktok` + tombol upload di UI |
 | 🔍 **Deteksi model** | Tombol "Deteksi" mengambil daftar model yang tersedia untuk API key kamu (semua provider) |
 | ✨ **Pro editing** | Jump cut (buang jeda & "eh/em"), zoom dinamis + punch-in, caption kata-aktif, color grade, progress bar, whoosh SFX, thumbnail pintar + cover B, CTA akhir — preset Minimal / Dinamis / Maksimal |
-| 🐛 Bug fix | Semua temuan audit diperbaiki — lihat [CHANGELOG_V4.md](CHANGELOG_V4.md) |
+| 🐛 Bug fix | Semua temuan audit diperbaiki |
 
 ### Pilih provider AI
 
@@ -82,7 +134,7 @@ Paling mudah: buka **http://localhost:8000/app#settings**, tempel API key, klik 
 | 📤 **Publisher Module** | `core/publisher.py`: paket publish per platform, rencana posting, jam upload terbaik, varian caption A/B test |
 | ⬆️ **Auto-Upload YouTube** | Upload otomatis ke YouTube Shorts via YouTube Data API v3 (OAuth) — `python cli.py --upload-youtube` |
 | 🎵 **TikTok Auto-Upload** | Lewat `tiktok-uploader` bila terpasang; fallback panduan manual |
-| 🐛 **Semua bug v2 diperbaiki** | Lihat [CHANGELOG_V3.md](CHANGELOG_V3.md) |
+| 🐛 **Semua bug v2 diperbaiki** | — |
 
 ---
 
@@ -373,7 +425,6 @@ viral-auto-klip/
 ├── .env.example                 ← Template environment variables v3
 ├── viral_auto_klip_v2_real.html ← UI alternatif (HTML, v3-fixed)
 ├── start.bat                    ← One click setup Windows v3
-├── CHANGELOG_V3.md              ← Riwayat perbaikan & upgrade v3
 ├── core/
 │   ├── ai_providers.py          ← NEW v4: 10 provider AI, fallback berantai, login Google
 │   ├── analyzer.py              ← AI moment finder + scoring + rerank + AI packaging
