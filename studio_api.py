@@ -113,6 +113,38 @@ def youtube_test():
     return _wrap(youtube_browser.test_session)
 
 
+class ClientSecretRequest(BaseModel):
+    content: str = ""
+
+
+@router.get("/youtube/api")
+def youtube_api_status():
+    """Status YouTube Data API (resmi): library, client_secret, login — tanpa isi secret."""
+    from core import publisher
+    return publisher.youtube_api_status()
+
+
+@router.post("/youtube/api/secret")
+def youtube_api_secret(req: ClientSecretRequest):
+    from core import publisher
+    if len(req.content) > 50_000:
+        raise HTTPException(400, "File terlalu besar untuk client_secret.json")
+    return _wrap(publisher.save_youtube_client_secret, req.content)
+
+
+@router.post("/youtube/api/login")
+def youtube_api_login():
+    """Membuka halaman izin Google di browser laptop yang menjalankan server (pemakaian lokal)."""
+    from core import publisher
+    return _wrap(publisher.youtube_api_login)
+
+
+@router.delete("/youtube/api/login")
+def youtube_api_logout():
+    from core import publisher
+    return _wrap(publisher.youtube_api_logout)
+
+
 class TikTokCookiesRequest(BaseModel):
     text: str = ""
 

@@ -86,7 +86,10 @@ def upload_now(item: Dict) -> Dict:
                 secret_path = Path(secret) if secret else None
                 if secret_path is not None and not secret_path.is_absolute():
                     secret_path = config.BASE_DIR / secret_path
-                api_ready = bool(secret_path and secret_path.exists())
+                token_ok = (config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE).exists()
+                # Mode otomatis: API hanya bila sudah login (token ada) — kalau belum, upload di latar
+                # akan membuka jendela izin Google tanpa ada yang menunggu.
+                api_ready = bool(secret_path and secret_path.exists() and (token_ok or not browser_ready))
                 use_browser = method == "browser" or (method == "auto" and not api_ready and browser_ready)
                 if use_browser:
                     res = youtube_browser.upload_video(path, title=title, description=description,

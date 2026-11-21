@@ -26,6 +26,9 @@ from .utils import trim_caption
 
 COOKIE_DIR = config.BASE_DIR / "data" / "tiktok"
 COOKIE_FILE = COOKIE_DIR / "cookies.json"
+# Cookie sesi TikTok (HttpOnly). Tanpa salah satunya TikTok Studio selalu mengarah ke halaman login.
+_LOGIN_COOKIES = {"sessionid", "sessionid_ss", "sid_tt", "sid_guard"}
+_MISSING_HELP = ("Cookie login TikTok (sessionid, sid_tt, sid_guard) tidak ikut. Biasanya karena disalin dari document.cookie/DevTools yang tidak bisa membaca cookie HttpOnly. Buka tiktok.com dalam keadaan login, export pakai extension \"Get cookies.txt LOCALLY\" (atau Cookie-Editor → Export JSON), lalu pilih/tempel file itu di sini.")
 
 UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -121,8 +124,19 @@ def parse_cookies(raw: str) -> List[Dict[str, Any]]:
     return cookies
 
 
+def _session_check(cookies: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Apakah cookie LOGIN ikut ter-export. Cookie sesi bersifat HttpOnly sehingga tidak ikut bila disalin
+    dari document.cookie / tab Console DevTools — hasilnya cookie 'tersimpan' tapi tidak pernah login."""
+    names = {c.get("name") for c in cookies}
+    found = sorted(names & _LOGIN_COOKIES)
+    expiries = [c["expires"] for c in cookies if c.get("name") in _LOGIN_COOKIES and c.get("expires", -1) > 0]
+    return {"logged_in": bool(found), "login_cookies": found, "session_expires_at": min(expiries) if expiries else None}
+
+
 def save_cookies(raw: str) -> Dict[str, Any]:
     cookies = parse_cookies(raw)
+    if not _session_check(cookies)["logged_in"]:
+        raise TikTokUploadError(_MISSING_HELP)
     COOKIE_DIR.mkdir(parents=True, exist_ok=True)
     COOKIE_FILE.write_text(json.dumps({"saved_at": time.time(), "cookies": cookies}, indent=2),
                            encoding="utf-8")
@@ -153,8 +167,10 @@ def cookie_status() -> Dict[str, Any]:
         except (OSError, json.JSONDecodeError, AttributeError):
             pass
     soonest = min((c["expires"] for c in cookies if c.get("expires", -1) > 0), default=None)
-    return {"configured": bool(cookies), "count": len(cookies), "saved_at": saved_at,
-            "expires_at": soonest, "path": str(COOKIE_FILE)}
+    sess = _session_check(cookies)
+    return {"configured": sess["logged_in"], "incomplete": bool(cookies) and not sess["logged_in"],
+            "count": len(cookies), "saved_at": saved_at, "expires_at": sess["session_expires_at"] or soonest,
+            "login_cookies": sess["login_cookies"], "path": str(COOKIE_FILE)}
 
 
 def clear_cookies() -> Dict[str, Any]:
@@ -325,10 +341,12 @@ def test_session() -> Dict[str, Any]:
     cookies = load_cookies()
     if not cookies:
         return {"ok": False, "error": "Cookies belum diatur"}
+    if not _session_check(cookies)["logged_in"]:
+        return {"ok": False, "error": _MISSING_HELP}
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return {"ok": False, "error": "Playwright belum terpasang"}
+        return {"ok": False, "error": "Playwright belum terpasang: pip install playwright && playwright install chromium"}
     with sync_playwright() as p:
         browser = _launch(p)
         try:

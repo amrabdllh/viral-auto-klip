@@ -293,6 +293,79 @@ def upload_clips(
     return report
 
 
+YT_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+YT_SECRET_FILE = "client_secret_youtube.json"  # di BASE_DIR, di-gitignore (client_secret*.json)
+
+
+def _yt_secret_path() -> Optional[Path]:
+    raw = str(getattr(config, "YOUTUBE_CLIENT_SECRET_FILE", "") or "")
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else config.BASE_DIR / path
+
+
+def youtube_api_status() -> Dict:
+    """Ringkasan untuk UI — tidak pernah mengembalikan isi secret/token."""
+    try:
+        import googleapiclient  # noqa: F401
+        import google_auth_oauthlib  # noqa: F401
+        library = True
+    except ImportError:
+        library = False
+    secret = _yt_secret_path()
+    project = ""
+    if secret and secret.exists():
+        try:
+            data = json.loads(secret.read_text(encoding="utf-8"))
+            project = str((data.get("installed") or data.get("web") or {}).get("project_id", ""))
+        except (OSError, ValueError):
+            pass
+    return {"library": library, "secret": bool(secret and secret.exists()), "project": project,
+            "logged_in": (config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE).exists()}
+
+
+def save_youtube_client_secret(raw: str) -> Dict:
+    """Validasi client_secret.json (OAuth client 'Desktop app') lalu simpan & pakai."""
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError("Bukan file JSON. Pilih file client_secret_xxx.json yang diunduh dari Google Cloud.") from exc
+    block = data.get("installed") or data.get("web") if isinstance(data, dict) else None
+    if not isinstance(block, dict) or not block.get("client_id") or not block.get("client_secret"):
+        raise RuntimeError("Ini bukan client_secret OAuth (tidak ada client_id/client_secret). "
+                           "Di Google Cloud: APIs & Services → Credentials → Create OAuth client ID → Desktop app → Download JSON.")
+    if "web" in data and "installed" not in data:
+        raise RuntimeError("Tipe OAuth client-nya 'Web application'. Buat ulang dengan tipe 'Desktop app' lalu download JSON-nya.")
+    from . import settings
+    target = config.BASE_DIR / YT_SECRET_FILE
+    target.write_text(raw, encoding="utf-8")
+    settings.save_settings({"YOUTUBE_CLIENT_SECRET_FILE": str(target)})
+    token = config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE
+    token.unlink(missing_ok=True)  # token lama milik client lain tidak berlaku lagi
+    return youtube_api_status()
+
+
+def youtube_api_login() -> Dict:
+    """Buka halaman izin Google di browser laptop ini (sekali saja), simpan token refresh."""
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    secret = _yt_secret_path()
+    if not secret or not secret.exists():
+        raise RuntimeError("Pilih file client_secret.json dulu.")
+    flow = InstalledAppFlow.from_client_secrets_file(str(secret), YT_SCOPES)
+    creds = flow.run_local_server(port=0, prompt="consent", timeout_seconds=300,
+                                  success_message="Login YouTube berhasil. Tab ini boleh ditutup lalu kembali ke Viral Auto Klip.")
+    if not creds:
+        raise RuntimeError("Login dibatalkan atau melebihi 5 menit.")
+    (config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE).write_text(creds.to_json())
+    return youtube_api_status()
+
+
+def youtube_api_logout() -> Dict:
+    (config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE).unlink(missing_ok=True)
+    return youtube_api_status()
+
+
 def upload_to_tiktok(video_path: str, description: str = "", cookies_file: str = "") -> Dict:
     """
     Auto-upload TikTok via paket `tiktok-uploader` (cookie sesi TikTok wajib).
