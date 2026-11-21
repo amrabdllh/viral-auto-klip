@@ -8,7 +8,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from loguru import logger
 
@@ -45,12 +45,13 @@ def platform_status() -> Dict:
     cookies = config.TIKTOK_COOKIES_FILE or ""
     yt_cookie_ok = bool(youtube_browser.cookie_status().get("configured"))
     tt_cookie_ok = bool(tiktok_browser.cookie_status().get("configured"))
+    health = {pf: db.kv_get(f"session_health_{pf}", None) for pf in PLATFORMS}
     return {
-        "youtube": {"label": "YouTube Shorts",
+        "youtube": {"label": "YouTube Shorts", "session": health.get("youtube"),
                     "ready": bool(yt_cookie_ok or (yt_secret and Path(yt_secret).exists() and yt_lib)),
                     "browser": yt_cookie_ok, "logged_in": token.exists(), "library": yt_lib,
                     "hint": "Tempel cookies di Pengaturan → YouTube (browser headless), atau isi YOUTUBE_CLIENT_SECRET_FILE"},
-        "tiktok": {"label": "TikTok", "ready": bool(tt_cookie_ok or (cookies and Path(cookies).exists())),
+        "tiktok": {"label": "TikTok", "session": health.get("tiktok"), "ready": bool(tt_cookie_ok or (cookies and Path(cookies).exists())),
                    "browser": tt_cookie_ok, "library": True,
                    "hint": "Tempel cookies di Pengaturan → TikTok (browser headless)"},
     }
@@ -125,8 +126,42 @@ def tick() -> int:
     return len(due)
 
 
+SESSION_CHECK_H = 3.0
+
+
+def check_sessions(force: bool = False, only: Optional[str] = None) -> Dict:
+    """Tes sesi cookie YouTube/TikTok (headless, tanpa upload) — sekalian MENYEGARKAN cookie yang dirotasi situs
+    (youtube_browser/tiktok_browser.persist_refreshed). Hasil disimpan agar UI bisa memperingatkan SEBELUM jadwal gagal."""
+    from . import tiktok_browser, youtube_browser
+    out = {}
+    for pf, mod in (("youtube", youtube_browser), ("tiktok", tiktok_browser)):
+        if (only and pf != only) or not mod.cookie_status().get("configured"):
+            continue
+        prev = db.kv_get(f"session_health_{pf}", None) or {}
+        if not force and time.time() - float(prev.get("at", 0)) < SESSION_CHECK_H * 3600:
+            out[pf] = prev
+            continue
+        try:
+            res = mod.test_session()
+        except Exception as exc:  # noqa: BLE001
+            res = {"ok": False, "error": str(exc)[:200]}
+        rec = {"ok": bool(res.get("ok")), "error": str(res.get("error") or "")[:200], "at": time.time(),
+               "who": str(res.get("channel") or res.get("username") or "")}
+        db.kv_set(f"session_health_{pf}", rec)
+        if not rec["ok"]:
+            logger.warning(f"Sesi {pf} tidak valid: {rec['error']} — perbarui cookies di Pengaturan sebelum jadwal berikutnya")
+        out[pf] = rec
+    return out
+
+
+def _next_upload_soon(within_s: float = 45 * 60) -> bool:
+    now = time.time()
+    return any(s.get("status") == "pending" and now < float(s["run_at"]) <= now + within_s for s in db.list_schedules())
+
+
 def _loop() -> None:
     last_measure = 0.0
+    last_session = 0.0
     while True:
         try:
             tick()
@@ -139,6 +174,14 @@ def _loop() -> None:
                 measure_due()
             except Exception as exc:
                 logger.warning(f"Pengukuran jam upload gagal: {str(exc)[:160]}")
+        # sesi upload: tiap 3 jam, dan sekali lagi ±45 mnt sebelum upload berikutnya (bila cek terakhir > 1 jam lalu)
+        if time.time() - last_session > SESSION_CHECK_H * 3600 or (
+                time.time() - last_session > 3600 and _next_upload_soon()):
+            last_session = time.time()
+            try:
+                check_sessions(force=True)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Cek sesi upload gagal: {str(exc)[:160]}")
         time.sleep(max(10, int(getattr(config, "SCHEDULER_INTERVAL", 30))))
 
 

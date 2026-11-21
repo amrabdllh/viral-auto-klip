@@ -470,6 +470,8 @@ def clip_quick(ctx: JobContext) -> Dict:
                                               extra_tags=p.get("extra_hashtags") or "", content_type=info.get("content_type", ""))
         if auto_pub["skipped"]:
             ctx.log(f"Upload otomatis dilewati: {auto_pub['skipped']}")
+        for line in auto_pub.get("plans") or []:
+            ctx.log(f"Riset jam FYP: {line}")
         for s in auto_pub["scheduled"]:
             ctx.log(f"Dijadwalkan {datetime.fromtimestamp(s['run_at']).strftime('%a %d %b %H:%M')} → "
                     f"{', '.join(s['platforms'])} ({s['niche']}, jam {s.get('slot', 'jangkar')}): {s['title'][:60]}")
@@ -1100,10 +1102,7 @@ def campaign_render_job(ctx: JobContext) -> Dict:
     preset_path = Path(preset)
     if not preset_path.is_absolute() and not preset_path.exists():
         preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
-    overrides = {k: p[k] for k in (
-        "layout", "facecam_rect", "gameplay_rect", "subtitle_provider",
-        "highlight", "intro_voice",
-    ) if k in p and p[k] not in (None, "")}
+    # layout/facecam_rect/gameplay_rect/subtitle_provider/highlight/intro_voice dibaca campaign.render_edited dari params
 
     # ---- Rentang: satu cut, atau beberapa sekaligus (batch).
     raw_ranges = p.get("ranges") or []

@@ -464,4 +464,5 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
         kept.append(clip)
     logger.info(f"🎞️ Editor-AI: {len(kept)} lolos, {rejected} ditolak, {trimmed} batasnya dirapikan")
     kept = an()._remove_overlapping_clips(sorted(kept, key=lambda c: c["score"], reverse=True))
+    kept = an()._remove_topic_duplicates(kept)
     return kept[:limit]

@@ -245,6 +245,7 @@ def _analyze_viral_potential(transcript_segments: List[Dict], video_info: Dict, 
     any_ai_scored = any(c.get("llm_score") for c in clips)
     clips = sorted(clips, key=lambda x: ((1 if (any_ai_scored and x.get("llm_score")) else 0), x["score"]), reverse=True)
     clips = _remove_overlapping_clips(clips)
+    clips = _remove_topic_duplicates(clips)
     clips = _apply_diversity_ranking(clips)
     # Editor-AI: tinjau kandidat teratas dengan konteks sekitar (standalone, hook, payoff), rapikan batas potong,
     # buang yang lemah, dan tulis hook/judul/caption yang terdukung kutipan dari klip.
@@ -1079,6 +1080,39 @@ def _remove_overlapping_clips(clips: List[Dict], min_gap: float = 5.0) -> List[D
         if all(not (clip["start"] < s["end"] + min_gap and clip["end"] > s["start"] - min_gap) for s in selected):
             selected.append(clip)
     return selected
+
+
+_TOPIC_STOP = set("yang dan di ke dari itu ini ada aja udah gua lu gue kamu aku nya kok sih dong deh lah kan ya ga gak "
+                  "nggak enggak tapi jadi kalau kalo buat sama bisa mau lagi juga atau terus tuh nih banget apa kita "
+                  "mereka dia the and you that this".split())
+
+
+def _topic_words(clip: Dict) -> set:
+    text = f"{clip.get('text') or ''} {clip.get('ai_title') or ''} {clip.get('hook_text') or ''}".lower()
+    return {w for w in re.findall(r"[a-z0-9]+", text) if len(w) > 2 and w not in _TOPIC_STOP}
+
+
+def _remove_topic_duplicates(clips: List[Dict], near_sec: float = 90.0) -> List[Dict]:
+    """Buang klip yang MEMBAHAS HAL YANG SAMA dengan klip lain yang skornya lebih tinggi (input sudah urut skor):
+    berdekatan (< near_sec) dan kata-katanya mirip (Jaccard ≥ 0.2), atau sangat mirip di mana pun (≥ 0.45).
+    Tidak tumpang tindih waktu ≠ beda topik — dua potongan 13 dtk berjauhan bisa berisi momen yang sama."""
+    kept: List[Dict] = []
+    for clip in clips:
+        words = _topic_words(clip)
+        dup = None
+        for other in kept:
+            ow = _topic_words(other)
+            sim = len(words & ow) / max(1, len(words | ow))
+            gap = max(clip["start"] - other["end"], other["start"] - clip["end"], 0.0)
+            if (gap < near_sec and sim >= 0.2) or sim >= 0.45:
+                dup = other
+                break
+        if dup is None:
+            kept.append(clip)
+        else:
+            logger.info(f"Klip topik kembar dibuang: '{str(clip.get('ai_title') or clip.get('hook_text') or '')[:50]}' "
+                        f"(mirip '{str(dup.get('ai_title') or dup.get('hook_text') or '')[:50]}')")
+    return kept
 
 
 def _apply_diversity_ranking(clips: List[Dict]) -> List[Dict]:

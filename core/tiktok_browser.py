@@ -173,6 +173,27 @@ def cookie_status() -> Dict[str, Any]:
             "login_cookies": sess["login_cookies"], "path": str(COOKIE_FILE)}
 
 
+def persist_refreshed(context) -> bool:
+    """Simpan cookie yang DIPERBARUI situs selama sesi headless (rotasi sesi). Tanpa ini salinan di disk cepat basi
+    dan sesi mati dalam hitungan jam. Hanya disimpan bila masih berisi cookie login."""
+    try:
+        fresh = [c for c in (_norm_cookie(dict(x)) for x in context.cookies()) if c]
+    except Exception:  # noqa: BLE001
+        return False
+    if not fresh or not _session_check(fresh)["logged_in"]:
+        return False
+    try:
+        payload = json.loads(COOKIE_FILE.read_text(encoding="utf-8")) if COOKIE_FILE.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    merged = {(c["name"], c.get("domain"), c.get("path")): c for c in load_cookies()}
+    merged.update({(c["name"], c.get("domain"), c.get("path")): c for c in fresh})
+    payload = {"saved_at": (payload or {}).get("saved_at") or time.time(), "refreshed_at": time.time(),
+               "cookies": list(merged.values())}
+    COOKIE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return True
+
+
 def clear_cookies() -> Dict[str, Any]:
     try:
         COOKIE_FILE.unlink(missing_ok=True)
@@ -318,11 +339,13 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                     # Draf kadang tersimpan tanpa memunculkan teks konfirmasi — jangan
                     # gagalkan jadwal; minta pengguna mengecek TikTok Studio → Draf.
                     logger.warning("[tiktok-browser] Draf tidak terkonfirmasi — cek TikTok Studio → Konten → Draf")
+                    persist_refreshed(context)  # simpan cookie hasil rotasi sesi
                     return {"ok": True, "mode": "draft", "confirmed": False,
                             "privacy": "default", "description": description, "file": str(video)}
                 raise TikTokUploadError(
                     "Post ditekan tetapi konfirmasi tidak terlihat. Cek TikTok Studio → Konten.")
             say("Upload", 100, "Draf TikTok tersimpan" if mode == "draft" else "Upload TikTok selesai")
+            persist_refreshed(context)  # simpan cookie hasil rotasi sesi
             return {"ok": True, "mode": mode, "privacy": "default", "description": description,
                     "file": str(video)}
         except TikTokUploadError:
@@ -362,6 +385,7 @@ def test_session() -> Dict[str, Any]:
                 name = page.locator('[data-e2e="profile-username"], [data-e2e="user-name"]').first.inner_text(timeout=3000).strip()
             except Exception:  # noqa: BLE001
                 pass
+            persist_refreshed(context)  # simpan cookie hasil rotasi sesi
             return {"ok": True, "username": name}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc).splitlines()[0][:200]}

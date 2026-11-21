@@ -1,4 +1,4 @@
-yt-dlp>=2024.12.0
+yt-dlp[default]>=2026.10.26   # [default] = yt-dlp-ejs (tantangan JS YouTube)
 pytubefix>=8.12.0
 # Transkripsi lokal (faster-whisper; openai-whisper dihapus — tidak dipakai & berat)
 faster-whisper>=1.1.0
