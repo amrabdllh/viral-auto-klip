@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 import config
+from .utils import trim_caption
 
 COOKIE_DIR = config.BASE_DIR / "data" / "tiktok"
 COOKIE_FILE = COOKIE_DIR / "cookies.json"
@@ -247,7 +248,7 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                     editor.click()
                     page.keyboard.press("Control+A")
                     page.keyboard.press("Backspace")
-                    page.keyboard.insert_text(description[:2000])
+                    page.keyboard.insert_text(trim_caption(description, 2000))
                 except Exception:  # noqa: BLE001 - caption opsional
                     pass
 

@@ -23,6 +23,7 @@ from loguru import logger
 
 import config
 from .fyp_agent import build_upload_strategy, get_best_upload_schedule, suggest_caption_variants
+from .utils import trim_caption
 
 ALL_PLATFORMS = ["TikTok", "Instagram Reels", "YouTube Shorts"]
 
@@ -220,7 +221,7 @@ def upload_to_youtube(
     body = {
         "snippet": {
             "title": str(title)[:100],
-            "description": str(description)[:4900],
+            "description": trim_caption(str(description), 4900),
             "tags": clean_tags[:20],
             "categoryId": category_id or config.YOUTUBE_CATEGORY_ID,
         },

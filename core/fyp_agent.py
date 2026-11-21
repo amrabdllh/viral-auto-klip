@@ -83,7 +83,7 @@ def _build_platform_copy(clip: Dict, platform: str, profile: Dict) -> Dict:
     
     full_caption = f"{viral_caption} {cta}".strip()
     if len(full_caption) > limit:
-        full_caption = full_caption[:limit].rsplit(" ", 1)[0].rstrip(".,")
+        full_caption = trim_caption(full_caption, limit)
     
     return {
         "title": title[:95] if platform == "YouTube Shorts" else title[:70],

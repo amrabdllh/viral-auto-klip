@@ -657,7 +657,7 @@ function scheduleModal({ asset_id, file_path, onSaved } = {}) {
 
 function bulkScheduleModal(assetIds, onSaved) {
   if (!assetIds.length) return toast("Pilih klip dulu", true);
-  modal({ title: `Upload batch · ${assetIds.length} klip`, sub: "Semua klip diunggah otomatis; atur jarak antar upload supaya tidak spam.",
+  modal({ title: `Upload batch · ${assetIds.length} klip`, sub: "Semua klip diunggah otomatis; atur jarak antar upload supaya tidak spam. Server harus menyala saat jadwal tiba.",
     body: `<div class="fields two">${UI.field("Mulai dari", `<input type="datetime-local" data-at value="${localInputValue(Date.now() / 1000)}">`)}
       ${UI.field("Jeda antar upload (menit)", `<input type="number" data-gap min="0" max="1440" value="30">`, { hint: "Upload berurutan tiap N menit — klip berikutnya menunggu giliran. 0 = sebar otomatis per hari (Smart Cadence)." })}
       ${UI.field("Slot per hari", `<select data-pd>${UI.options([1, 2, 3, 4, 5], 3)}</select>`, { hint: "Dipakai hanya kalau jeda = 0" })}

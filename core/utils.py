@@ -30,16 +30,20 @@ def trim_caption(text: str, limit: Optional[int] = None) -> str:
     """Potong caption ke batas karakter dengan rapi: utamakan akhir kalimat, lalu
     batas kata — tidak pernah berhenti di tengah kata (mis. "…Setuju ini ca")."""
     text = str(text or "").strip()
-    limit = int(limit or getattr(config, "UPLOAD_CAPTION_MAX_CHARS", 140))
+    limit = int(getattr(config, "UPLOAD_CAPTION_MAX_CHARS", 140) if limit is None else limit)
+    limit = max(1, limit)
     if len(text) <= limit:
         return text
     cut = text[:limit]
     end = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "), cut.rfind("\n"))
-    if end >= limit // 3:
+    if end >= int(limit * 0.6):
         return cut[: end + 1].strip()
     space = cut.rfind(" ")
     if space >= limit // 2:
         return cut[:space].rstrip(" ,;:–—-") + "…"
+    # Jangan tinggalkan ZWJ menggantung di ujung (emoji gabungan ikut terbelah).
+    while cut and cut[-1] == "\u200d":
+        cut = cut[:-1]
     return cut.rstrip() + "…"
 
 

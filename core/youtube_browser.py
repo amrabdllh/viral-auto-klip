@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 import config
+from .utils import trim_caption
 
 COOKIE_DIR = config.BASE_DIR / "data" / "youtube"
 COOKIE_FILE = COOKIE_DIR / "cookies.json"
@@ -283,7 +284,7 @@ def upload_video(video: Path | str, *, title: str, description: str = "",
                     page.wait_for_timeout(500)
                 except Exception:  # noqa: BLE001
                     pass
-                _set_text(page, DESCRIPTION_SELECTOR, description[:4900], wait=20_000)
+                _set_text(page, DESCRIPTION_SELECTOR, trim_caption(description, 4900), wait=20_000)
             if tags:
                 try:
                     _set_text(page, '#textbox[aria-label*="tag" i], #textbox[placeholder*="tag" i]',

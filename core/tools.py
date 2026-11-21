@@ -484,6 +484,7 @@ def clip_quick(ctx: JobContext) -> Dict:
 # ============================================================================ Atur Manual
 
 def _manual_clip_data(transcript: List[Dict], start: float, end: float, title: str, idx: int) -> Dict:
+    from .utils import trim_caption
     segs = [s for s in transcript if max(s["start"], start) < min(s["end"], end)]
     words = [w for s in segs for w in (s.get("words") or []) if start - 0.05 <= float(w.get("start", 0)) < end]
     text = " ".join(s["text"].strip() for s in segs).strip()
@@ -491,7 +492,7 @@ def _manual_clip_data(transcript: List[Dict], start: float, end: float, title: s
         "start": start, "end": end, "duration": end - start, "text": text[:200], "transcript": text[:2000],
         "score": 0, "local_score": 0, "llm_score": 0, "score_breakdown": {}, "category": f"manual{idx + 1}",
         "reason": "Dipilih manual", "keywords_matched": [], "sentiment": 0, "fyp_signals": [],
-        "hook_text": title or (text[:60] if text else ""), "upload_caption": title or text[:120], "hashtags": [],
+        "hook_text": title or (text[:60] if text else ""), "upload_caption": title or trim_caption(text, 120), "hashtags": [],
         "source": "manual", "subtitle_segments": segs, "words": words, "ai_title": title,
     }
 
@@ -1279,7 +1280,8 @@ def upload_tiktok_job(ctx: JobContext) -> Dict:
     def progress(stage: str, pct: int, message: str) -> None:
         ctx.progress(max(5, min(99, pct)), stage, message)
 
-    result = tiktok_browser.upload_video(str(path), description=description[:2000],
+    from .utils import trim_caption
+    result = tiktok_browser.upload_video(str(path), description=trim_caption(description, 2000),
                                          progress=progress)
     publish_guard.record_upload(path, "tiktok", {
         "url": result.get("url"), "status": result.get("status") or "done", "at": time.time(),
@@ -1294,6 +1296,7 @@ def upload_tiktok_job(ctx: JobContext) -> Dict:
 
 def _auto_upload_meta(transcript: str, preset_hashtags: str = "") -> Dict:
     """Buat judul + deskripsi upload dari transkrip klip. Tidak melempar."""
+    from .utils import trim_caption
     if not (transcript or "").strip():
         return {}
     prompt = (
@@ -1310,7 +1313,7 @@ def _auto_upload_meta(transcript: str, preset_hashtags: str = "") -> Dict:
         raw = _ai.complete(prompt, json_mode=True, max_tokens=500)
         data = _ai.parse_json(raw)
         title = str(data.get("title") or "").strip()[:100]
-        description = str(data.get("description") or "").strip()[:4500]
+        description = trim_caption(str(data.get("description") or "").strip(), 4500)
         return {"title": title, "description": description} if title or description else {}
     except Exception as exc:  # noqa: BLE001 - metadata opsional, jangan gagalkan render
         logger.warning(f"auto metadata gagal ({str(exc)[:160]}); memakai nama file")

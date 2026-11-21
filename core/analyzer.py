@@ -876,7 +876,11 @@ def _build_upload_caption(text: str, category: str) -> str:
         "engagement": "Kamu pilih yang mana?",
         "general": "Menurut kamu gimana?",
     }
-    return trim_caption(f"{first_line}. {ctas.get(category, ctas['general'])}")
+    cta = ctas.get(category, ctas["general"])
+    # Sisakan ruang untuk CTA supaya tidak ikut terpotong saat kalimat pertama panjang.
+    budget = max(20, config.UPLOAD_CAPTION_MAX_CHARS - len(cta) - 3)
+    head = trim_caption(first_line, budget).rstrip(" .…,:;")
+    return f"{head}. {cta}"
 
 
 def _suggest_hashtags(category: str, keywords: List[str]) -> List[str]:
