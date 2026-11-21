@@ -639,6 +639,13 @@ function scheduleModal({ asset_id, file_path, onSaved } = {}) {
       ${UI.field("Waktu upload", `<input type="datetime-local" data-at value="${localInputValue(soon)}">`, { hint: "Server harus tetap menyala saat jadwal tiba." })}
       ${UI.field("Platform", platformToggles())}`,
     foot: UI.btn("Upload sekarang", { kind: "ghost", attrs: "data-now" }) + UI.btn("Simpan jadwal", { kind: "primary", attrs: "data-save" }) }, (m) => {
+    // Isi judul & deskripsi dari metadata klip supaya langsung terpasang saat upload.
+    if (asset_id) api(`/api/assets/${asset_id}`).then((a) => {
+      const cp = a.copy || {};
+      const t = $("[data-title]", m), d = $("[data-desc]", m);
+      if (t && !t.value) t.value = cp.title || "";
+      if (d && !d.value) d.value = cp.description || "";
+    }).catch(() => {});
     const collect = (now) => ({ asset_id: asset_id || "", file_path: file_path || "", title: $("[data-title]", m).value, description: $("[data-desc]", m).value,
       platforms: pickedPlatforms(m), run_at: now ? Date.now() / 1000 : new Date($("[data-at]", m).value).getTime() / 1000 });
     $("[data-save]", m).onclick = (e) => busy(e.currentTarget, async () => { try { await api("/api/schedules", { body: collect(false) }); toast("Jadwal tersimpan"); closeModal(); onSaved && onSaved(); } catch (err) { fail(err); } });

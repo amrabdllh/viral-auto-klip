@@ -17,6 +17,18 @@ from . import db
 
 PLATFORMS = ["youtube", "tiktok"]
 _STARTED = False
+# Hashtag yang hanya relevan di YouTube — jangan ikut ke caption TikTok.
+_YT_ONLY_TAGS = re.compile(r"#(?:shorts|youtubeshorts|youtubeshort|shortvideo|shortsfeed|youtube)\b",
+                           re.IGNORECASE)
+
+
+def _caption_for(platform: str, title: str, description: str) -> str:
+    """Caption upload per platform. TikTok tidak membawa hashtag khusus YouTube."""
+    text = f"{title} {description}".strip()
+    if platform != "youtube":
+        text = _YT_ONLY_TAGS.sub("", text)
+        text = re.sub(r"[ \t]{2,}", " ", text).strip()
+    return text
 _LOCK = threading.Lock()
 
 
@@ -84,10 +96,11 @@ def upload_now(item: Dict) -> Dict:
                     report["youtube"] = upload_to_youtube(path, title=title,
                                                           description=description, tags=tags)
             elif platform == "tiktok":
+                caption = _caption_for("tiktok", title, description)
                 if tiktok_browser.cookie_status().get("configured"):
-                    report["tiktok"] = tiktok_browser.upload_video(str(path), description=f"{title} {description}".strip())
+                    report["tiktok"] = tiktok_browser.upload_video(str(path), description=caption)
                 else:
-                    report["tiktok"] = upload_to_tiktok(path, description=f"{title} {description}".strip())
+                    report["tiktok"] = upload_to_tiktok(path, description=caption)
         except Exception as exc:
             report[platform] = {"status": "failed", "reason": str(exc)[:400]}
     return report

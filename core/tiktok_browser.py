@@ -43,6 +43,15 @@ POST_SELECTORS = (
     'button:has-text("Unggah")',
     'button:has-text("Upload")',
 )
+SAVE_DRAFT_SELECTORS = (
+    'button[data-e2e="save_draft_button"]',
+    'button[data-e2e="draft_button"]',
+    'button:has-text("Simpan draf")',
+    'button:has-text("Simpan sebagai draf")',
+    'button:has-text("Save draft")',
+    'button:has-text("Save as draft")',
+    'button:has-text("Draf")',
+)
 
 
 class TikTokUploadError(ValueError):
@@ -178,8 +187,14 @@ def _first(page, selectors, *, state="visible", timeout=8000):
 
 
 def upload_video(video: Path | str, *, description: str = "", timeout: int = 300,
-                 progress=None) -> Dict[str, Any]:
-    """Upload satu video ke TikTok Studio (headless). Tidak pernah membuka jendela."""
+                 progress=None, mode: Optional[str] = None) -> Dict[str, Any]:
+    """Upload satu video ke TikTok Studio (headless). Tidak pernah membuka jendela.
+
+    mode: "draft" (default — simpan ke Draf TikTok Studio) atau "post" (langsung posting).
+    """
+    mode = str(mode or getattr(config, "TIKTOK_UPLOAD_MODE", "draft") or "draft").strip().lower()
+    if mode not in ("draft", "post"):
+        mode = "draft"
     def say(stage: str, pct: int, message: str) -> None:
         logger.info(f"[tiktok-browser] {message}")
         if progress:
@@ -237,30 +252,36 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                     pass
 
             say("Upload", 60, "Menunggu video selesai diproses…")
-            post_btn = None
+            target = SAVE_DRAFT_SELECTORS if mode == "draft" else POST_SELECTORS
+            action_btn = None
             while time.monotonic() < deadline:
-                post_btn = _first(page, POST_SELECTORS, timeout=3000)
-                if post_btn is not None:
+                action_btn = _first(page, target, timeout=3000)
+                if action_btn is not None:
                     try:
-                        disabled = post_btn.get_attribute("disabled") is not None or \
-                                   post_btn.get_attribute("aria-disabled") == "true"
+                        disabled = action_btn.get_attribute("disabled") is not None or \
+                                   action_btn.get_attribute("aria-disabled") == "true"
                     except Exception:  # noqa: BLE001
                         disabled = False
                     if not disabled:
                         break
                 page.wait_for_timeout(2000)
 
-            if post_btn is None:
+            if action_btn is None:
+                if mode == "draft":
+                    raise TikTokUploadError(
+                        "Tombol Simpan draf tidak ditemukan — UI TikTok mungkin berubah. "
+                        "Ubah Pengaturan → Mode upload TikTok ke 'post' untuk langsung posting.")
                 raise TikTokUploadError("Tombol Post tidak muncul — UI TikTok mungkin berubah")
 
-            say("Upload", 80, "Menekan Post…")
+            say("Upload", 80, "Menyimpan ke Draf…" if mode == "draft" else "Menekan Post…")
             try:
-                post_btn.click(timeout=5000)
+                action_btn.click(timeout=5000)
             except Exception:  # noqa: BLE001
-                post_btn.evaluate("el => el.click()")
+                action_btn.evaluate("el => el.click()")
 
             # Tunggu konfirmasi: URL pindah ke halaman konten, atau muncul teks sukses.
             uploaded = False
+            confirm = r"draf|draft|tersimpan|saved" if mode == "draft" else r"uploaded|berhasil|success"
             for _ in range(60):
                 if time.monotonic() > deadline:
                     break
@@ -268,7 +289,7 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                     uploaded = True
                     break
                 try:
-                    if page.locator('text=/uploaded|berhasil|success/i').count():
+                    if page.locator(f"text=/{confirm}/i").count():
                         uploaded = True
                         break
                 except Exception:  # noqa: BLE001
@@ -276,10 +297,16 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                 page.wait_for_timeout(2000)
 
             if not uploaded:
+                if mode == "draft":
+                    # Draf kadang tersimpan tanpa memunculkan teks konfirmasi — jangan
+                    # gagalkan jadwal; minta pengguna mengecek TikTok Studio → Draf.
+                    logger.warning("[tiktok-browser] Draf tidak terkonfirmasi — cek TikTok Studio → Konten → Draf")
+                    return {"ok": True, "mode": "draft", "confirmed": False,
+                            "privacy": "default", "description": description, "file": str(video)}
                 raise TikTokUploadError(
                     "Post ditekan tetapi konfirmasi tidak terlihat. Cek TikTok Studio → Konten.")
-            say("Upload", 100, "Upload TikTok selesai")
-            return {"ok": True, "privacy": "default", "description": description,
+            say("Upload", 100, "Draf TikTok tersimpan" if mode == "draft" else "Upload TikTok selesai")
+            return {"ok": True, "mode": mode, "privacy": "default", "description": description,
                     "file": str(video)}
         except TikTokUploadError:
             raise

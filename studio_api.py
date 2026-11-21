@@ -438,6 +438,16 @@ def storage():
             "disk_free_bytes": shutil.disk_usage(str(config.BASE_DIR)).free}
 
 
+@router.get("/assets/{asset_id}")
+def get_asset(asset_id: str):
+    """Detail satu aset + judul/deskripsi otomatis (dipakai modal Jadwalkan upload)."""
+    asset = db.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Aset tidak ditemukan")
+    asset["exists"] = Path(asset["path"]).exists()
+    return {**asset, "copy": _asset_copy(asset)}
+
+
 @router.delete("/assets/{asset_id}")
 def delete_asset(asset_id: str, file: bool = True):
     asset = db.delete_asset(asset_id)
