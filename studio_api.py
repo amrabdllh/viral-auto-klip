@@ -159,6 +159,7 @@ def campaign_presets():
                 continue
             out.append({
                 "file": path.name,
+                "name": str(preset.get("name") or path.stem),
                 "layout": preset["layout"],
                 "subtitle_provider": preset.get("subtitle_provider") or "none",
                 "intro_voice": preset.get("intro_voice") or "none",

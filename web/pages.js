@@ -187,7 +187,7 @@ PAGES.analisis = { render(view, q) {
     const list = r.presets || [];
     sel.innerHTML = `<option value="">Tanpa template</option>` + (list.map((p) => p.error
       ? `<option value="${esc(p.file)}" disabled>${esc(p.file)} — ${esc(p.error)}</option>`
-      : `<option value="${esc(p.file)}">${esc(p.file)} · ${esc(p.layout)} · ${esc(p.fps)} fps</option>`).join("")
+      : `<option value="${esc(p.file)}">${esc(p.name || p.file)} · ${esc(p.fps)} fps</option>`).join("")
       || `<option value="" disabled>Tidak ada preset</option>`);
     sel.value = "";
   }).catch(() => {});
@@ -248,7 +248,7 @@ PAGES.live = { render(view, q) {
     const list = r.presets || [];
     sel.innerHTML = list.map((p) => p.error
       ? `<option value="${esc(p.file)}" disabled>${esc(p.file)} — ${esc(p.error)}</option>`
-      : `<option value="${esc(p.file)}">${esc(p.file)} · ${esc(p.layout)}</option>`).join("")
+      : `<option value="${esc(p.file)}">${esc(p.name || p.file)}</option>`).join("")
       || `<option value="">Tidak ada preset</option>`;
     if (r.default) sel.value = r.default;
   }).catch(() => {});

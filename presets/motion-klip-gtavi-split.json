@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "name": "MotionKlip GTA VI — facecam + gameplay",
   "layout": "split",
   "facecam_rect": [
     0.775,
