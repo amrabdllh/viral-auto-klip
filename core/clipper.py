@@ -36,11 +36,15 @@ def _video_encode_args(crf: int = 20, fast: bool = False) -> List[str]:
       menambah blok — dulu cq 19 per generasi, padahal klip melewati 4-6 encode berturut-turut.
     - Hasil akhir: preset p7 (paling lambat/terbaik), tune hq, VBR + lookahead 32, AQ spasial & temporal,
       3 B-frame sebagai referensi, multipass penuh. GPU 3060 masih jauh dari penuh dengan ini.
+    - ENCODE_CQ (opsional): override CQ/CRF, mis. 18–20 untuk file lebih kecil. 0 = ikut codebase.
     """
+    cq_override = int(getattr(config, "ENCODE_CQ", 0) or 0)
+    if cq_override:
+        crf = max(1, min(51, cq_override))
     if config.USE_NVENC and _has_nvenc():
         if fast:
-            return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "14", "-b:v", "0", "-pix_fmt", "yuv420p"]
-        cq = max(14, min(28, crf - 1))
+            return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", str(cq_override or 14), "-b:v", "0", "-pix_fmt", "yuv420p"]
+        cq = cq_override or max(14, min(28, crf - 1))
         return [
             "-c:v", "h264_nvenc", "-preset", config.NVENC_PRESET, "-tune", "hq", "-profile:v", "high",
             "-rc", "vbr", "-cq", str(cq), "-b:v", "0", "-maxrate", "40M", "-bufsize", "80M",
@@ -133,6 +137,7 @@ def process_clips(
     edit_opts: Optional[Dict] = None,
     layout: str = "auto",
     lower_third: Optional[Dict] = None,
+    stream_layout: Optional[Dict] = None,
 ) -> List[Dict]:
     """
     Process each viral clip: extract, reframe, caption, encode.
@@ -151,17 +156,32 @@ def process_clips(
     video_info = get_video_info(video_path)
     scene_cuts = _detect_scene_cuts(video_path, clips_data)
 
+    # stream_layout eksplisit (dict) menang: campaign/live sudah menentukan kotak
+    # facecam sendiri (rect preset atau deteksi per jendela). layout="off" = tanpa split.
+    preset_layout = stream_layout if isinstance(stream_layout, dict) else None
     stream_layout = None
-    if layout in ("auto", "gaming") and target_aspect == "portrait" and not split_screen and not group_framing:
+    if preset_layout is not None:
+        stream_layout = preset_layout
+    elif layout != "off" and layout in ("auto", "gaming") and target_aspect == "portrait" \
+            and not split_screen and not group_framing:
         try:
             stream_layout = detect_stream_layout(video_path, clips_data, force=layout == "gaming")
         except Exception as exc:
             logger.warning(f"Deteksi layout facecam gagal: {exc}")
-        if stream_layout:
-            logger.info(f"  Layout gaming terdeteksi: facecam {stream_layout['cam_box']} → split wajah/gameplay")
-            # caption di sambungan facecam/gameplay (gaya klip streamer)
-            seam = int(1920 * stream_layout["cam_ratio"])
+    if stream_layout:
+        logger.info(f"  Layout gaming: facecam {stream_layout['cam_box']} → split wajah/gameplay")
+        # Posisi caption: layout campaign boleh menetapkan sendiri (mis. di bawah
+        # gameplay, tepat di atas banner). Default: di sambungan facecam/gameplay.
+        caption_y = stream_layout.get("caption_y")
+        if caption_y is not None:
+            style["vertical_position"] = max(80, min(1800, int(caption_y)))
+            logger.info(f"  Caption Y (margin bawah): {style['vertical_position']}px")
+        else:
+            seam = int(1920 * float(stream_layout.get("cam_ratio", 0.38)))
             style["vertical_position"] = max(200, 1920 - seam - 150)
+        if stream_layout.get("caption_font_size"):
+            style["font_size"] = max(40, min(110, int(stream_layout["caption_font_size"])))
+            logger.info(f"  Caption font: {style['font_size']}px")
 
     content_rect = None
     if not stream_layout:  # sumber berbingkai (kartu video + border hitam + branding) → crop hanya gambarnya
@@ -368,7 +388,8 @@ def _process_single_clip(
             # (v6.4) streamer: facecam di atas, gameplay di bawah (tanpa tracking wajah per frame)
             from . import ffx
             ffx.split_cam(str(working_clip_path), str(reframed_path), tuple(layout["cam_box"]), tuple(layout["game_box"]),
-                          cam_ratio=layout["cam_ratio"], cam_top=True)
+                          cam_ratio=layout["cam_ratio"], cam_top=True,
+                          face=tuple(layout["face"][:2]) if layout.get("face") else None)
         elif opts["enable_face_reframe"]:
             face_bboxes = detect_faces_in_clip(
                 str(working_clip_path),
@@ -587,8 +608,10 @@ def _process_single_clip(
         lt_items = _lower_third_items(opts.get("lower_third") or {}, speaker_plan, clip_duration,
                                       t_min=max(cold_shift + 0.4, 2.9 if config.ENABLE_BROLL and not clip_info.get("no_hook_card") else 0.6))
         if edit.get("lower_third") and lt_items:
+            # Split/campaign: kartu nama di area gameplay, di atas subtitle dan
+            # banner (0.86 dulu menabrak banner MotionKlip di y=1584).
             f, files = editing.lower_third_filters(lt_items, clip_dir, _drawtext_font(), _escape_ffmpeg_filter_path,
-                                                   y_frac=0.86 if layout else 0.58)
+                                                   y_frac=0.74 if layout else 0.58)
             overlays += f
             overlay_files += files
         polish = dict(width=out_w, height=out_h, duration=clip_duration, ass_path=ass_for_burn, grade=edit["color_grade"],
@@ -771,6 +794,35 @@ def _process_single_clip(
         logger.exception(f"Failed to process clip {idx+1}: {e}")
         return idx, None
 
+# Lebar wajah maksimum (fraksi lebar frame) yang masih dianggap facecam streamer.
+# 0.32 memberi ruang untuk facecam besar; wajah podcast biasanya >= 0.35 dan di tengah.
+FACE_CAM_MAX_WIDTH = 0.32
+
+
+def centered_cam_box(face, cam_ratio: float = 0.38) -> List[float]:
+    """Kotak facecam yang memusatkan wajah di panel, tanpa padding.
+
+    Tinggi kotak ±2× tinggi wajah (ruang rambut), lebar mengikuti rasio panel
+    atas. Kalau wajah berada sangat dekat tepi frame, kotak dipersempit sampai
+    bisa muat terpusat — konsekuensinya crop lebih dekat, tetapi tidak ada bar
+    hitam. Dipakai untuk semua streamer, bukan koordinat tetap.
+    """
+    mx, my, _fw, fh = (float(v) for v in face)
+    panel_ratio = 1080 / (1920 * max(0.2, min(0.6, cam_ratio)))
+    k = panel_ratio * 1080 / 1920  # cw/ch ternormalisasi (vh/vw = 1080/1920)
+    ch = min(0.9, max(fh * 2.0, 0.18))
+    cw = ch * k
+    # wajah tepat di tengah: x = mx - cw/2 harus di dalam [0, 1-cw]
+    cw = max(0.08, min(cw, 2 * min(mx, 1 - mx)))
+    ch = min(0.9, cw / k)
+    # jaga kotak tetap di dalam frame (wajah ~52% dari atas kotak)
+    ch = min(ch, 2 * min(my / 0.52, (1 - my) / 0.48))
+    cw = max(0.08, ch * k)
+    x = min(max(mx - cw / 2, 0.0), 1 - cw)
+    y = min(max(my - ch * 0.52, 0.0), 1 - ch)
+    return [round(x, 4), round(y, 4), round(cw, 4), round(ch, 4)]
+
+
 def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = None, samples: int = 14,
                          force: bool = False, cam_ratio: float = 0.38) -> Optional[Dict]:
     """Deteksi facecam streamer (wajah kecil yang posisinya tetap di pinggir layar gameplay).
@@ -783,7 +835,9 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
         return None
     if clips_data:
         spans = [(float(c["start"]), float(c["end"])) for c in clips_data[:8]]
-        times = [s + (e - s) * k / 3 for s, e in spans for k in (1, 2)]
+        # Minimal 3 sampel per klip: dulu 2 sampel/klip, jadi jendela dengan 1 klip
+        # hanya membaca 2 frame -> `read < 3` -> deteksi SELALU gagal tanpa log.
+        times = [s + (e - s) * k / 4 for s, e in spans for k in (1, 2, 3)]
     else:
         times = [dur * (0.05 + 0.9 * k / max(samples - 1, 1)) for k in range(samples)]
     times = sorted(t for t in times if 0 < t < dur)[:samples]
@@ -799,9 +853,13 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
                 continue
             read += 1
             faces = detector.detect(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            # wajah 'facecam': lebar < 14% frame
-            small = [((x + w / 2) / vw, (y + h / 2) / vh, w / vw, h / vh) for (x, y, w, h), s in faces if s >= 0.6 and w / vw < 0.14]
-            big = [1 for (x, y, w, h), s in faces if s >= 0.6 and w / vw >= 0.14]
+            # Wajah 'facecam' streamer bisa cukup besar: facecam Windah ±22% lebar
+            # frame (preset campaign: 0.225). Ambang lama 14% membuat facecam seperti
+            # itu dianggap "wajah besar" -> deteksi gagal -> jatuh ke reframe wajah
+            # penuh dan gameplay hilang. Podcast tetap terpisah karena wajahnya
+            # >= 35% dan biasanya di tengah.
+            small = [((x + w / 2) / vw, (y + h / 2) / vh, w / vw, h / vh) for (x, y, w, h), s in faces if s >= 0.6 and w / vw < FACE_CAM_MAX_WIDTH]
+            big = [1 for (x, y, w, h), s in faces if s >= 0.6 and w / vw >= FACE_CAM_MAX_WIDTH]
             if big and not force:
                 found.append((-1, -1, 0, 0))  # ada wajah besar = kemungkinan bukan gameplay
             found.extend(small)
@@ -814,6 +872,7 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     pts = [f for f in found if f[0] >= 0]
     big_frames = sum(1 for f in found if f[0] < 0)
     if read < 3 or not pts:
+        logger.info(f"Layout probe: frames={read} wajah_kecil={len(pts)} → kurang sampel, tanpa split")
         return None
     # kluster posisi wajah: facecam = posisi yang muncul di sebagian besar frame
     best: List[Tuple[float, float, float, float]] = []
@@ -825,18 +884,16 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     mx, my = float(np.median([p[0] for p in best])), float(np.median([p[1] for p in best]))
     fw, fh = float(np.median([p[2] for p in best])), float(np.median([p[3] for p in best]))
     at_edge = mx < 0.32 or mx > 0.68 or my < 0.3 or my > 0.7
+    logger.info(f"Layout probe: frames={read} small={len(pts)} big={big_frames} "
+                f"share={share:.2f} face_w={fw:.3f} mx={mx:.2f} my={my:.2f} at_edge={at_edge} force={force}")
     if not force and (share < 0.55 or big_frames > read * 0.3 or not at_edge):
+        logger.info(f"Layout probe: share={share:.2f} big={big_frames} at_edge={at_edge} → bukan layout streamer")
         return None
-    # kotak facecam: ±2.9× tinggi wajah, rasio sama dengan panel atas (1080 × 1920·cam_ratio)
-    panel_ratio = 1080 / (1920 * cam_ratio)
-    span_x = max(p[0] for p in best) - min(p[0] for p in best)  # streamer bergerak di dalam cam
-    ch = min(0.9, max(fh * 2.9, 0.22))
-    cw = ch * vh * panel_ratio / vw
-    cw = max(cw, min(0.6, span_x + fw * 2.4))
-    ch = cw * vw / (panel_ratio * vh)
-    x = min(max(mx - cw / 2, 0.0), 1 - cw)
-    y = min(max(my + fh * 0.35 - ch / 2, 0.0), 1 - ch)
-    return {"cam_box": [round(x, 4), round(y, 4), round(cw, 4), round(ch, 4)], "game_box": [0.0, 0.0, 1.0, 1.0],
+    # Kotak facecam dihitung agar wajah SELALU di tengah panel (bukan preset
+    # tetap): tinggi 2× wajah, lebar mengikuti rasio panel, lalu dipersempit
+    # bila wajah terlalu dekat tepi frame — tanpa padding/bar hitam.
+    box = centered_cam_box((mx, my, fw, fh), cam_ratio)
+    return {"cam_box": box, "game_box": [0.0, 0.0, 1.0, 1.0],
             "cam_ratio": cam_ratio, "face": [round(mx, 3), round(my, 3), round(fw, 3), round(fh, 3)], "share": round(share, 2)}
 
 

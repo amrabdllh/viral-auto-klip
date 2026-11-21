@@ -504,7 +504,12 @@ function mediaCard(c, { selectable = false } = {}) {
   const meta = c.meta || {};
   const path = c.file_path || c.file || c.path;
   const title = c.ai_title || meta.ai_title || c.title || meta.title || c.hook_text || c.name || baseName(path);
-  const caption = [c.upload_caption || meta.upload_caption || meta.description || "", (c.hashtags || meta.hashtags || []).join(" ")].join(" ").trim();
+  const rawTags = c.hashtags ?? meta.hashtags ?? [];
+  const tags = (Array.isArray(rawTags) ? rawTags : String(rawTags).split(/\s+/)).filter(Boolean);
+  const tagText = tags.slice(0, 3).map((t) => (String(t).startsWith("#") ? String(t) : "#" + String(t))).join(" ");
+  const baseCaption = c.upload_caption || meta.upload_caption || meta.description || "";
+  const caption = [baseCaption, tags.filter((t) => !baseCaption.includes("#" + String(t).replace(/^#/, ""))).join(" ")]
+    .join(" ").trim();
   const thumb = c.thumbnail || meta.thumbnail;
   const score = c.score ?? meta.score;
   const dur = c.duration ?? meta.duration;
@@ -516,13 +521,15 @@ function mediaCard(c, { selectable = false } = {}) {
   else if (isImage(path)) media = `<div class="m-thumb"><img src="${fileUrl(path)}" alt="" loading="lazy">`;
   else media = `<div class="m-thumb audio">${icon("doc")}`;
   if (!isAudio(path)) media += `<div class="m-badges">${score ? `<span class="m-badge score">${Math.round(score)}</span>` : ""}${dur ? `<span class="m-badge">${fmtDur(dur)}</span>` : ""}</div></div>`;
-  const metaLine = [c.clock ? "Live " + c.clock : "", c.category && !String(c.category).startsWith("manual") ? c.category : "", c.fyp_grade ? "FYP " + c.fyp_grade : "", c.size ? fmtBytes(c.size) : "", c.size_mb ? c.size_mb + " MB" : "", meta.provider || ""].filter(Boolean).join(" · ");
-  return `<article class="media" data-asset="${esc(id)}" data-path="${esc(path)}">${media}
+  const metaLine = [c.clock ? "Live " + c.clock : "", (c.category || meta.category) && !String(c.category || meta.category).startsWith("manual") ? (c.category || meta.category) : "", tagText, c.fyp_grade ? "FYP " + c.fyp_grade : "", c.size ? fmtBytes(c.size) : "", c.size_mb ? c.size_mb + " MB" : "", meta.provider || ""].filter(Boolean).join(" · ");
+  return `<article class="media" data-asset="${esc(id)}" data-path="${esc(path)}" data-cap="${esc(caption)}">${media}
     ${selectable ? `<input type="checkbox" class="m-sel" aria-label="Pilih">` : ""}
     <div class="m-body"><div class="m-title" title="${esc(title)}">${esc(title)}</div><div class="m-meta">${esc(metaLine) || "&nbsp;"}</div></div>
     <div class="m-actions">${UI.btn("Unduh", { ico: "download", size: "sm", href: fileUrl(path, true) })}<span class="spacer"></span>
       ${caption ? UI.btn("", { ico: "copy", size: "sm", kind: "ghost", title: "Salin caption & hashtag", attrs: `data-copy="${esc(caption)}"` }) : ""}
-      ${isVideo(path) && id ? UI.btn("", { ico: "calendar", size: "sm", kind: "ghost", title: "Jadwalkan upload", attrs: "data-sched" }) : ""}</div></article>`;
+      ${isVideo(path) && id ? UI.btn("", { ico: "calendar", size: "sm", kind: "ghost", title: "Jadwalkan upload", attrs: "data-sched" }) : ""}
+      ${isVideo(path) ? UI.btn("", { ico: "upload", size: "sm", kind: "ghost", title: "Upload ke YouTube (headless, tanpa popup)", attrs: "data-yt" }) : ""}
+      ${isVideo(path) ? UI.btn("", { ico: "music", size: "sm", kind: "ghost", title: "Upload ke TikTok", attrs: "data-tt" }) : ""}</div></article>`;
 }
 
 function bindCards(root) {
@@ -532,7 +539,37 @@ function bindCards(root) {
     const cp = e.target.closest("[data-copy]");
     if (cp) return copyText(cp.dataset.copy, "Disalin");
     const sc = e.target.closest("[data-sched]");
-    if (sc) scheduleModal({ asset_id: sc.closest(".media").dataset.asset });
+    if (sc) return scheduleModal({ asset_id: sc.closest(".media").dataset.asset });
+    const yt = e.target.closest("[data-yt]");
+    if (yt) {
+      const card = yt.closest(".media");
+      const path = card.dataset.path;
+      const caption = card.dataset.cap || "";
+      const title = (card.querySelector(".m-title")?.textContent || baseName(path)).slice(0, 100);
+      return busy(yt, async () => {
+        try {
+          const job = await api("/jobs", { body: { kind: "upload_browser", title: "Upload YouTube · " + title, params: { path, title, description: caption, privacy: "private" } } });
+          toast("Upload berjalan di latar belakang — tidak ada jendela yang muncul");
+          const done = await waitJob(job.id);
+          toast(done.result?.skipped ? (done.message || "Sudah pernah diupload — dilewati") : done.status === "done" ? "Terupload ke YouTube (private)" : "Upload gagal: " + (done.message || "lihat Log Job"));
+        } catch (err) { fail(err); }
+      });
+    }
+    const tt = e.target.closest("[data-tt]");
+    if (tt) {
+      const card = tt.closest(".media");
+      const path = card.dataset.path;
+      const caption = card.dataset.cap || "";
+      const title = (card.querySelector(".m-title")?.textContent || baseName(path)).slice(0, 100);
+      return busy(tt, async () => {
+        try {
+          const job = await api("/jobs", { body: { kind: "upload_tiktok", title: "Upload TikTok · " + title, params: { path, description: caption } } });
+          toast("Upload TikTok berjalan di latar belakang");
+          const done = await waitJob(job.id);
+          toast(done.result?.skipped ? (done.message || "Sudah pernah diupload — dilewati") : done.status === "done" ? "TikTok: " + ((done.result?.upload?.status) || "selesai") : "Upload gagal: " + (done.message || "lihat Log Job"));
+        } catch (err) { fail(err); }
+      });
+    }
   });
   root.addEventListener("change", (e) => { if (e.target.classList.contains("m-sel")) e.target.closest(".media").classList.toggle("selected", e.target.checked); });
 }
@@ -602,6 +639,13 @@ function scheduleModal({ asset_id, file_path, onSaved } = {}) {
       ${UI.field("Waktu upload", `<input type="datetime-local" data-at value="${localInputValue(soon)}">`, { hint: "Server harus tetap menyala saat jadwal tiba." })}
       ${UI.field("Platform", platformToggles())}`,
     foot: UI.btn("Upload sekarang", { kind: "ghost", attrs: "data-now" }) + UI.btn("Simpan jadwal", { kind: "primary", attrs: "data-save" }) }, (m) => {
+    // Isi judul & deskripsi dari metadata klip supaya langsung terpasang saat upload.
+    if (asset_id) api(`/api/assets/${asset_id}`).then((a) => {
+      const cp = a.copy || {};
+      const t = $("[data-title]", m), d = $("[data-desc]", m);
+      if (t && !t.value) t.value = cp.title || "";
+      if (d && !d.value) d.value = cp.description || "";
+    }).catch(() => {});
     const collect = (now) => ({ asset_id: asset_id || "", file_path: file_path || "", title: $("[data-title]", m).value, description: $("[data-desc]", m).value,
       platforms: pickedPlatforms(m), run_at: now ? Date.now() / 1000 : new Date($("[data-at]", m).value).getTime() / 1000 });
     $("[data-save]", m).onclick = (e) => busy(e.currentTarget, async () => { try { await api("/api/schedules", { body: collect(false) }); toast("Jadwal tersimpan"); closeModal(); onSaved && onSaved(); } catch (err) { fail(err); } });
@@ -613,17 +657,19 @@ function scheduleModal({ asset_id, file_path, onSaved } = {}) {
 
 function bulkScheduleModal(assetIds, onSaved) {
   if (!assetIds.length) return toast("Pilih klip dulu", true);
-  modal({ title: `Smart Cadence · ${assetIds.length} klip`, sub: "Klip disebar otomatis ke beberapa slot per hari di jam ramai.",
+  modal({ title: `Upload batch · ${assetIds.length} klip`, sub: "Semua klip diunggah otomatis; atur jarak antar upload supaya tidak spam. Server harus menyala saat jadwal tiba.",
     body: `<div class="fields two">${UI.field("Mulai dari", `<input type="datetime-local" data-at value="${localInputValue(Date.now() / 1000)}">`)}
-      ${UI.field("Slot per hari", `<select data-pd>${UI.options([1, 2, 3, 4, 5], 3)}</select>`)}</div>
-      ${UI.field("Jam posting", `<input type="text" data-hours placeholder="12, 18, 20">`, { hint: "Pisahkan dengan koma. Kosong = 12, 18, 20." })}
+      ${UI.field("Jeda antar upload (menit)", `<input type="number" data-gap min="0" max="1440" value="30">`, { hint: "Upload berurutan tiap N menit — klip berikutnya menunggu giliran. 0 = sebar otomatis per hari (Smart Cadence)." })}
+      ${UI.field("Slot per hari", `<select data-pd>${UI.options([1, 2, 3, 4, 5], 3)}</select>`, { hint: "Dipakai hanya kalau jeda = 0" })}
+      ${UI.field("Jam posting", `<input type="text" data-hours placeholder="12, 18, 20">`, { hint: "Dipakai hanya kalau jeda = 0" })}</div>
       ${UI.field("Platform", platformToggles())}`,
     foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Jadwalkan", { kind: "primary", attrs: "data-save" }) }, (m) => {
     $("[data-save]", m).onclick = (e) => busy(e.currentTarget, async () => {
       try {
         const hours = $("[data-hours]", m).value.split(",").map((x) => parseInt(x, 10)).filter((x) => x >= 0 && x < 24);
-        const r = await api("/api/schedules/bulk", { body: { asset_ids: assetIds, per_day: +$("[data-pd]", m).value, hours, start_at: new Date($("[data-at]", m).value).getTime() / 1000, platforms: pickedPlatforms(m) } });
-        toast(`${r.length} klip dijadwalkan`); closeModal(); onSaved && onSaved();
+        const gap = Math.max(0, parseInt($("[data-gap]", m).value || "0", 10));
+        const r = await api("/api/schedules/bulk", { body: { asset_ids: assetIds, per_day: +$("[data-pd]", m).value, hours, gap_min: gap, start_at: new Date($("[data-at]", m).value).getTime() / 1000, platforms: pickedPlatforms(m) } });
+        toast(`${r.length} klip dijadwalkan${gap ? ` tiap ${gap} menit` : ""}`); closeModal(); onSaved && onSaved();
       } catch (err) { fail(err); }
     });
   });

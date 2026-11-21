@@ -19,14 +19,17 @@ bisa dicocokkan ke video.
 from __future__ import annotations
 
 import csv
+import math
+import os
 import json
 import re
 import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -38,6 +41,12 @@ SEGMENT_SEC = 60
 # Penonton melihat siaran ±5–15 dtk di belakang, lalu butuh beberapa detik untuk mengetik.
 CHAT_LAG_SEC = 12.0
 MAX_BACKLOG_SEC = 3500  # playlist YouTube menyimpan ±3600 potongan 1 dtk
+
+# Koreksi offset audio antar-rendition HLS. Default MATI: -itsoffset negatif
+# membuat timestamp audio mundur dan segment muxer berhenti merotasi (rekaman
+# macet di segmen pertama). Nyalakan hanya untuk sumber yang terbukti desync:
+#   set LIVE_AUDIO_OFFSET=1 di .env
+AUDIO_OFFSET_ENABLED = os.getenv("LIVE_AUDIO_OFFSET", "1").lower() in ("1", "true", "yes")
 
 
 # ============================================================================ info siaran
@@ -82,22 +91,111 @@ def _pick_streams(info: Dict, max_height: int = 1080) -> Tuple[str, Optional[str
 
 def _playlist_timing(url: str, headers: Dict) -> Tuple[Optional[float], List[float]]:
     """(jam dinding potongan pertama, durasi tiap potongan) dari playlist HLS."""
+    pdt, _seq, segs = _fetch_segments(url, headers)
+    return pdt, [d for _, d in segs]
+
+
+def _fetch_segments(url: str, headers: Dict) -> Tuple[Optional[float], int, List[Tuple[str, float]]]:
+    """Baca playlist HLS: (PDT potongan pertama, media-sequence, [(url absolut, durasi)])."""
     req = urllib.request.Request(url, headers={k: v for k, v in headers.items() if k.lower() != "accept-encoding"})
     with urllib.request.urlopen(req, timeout=20) as resp:
         text = resp.read().decode("utf-8", "replace")
-    pdt, durs = None, []
+    pdt: Optional[float] = None
+    seq = 0
+    segs: List[Tuple[str, float]] = []
+    dur = 1.0
     for line in text.splitlines():
-        if line.startswith("#EXT-X-PROGRAM-DATE-TIME:") and pdt is None and not durs:
+        s = line.strip()
+        if s.startswith("#EXT-X-PROGRAM-DATE-TIME:") and pdt is None:
             try:
-                pdt = datetime.fromisoformat(line.split(":", 1)[1].strip().replace("Z", "+00:00")).timestamp()
+                pdt = datetime.fromisoformat(s.split(":", 1)[1].strip().replace("Z", "+00:00")).timestamp()
             except ValueError:
                 pdt = None
-        elif line.startswith("#EXTINF:"):
+        elif s.startswith("#EXT-X-MEDIA-SEQUENCE:"):
             try:
-                durs.append(float(line[8:].split(",")[0]))
+                seq = int(s.split(":", 1)[1].strip())
             except ValueError:
-                durs.append(1.0)
-    return pdt, durs
+                pass
+        elif s.startswith("#EXTINF:"):
+            try:
+                dur = float(s[8:].split(",")[0])
+            except ValueError:
+                dur = 1.0
+        elif s and not s.startswith("#"):
+            segs.append((urllib.parse.urljoin(url, s), dur))
+            dur = 1.0
+    return pdt, seq, segs
+
+
+def _segment_starts(pdt: float, segs: List[Tuple[str, float]]) -> List[float]:
+    out, t = [], pdt
+    for _, d in segs:
+        out.append(t)
+        t += d
+    return out
+
+
+def _iso(wall: float) -> str:
+    return datetime.fromtimestamp(wall, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _write_mirror(path: Path, segs: List[Tuple[str, float]], seq0: int, wall0: float) -> None:
+    """Tulis playlist HLS lokal yang menunjuk langsung ke segmen remote.
+
+    FFmpeg membacanya seperti playlist live biasa (file ini diperbarui terus),
+    tetapi kita yang menentukan segmen pertama — tidak ada lagi balapan
+    "playlist bergeser satu segmen" antara pembacaan kita dan pembukaan FFmpeg.
+    """
+    maxdur = max((d for _, d in segs), default=1.0)
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{math.ceil(maxdur)}",
+             f"#EXT-X-MEDIA-SEQUENCE:{seq0}", f"#EXT-X-PROGRAM-DATE-TIME:{_iso(wall0)}"]
+    for u, d in segs:
+        lines.extend((f"#EXTINF:{d:.6f},", u))
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def cleanup_orphan_recorders() -> int:
+    """Bunuh ffmpeg rekaman yang tertinggal saat server dimatikan paksa.
+
+    Server yang di-`taskkill /F` tidak menjalankan `finally`, jadi subproses
+    ffmpeg tetap hidup dan terus mengunduh stream — beberapa proses yatim
+    berebut bandwidth dan membuat rekaman baru berjalan 0,2x realtime.
+    PID dicatat di <job>/rec/ffmpeg.pid.
+    """
+    killed = 0
+    try:
+        roots = (list(Path(config.OUTPUT_DIR).glob("job_*/rec/ffmpeg.pid"))
+                 + list(Path(config.OUTPUT_DIR).glob("job_*/chat/chat.pid")))
+    except OSError:
+        return 0
+    for pid_file in roots:
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            continue
+        # PID bisa dipakai ulang setelah restart. Jangan bunuh berdasarkan nama proses saja:
+        # cocokkan command line dengan folder job pemilik PID.
+        job_dir = pid_file.parents[1] if len(pid_file.parents) > 1 else pid_file.parent
+        job_token = job_dir.name.lower()
+        expected = "ffmpeg.exe" if pid_file.name == "ffmpeg.pid" else "python.exe"
+        try:
+            out = subprocess.run(
+                ["wmic", "process", "where", f"processid={pid}", "get", "name,commandline", "/format:list"],
+                capture_output=True, text=True, timeout=10).stdout.lower()
+        except Exception:
+            out = ""
+        if expected in out and job_token in out:
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=10)
+                killed += 1
+            except Exception:
+                pass
+        pid_file.unlink(missing_ok=True)
+    if killed:
+        logger.warning(f"{killed} proses ffmpeg yatim dari sesi sebelumnya dimatikan")
+    return killed
 
 
 # ============================================================================ recorder
@@ -196,6 +294,10 @@ class Recorder:
 
     # ---- internal
     def _kill(self) -> None:
+        try:
+            (self.dir / "ffmpeg.pid").unlink(missing_ok=True)
+        except OSError:
+            pass
         proc = self._proc
         if proc and proc.poll() is None:
             try:
@@ -233,43 +335,153 @@ class Recorder:
             backlog = min(MAX_BACKLOG_SEC, max(4.0, time.time() - last + 6)) if last else 30.0
         self.refresh()
 
+    # ---- playlist cermin: titik mulai deterministik, tanpa balapan segmen
+    def _mirror_inputs(self, v_url: str, a_url: Optional[str], headers: Dict, backlog: float) -> Optional[Dict]:
+        """Tulis playlist HLS lokal dari segmen yang KITA pilih.
+
+        Masalah lama: `-live_start_index -n` dihitung per playlist, tetapi playlist
+        live bergeser tiap detik. Antara pembacaan kita dan pembukaan FFmpeg, satu
+        playlist bisa sudah bergeser satu segmen (1 dtk) sementara yang lain belum —
+        hasilnya audio bergeser ±1 dtk dan offset yang kita hitung justru menambah
+        kesalahan. Dengan playlist cermin, segmen pertama yang dibaca FFmpeg adalah
+        segmen yang sama yang kita pakai untuk menghitung offset.
+        """
+        try:
+            v_pdt, v_seq, v_segs = _fetch_segments(v_url, headers)
+            a_pdt, a_seq, a_segs = _fetch_segments(a_url, headers) if a_url else (None, 0, [])
+            if not v_segs or v_pdt is None:
+                return None
+            target = time.time() - max(0.0, backlog)
+
+            def pick(pdt: float, segs: List[Tuple[str, float]]) -> Tuple[int, float]:
+                starts = _segment_starts(pdt, segs)
+                for i, start in enumerate(starts):
+                    if start + segs[i][1] > target:
+                        return i, start
+                return max(0, len(segs) - 1), starts[-1]
+
+            vi, v_wall0 = pick(v_pdt, v_segs)
+            ai, a_wall0 = pick(a_pdt, a_segs) if (a_segs and a_pdt is not None) else (0, v_wall0)
+            v_path, a_path = self.dir / "v_live.m3u8", self.dir / "a_live.m3u8"
+            _write_mirror(v_path, v_segs[vi:], v_seq + vi, v_wall0)
+            state = {"v": {"path": str(v_path), "url": v_url, "headers": headers,
+                           "segs": list(v_segs[vi:]), "seq": v_seq + vi, "wall0": v_wall0},
+                     "a": None}
+            if a_url and a_segs:
+                _write_mirror(a_path, a_segs[ai:], a_seq + ai, a_wall0)
+                state["a"] = {"path": str(a_path), "url": a_url, "headers": headers,
+                              "segs": list(a_segs[ai:]), "seq": a_seq + ai, "wall0": a_wall0}
+            return {"v": v_wall0, "a": a_wall0, "state": state}
+        except Exception as exc:  # noqa: BLE001 - fallback ke mode -live_start_index
+            self.log(f"Playlist cermin gagal ({str(exc)[:140]}); memakai mode lama")
+            return None
+
+    @staticmethod
+    def _refresh_mirrors(items: List[Dict], stop: threading.Event) -> None:
+        """Tambahkan segmen baru ke playlist cermin selama FFmpeg membaca.
+
+        Harus APPEND, bukan tulis-ulang: di Windows FFmpeg memegang file
+        playlist yang sedang dibaca, sehingga `os.replace` gagal dan playlist
+        cermin tidak pernah bertambah — FFmpeg berhenti di ujung playlist awal.
+        """
+        while not stop.is_set():
+            for item in items:
+                try:
+                    _pdt, seq, segs = _fetch_segments(item["url"], item["headers"])
+                    last = item["seq"] + len(item["segs"]) - 1
+                    fresh = [(u, d) for j, (u, d) in enumerate(segs) if seq + j > last]
+                    if fresh:
+                        if seq > last + 1:
+                            logger.warning(f"Playlist cermin kehilangan {seq - last - 1} segmen")
+                        chunk = "".join(f"#EXTINF:{d:.6f},\n{u}\n" for u, d in fresh)
+                        with open(item["path"], "a", encoding="utf-8") as fh:
+                            fh.write(chunk)
+                            fh.flush()
+                        item["segs"].extend(fresh)
+                except Exception:  # noqa: BLE001 - dicoba lagi 2 dtk kemudian
+                    pass
+            stop.wait(2)
+
     def _run_ffmpeg(self, v_url: str, a_url: Optional[str], headers: Dict, backlog: float) -> None:
-        n = max(3, int(round(backlog)))
         run_no = len(self.runs)
         csv_path = self.dir / f"list_{run_no:02d}.csv"
         hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k.lower() in ("user-agent", "referer", "origin", "cookie"))
-        def inp(u):
-            args = ["-live_start_index", str(-n)]
-            if hdr:
-                args += ["-headers", hdr]
-            return args + ["-i", u]
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inp(v_url)]
-        if a_url:
-            cmd += [*inp(a_url), "-map", "0:v:0", "-map", "1:a:0"]
+        mirror = self._mirror_inputs(v_url, a_url, headers, backlog) if v_url.startswith("http") else None
+        stop_refresh = threading.Event()
+        if mirror:
+            v_wall0 = float(mirror["v"])
+            offset = 0.0
+            if a_url and mirror["state"]["a"] and AUDIO_OFFSET_ENABLED:
+                offset = float(mirror["a"]) - float(mirror["v"])
+            def inp(path: str):
+                # Tanpa -live_start_index, demuxer HLS mulai di "live edge"
+                # (3 segmen dari akhir) dan titik mulai kita diabaikan; 0 = mulai
+                # dari segmen pertama playlist cermin — segmen yang kita pilih.
+                args = ["-live_start_index", "0",
+                        "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+                        "-allowed_extensions", "ALL"]
+                return args + ["-f", "hls", "-i", path]
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inp(mirror["state"]["v"]["path"])]
+            if a_url:
+                if abs(offset) > 0.05:
+                    self.log(f"Offset audio {offset:+.2f} dtk dikoreksi")
+                    cmd += ["-itsoffset", f"{offset:.3f}"]
+                cmd += [*inp(mirror["state"]["a"]["path"]), "-map", "0:v:0", "-map", "1:a:0"]
+            else:
+                cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
+            items = [mirror["state"]["v"]] + ([mirror["state"]["a"]] if a_url and mirror["state"]["a"] else [])
+            threading.Thread(target=self._refresh_mirrors, args=(items, stop_refresh),
+                             name="live-mirror", daemon=True).start()
+            self.log("Merekam dari playlist cermin (titik mulai pasti)")
         else:
-            cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
+            # Fallback: perilaku lama dengan -live_start_index (bisa meleset 1 segmen).
+            try:
+                _, durs = _playlist_timing(v_url, headers)
+                avg = (sum(durs) / len(durs)) if durs else 5.0
+            except Exception:
+                avg = 5.0
+            n = max(3, int(round(backlog / max(avg, 1.0))))
+            self.log(f"Backlog {backlog:.0f} dtk, segmen rata-rata {avg:.1f} dtk → mulai {n} segmen ke belakang")
+            def inp(u):
+                args = ["-live_start_index", str(-n)]
+                if hdr:
+                    args += ["-headers", hdr]
+                return args + ["-i", u]
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inp(v_url)]
+            if a_url:
+                cmd += [*inp(a_url), "-map", "0:v:0", "-map", "1:a:0"]
+            else:
+                cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
+            v_wall0 = time.time() - n
+            try:
+                pdt, durs = _playlist_timing(v_url, headers)
+                if pdt and durs:
+                    idx = max(0, len(durs) - n)
+                    v_wall0 = pdt + sum(durs[:idx])
+            except Exception as exc:
+                self.log(f"Jam playlist tidak terbaca, pakai perkiraan: {exc}")
         cmd += ["-c", "copy", "-f", "segment", "-segment_time", str(SEGMENT_SEC), "-reset_timestamps", "1",
                 "-segment_start_number", str(self._next_number), "-segment_list", str(csv_path),
                 "-segment_list_type", "csv", str(self.dir / "seg_%05d.ts")]
         err_path = self.dir / f"ffmpeg_{run_no:02d}.log"
         err = open(err_path, "wb")
         self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
-        # jam dinding potongan awal: hitung dari playlist yang sama yang dibaca FFmpeg (selisih ±1 dtk)
-        wall_base = time.time() - n
         try:
-            pdt, durs = _playlist_timing(v_url, headers)
-            if pdt and durs:
-                idx = max(0, len(durs) - n)
-                wall_base = pdt + sum(durs[:idx])
-        except Exception as exc:
-            self.log(f"Jam playlist tidak terbaca, pakai perkiraan: {exc}")
+            (self.dir / "ffmpeg.pid").write_text(str(self._proc.pid), encoding="utf-8")
+        except OSError:
+            pass
+        wall_base = v_wall0
         self.runs.append({"csv": str(csv_path), "wall_base": wall_base})
-        self.log(f"Merekam siaran (mulai {int(n // 60)} mnt {int(n % 60)} dtk ke belakang)…")
+        if mirror:
+            self.log(f"Merekam siaran (mulai {max(0, int((time.time() - wall_base) // 60))} mnt ke belakang)…")
+        else:
+            self.log(f"Merekam siaran (mulai {int(n // 60)} mnt {int(n % 60)} dtk ke belakang)…")
         try:
             while self._proc.poll() is None and not self._stop.is_set():
                 self._stop.wait(2)
                 self.refresh()
         finally:
+            stop_refresh.set()
             if self._stop.is_set():
                 self._kill()
             err.close()
@@ -367,6 +579,10 @@ class ChatReader:
 
     def stop(self) -> None:
         self._stop.set()
+        try:
+            (self.dir / "chat.pid").unlink(missing_ok=True)
+        except OSError:
+            pass
         if self._proc and self._proc.poll() is None:
             self._proc.kill()
         self._thread.join(timeout=10)
@@ -391,6 +607,10 @@ class ChatReader:
                 cmd[3:3] = ["--cookies", cookies]
             try:
                 self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    (self.dir / "chat.pid").write_text(str(self._proc.pid), encoding="utf-8")
+                except OSError:
+                    pass
             except OSError as exc:
                 self.log(f"Chat live tidak bisa dibaca: {exc}")
                 return
@@ -542,6 +762,7 @@ def update_state(job_dir: Path, fn) -> Dict:
 # ============================================================================ job
 
 from . import db  # noqa: E402
+from .chat_spikes import chat_spike_moments, merge_hints  # noqa: E402
 from .jobs import JobCancelled, JobContext, handler, submit  # noqa: E402
 
 STOP_REQUESTS: set = set()   # "Selesai rekam": proses sisa rekaman lalu berhenti dengan rapi
@@ -553,7 +774,7 @@ _PASS_KEYS = ("caption_style", "edit_style", "language", "whisper_device", "whis
               "enable_captions", "hook_card", "use_llm", "audio_enhance", "layout", "video_mode", "output_type",
               "cold_open", "sound_design", "caption_fx", "audio_master", "jump_cuts", "dynamic_zoom", "progress_bar",
               "sfx", "end_cta", "color_grade", "enable_face_reframe", "speaker_cam", "broll", "shake", "freeze",
-              "lower_third", "censor", "speaker_names")
+              "lower_third", "censor", "speaker_names", "campaign", "preset", "subtitle_provider", "intro_voice")
 
 
 def _clock(ts: float) -> str:
@@ -697,6 +918,100 @@ def live_clip(ctx: JobContext) -> Dict:
             "chat": chat.count() if chat else 0}
 
 
+def _gameplay_from_cam(cam: List[float]) -> List[float]:
+    """Area gameplay = frame dikurangi sisi tempat facecam berada."""
+    x, y, w, h = cam
+    cx, cy = x + w / 2, y + h / 2
+    if cx > 0.55:            # cam di kanan
+        return [0.0, 0.0, round(max(0.55, min(0.79, x)), 4), 1.0]
+    if cx < 0.45:            # cam di kiri
+        return [round(min(0.8, x + w), 4), 0.0, round(max(0.2, 1.0 - (x + w)), 4), 1.0]
+    if cy > 0.5:             # cam di bawah
+        return [0.0, 0.0, 1.0, round(max(0.2, y), 4)]
+    return [0.0, round(min(0.8, y + h), 4), 1.0, round(max(0.2, 1.0 - (y + h)), 4)]
+
+
+def _render_campaign_window(video: str, picked: List[Dict], out_dir: Path,
+                            p: Dict, wall0: float) -> List[Dict]:
+    """Render jendela live dengan EDITING PENUH + banner + outro.
+
+    Semua efek yang dipakai klip biasa (jump cut, zoom, cold open, caption
+    animasi, sound design, color grade) dikerjakan `process_clips`. Setelah itu
+    banner dan outro ditempel. Jadi satu-satunya beda campaign adalah
+    split + banner + outro — sesuai permintaan.
+    """
+    from . import campaign, ffx, tools
+    from .clipper import detect_stream_layout, process_clips
+
+    preset_path = Path(p.get("preset") or getattr(config, "CAMPAIGN_DEFAULT_PRESET", "")
+                       or "motion-klip-gtavi-split.json")
+    if not preset_path.is_absolute():
+        preset_path = Path(config.BASE_DIR) / "presets" / preset_path.name
+    preset = campaign.load_preset(preset_path)
+    preset_tags = [t for t in str(preset.get("hashtags") or "").split() if t]
+    overrides = {k: p[k] for k in ("subtitle_provider", "intro_voice", "layout", "subtitle_position") if p.get(k)}
+    settings = campaign.campaign_settings(preset, overrides)
+
+    layout = None
+    if settings["layout"] == "split":
+        cam = game = face = None
+        try:
+            det = detect_stream_layout(video, picked)
+        except Exception as exc:  # noqa: BLE001
+            det = None
+            logger.warning(f"Deteksi facecam campaign dilewati: {str(exc)[:160]}")
+        if det:
+            # Auto-detect menentukan perlu split atau tidak + kotak yang
+            # memusatkan wajah; preset hanya cadangan bila deteksi gagal.
+            cam, game = det["cam_box"], _gameplay_from_cam(det["cam_box"])
+            face = [det["face"][0], det["face"][1]]
+            logger.info(f"Campaign live: auto {cam} (wajah {face[0]:.3f},{face[1]:.3f})")
+        else:
+            cam, game = settings.get("facecam_rect"), settings.get("gameplay_rect")
+        if cam and game:
+            layout = {"cam_box": list(cam), "game_box": list(game),
+                      "cam_ratio": settings["facecam_height"] / 1920.0,
+                      "face": face, "caption_y": campaign.caption_margin(settings, preset),
+                      "caption_font_size": campaign.caption_font_size(settings)}
+
+    opts = tools.render_options(p)
+    opts["stream_layout"] = layout
+    if layout is None:
+        opts["layout"] = "off"  # preset tanpa split: jangan auto-deteksi facecam
+    opts["enable_captions"] = bool(p.get("enable_captions", True))
+    from . import editing
+    prev_fps = editing.OUTPUT_FPS
+    editing.OUTPUT_FPS = max(24, min(60, int(settings.get("fps") or 60)))
+    try:
+        ctx_clips = process_clips(video, picked, out_dir, **opts)
+    finally:
+        editing.OUTPUT_FPS = prev_fps
+
+    clips: List[Dict] = []
+    for index, clip in enumerate(ctx_clips):
+        src = Path(clip["file_path"])
+        final = src.with_name(f"{src.stem}_campaign.mp4")
+        try:
+            campaign.finish_with_banner_and_outro(src, preset, final)
+        except Exception as exc:  # noqa: BLE001 - jangan buang klip yang sudah diedit
+            logger.warning(f"Banner/outro gagal ({str(exc)[:160]}); memakai klip tanpa banner")
+            final = src
+        if final != src:
+            src.unlink(missing_ok=True)  # hanya file campaign yang disimpan
+        row = dict(clip)
+        row["file_path"] = str(final)
+        row["campaign"] = True
+        # Hashtag preset campaign hanya dipakai bila user memilihnya; field manual tetap menang.
+        if preset_tags and p.get("use_preset_hashtags") and not p.get("hashtags_override"):
+            row["hashtags"] = preset_tags
+        start = float(row.get("start") or (picked[index]["start"] if index < len(picked) else 0))
+        end = float(row.get("end") or (picked[index]["end"] if index < len(picked) else 0))
+        row["start"], row["end"] = start, end
+        row["wall_span"] = [wall0 + start, wall0 + end]
+        clips.append(row)
+    return clips
+
+
 @handler("live_window")
 def live_window(ctx: JobContext) -> Dict:
     """Satu jendela rekaman live: transkrip → sinyal chat/suara → AI pilih momen → render klip."""
@@ -709,8 +1024,8 @@ def live_window(ctx: JobContext) -> Dict:
     if not Path(video).exists():
         raise FileNotFoundError("File jendela rekaman sudah terhapus")
     config.MIN_VIRAL_SCORE = max(0.0, min(float(p.get("min_score", 45)), 100.0))
-    config.MIN_CLIP_DURATION = max(5, int(p.get("min_duration", 15)))
-    config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(p.get("max_duration", 60)))
+    config.MIN_CLIP_DURATION = max(5, int(p.get("min_duration", 25)))
+    config.MAX_CLIP_DURATION = max(config.MIN_CLIP_DURATION + 5, int(p.get("max_duration", 50)))
     num = max(1, min(int(p.get("num_clips", 3)), 10))
     config.MAX_CLIPS_PER_VIDEO = num + 3  # cadangan: sebagian bisa gugur karena tumpang tindih jendela lain
     if p.get("watermark_text"):
@@ -719,6 +1034,21 @@ def live_window(ctx: JobContext) -> Dict:
     info = get_video_info(video)
     dur = float(info.get("duration") or p.get("duration") or 0)
     transcript, tinfo = tools.transcribe(ctx, video, p, 10)
+    if p.get("streamer_only", True):
+        from .transcriber import drop_foreign_segments
+        before = len(transcript)
+        transcript = drop_foreign_segments(transcript, str(p.get("language") or config.WHISPER_LANGUAGE or "id"))
+        if before > len(transcript):
+            ctx.log(f"Subtitle streamer saja: {before - len(transcript)} segmen dialog game/bahasa lain dibuang")
+        if llm and transcript:
+            try:
+                kept = tools.filter_streamer_segments(
+                    transcript, context=str(p.get("channel") or p.get("url") or ""))
+                if len(kept) < len(transcript):
+                    ctx.log(f"Dialog game dibuang LLM: {len(transcript) - len(kept)} segmen")
+                transcript = kept
+            except Exception:  # noqa: BLE001 - filter opsional
+                pass
     p["_lower_third"] = tools.build_lower_third(p, transcript, default_name=p.get("channel", ""), subtitle="Live di YouTube")
 
     ctx.progress(35, "Sinyal live", "Membaca lonjakan chat & suara streamer")
@@ -727,7 +1057,10 @@ def live_window(ctx: JobContext) -> Dict:
         events = json.loads(Path(p["chat_file"]).read_text(encoding="utf-8"))
     except (OSError, ValueError, KeyError):
         events = []
-    hints = chat_signals(events, wall0, wall0 + dur) + audio_signals(video)
+    hints = merge_hints(
+        chat_signals(events, wall0, wall0 + dur),
+        chat_spike_moments(events, wall0, wall0 + dur, lag=CHAT_LAG_SEC),
+    ) + audio_signals(video)
     for h in hints:
         h["label"] = describe_signal(h)
     ctx.log(f"Sinyal: {sum(h['kind'] == 'chat' for h in hints)} lonjakan chat, {sum(h['kind'] == 'audio' for h in hints)} lonjakan suara")
@@ -739,9 +1072,18 @@ def live_window(ctx: JobContext) -> Dict:
     # rerank per kandidat = 1 panggilan LLM masing-masing (bisa 24× ±20 dtk). AI Moment Finder (yang sudah
     # membaca sinyal live) cukup; rerank dibatasi agar satu jendela selesai sebelum jendela berikutnya.
     config.AI_RERANK_LIMIT = int(p.get("rerank_limit", 4))
+    # Mode live: Editor-AI tetap diberi hak veto; kalau satu jendela jadi kosong,
+    # ulangi sekali tanpa veto (fallback Clipper-style) supaya tetap dapat klip.
+    _review_before = config.AI_EDITOR_REVIEW
+    config.AI_EDITOR_REVIEW = True
     try:
         clips_data = analyzer.analyze_viral_potential(transcript, info, use_llm=llm)
+        if not clips_data:
+            config.AI_EDITOR_REVIEW = False
+            clips_data = analyzer.analyze_viral_potential(transcript, info, use_llm=llm)
+        clips_data = tools.enforce_clip_duration(clips_data, max_available=dur)
     finally:
+        config.AI_EDITOR_REVIEW = _review_before
         analyzer.SIGNAL_HINTS = []
         config.AI_RERANK_LIMIT = None
 
@@ -764,6 +1106,20 @@ def live_window(ctx: JobContext) -> Dict:
     if p.get("hook_card") is False:
         for c in picked:
             c["no_hook_card"] = True
+    if not picked and clips_data:
+        # Fallback ala Clipper: jangan pulangkan jendela kosong. Ambil kandidat
+        # terbaik yang masih menghormati batas durasi & wilayah baru, walau
+        # skornya di bawah ambang. Tanpa ini, ambang tinggi = nol klip.
+        allowed = [c for c in clips_data
+                   if c["end"] > new_from + 4 and (final or c["end"] < dur - 2.5)]
+        if allowed:
+            best = dict(max(allowed, key=lambda c: float(c.get("score") or 0)))
+            ws, we = wall0 + best["start"], wall0 + best["end"]
+            best["wall_span"] = [ws, we]
+            best["fallback"] = True
+            picked = [best]
+            ctx.log(f"Tidak ada kandidat di atas ambang — memakai yang terbaik "
+                    f"(skor {float(best.get('score') or 0):.0f}) seperti mode Clipper")
     if not picked:
         Path(video).unlink(missing_ok=True)
         return {"_message": "Tidak ada momen yang cukup kuat di jendela ini", "clips": [], "total_clips": 0,
@@ -771,7 +1127,10 @@ def live_window(ctx: JobContext) -> Dict:
 
     ctx.progress(55, "Render", f"Merender {len(picked)} klip (layout otomatis, cold open, sound design)…")
     out_dir = parent_dir / f"klip_{int(p.get('window', 0)):03d}"
-    clips = process_clips(video, picked, out_dir, **tools.render_options(p))
+    if p.get("campaign"):
+        clips = _render_campaign_window(video, picked, out_dir, p, wall0)
+    else:
+        clips = process_clips(video, picked, out_dir, **tools.render_options(p))
     tools.brand_clips(ctx, clips, p.get("brand_kit"))
     tools.register_clips(ctx, clips, "live")
     summary = []

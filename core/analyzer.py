@@ -23,6 +23,7 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 import config
 from . import ai_providers as ai
+from .utils import trim_caption
 
 vader_analyzer = SentimentIntensityAnalyzer()
 LLM_RATE_LIMITED = False
@@ -556,6 +557,8 @@ def _ai_moment_candidates(transcript: List[Dict], video_duration: float) -> List
     per_chunk = max(3, min(10, config.MAX_CLIPS_PER_VIDEO))
 
     def _ask(index: int, chunk: List[str]):
+        from . import viral_standard
+
         rules = [
             f"Durasi tiap momen {config.MIN_CLIP_DURATION}-{config.MAX_CLIP_DURATION} detik; start/end harus jatuh di batas kalimat dari transkrip.",
             "Momen harus utuh: ada hook/konteks di awal, inti, dan payoff/ending. Jangan mulai di tengah kalimat.",
@@ -563,6 +566,7 @@ def _ai_moment_candidates(transcript: List[Dict], video_duration: float) -> List
             "score 0-100 = peluang viral nyata (jangan murah memberi >85).",
             f"category salah satu: {', '.join(CATEGORIES)}.",
             "reason 1 kalimat; hook = teks pembuka layar maks 10 kata, bahasa sama dengan video.",
+            viral_standard.SELECTION_RULES,
         ] + ([GAMING_RULE] if CONTENT_TYPE == "gaming_stream" else [])
         prompt = (
             f"Transkrip video (format [mulai-selesai detik] teks), bagian {index}/{len(chunks)}:\n"
@@ -872,7 +876,11 @@ def _build_upload_caption(text: str, category: str) -> str:
         "engagement": "Kamu pilih yang mana?",
         "general": "Menurut kamu gimana?",
     }
-    return f"{first_line}. {ctas.get(category, ctas['general'])}"[:config.UPLOAD_CAPTION_MAX_CHARS].rstrip()
+    cta = ctas.get(category, ctas["general"])
+    # Sisakan ruang untuk CTA supaya tidak ikut terpotong saat kalimat pertama panjang.
+    budget = max(20, config.UPLOAD_CAPTION_MAX_CHARS - len(cta) - 3)
+    head = trim_caption(first_line, budget).rstrip(" .…,:;")
+    return f"{head}. {cta}"
 
 
 def _suggest_hashtags(category: str, keywords: List[str]) -> List[str]:
@@ -1027,7 +1035,7 @@ def _ai_package_clips(clips: List[Dict]) -> None:
         if str(data.get("title", "")).strip():
             clip["ai_title"] = str(data["title"]).strip()[:95]
         if str(data.get("caption", "")).strip():
-            clip["upload_caption"] = str(data["caption"]).strip()[:config.UPLOAD_CAPTION_MAX_CHARS]
+            clip["upload_caption"] = trim_caption(str(data["caption"]))
         tags = []
         for tag in data.get("hashtags") or []:
             tag = "#" + re.sub(r"[^\w]", "", str(tag).lstrip("#"), flags=re.UNICODE)

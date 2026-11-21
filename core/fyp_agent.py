@@ -4,6 +4,7 @@ FYP packaging agent: platform copy, upload order, and quality checklist.
 from typing import Dict, List
 
 import config
+from .utils import trim_caption
 
 
 def enrich_clip_for_platforms(clip: Dict, target_platform: str = "Semua") -> Dict:
@@ -82,7 +83,7 @@ def _build_platform_copy(clip: Dict, platform: str, profile: Dict) -> Dict:
     
     full_caption = f"{viral_caption} {cta}".strip()
     if len(full_caption) > limit:
-        full_caption = full_caption[:limit].rsplit(" ", 1)[0].rstrip(".,")
+        full_caption = trim_caption(full_caption, limit)
     
     return {
         "title": title[:95] if platform == "YouTube Shorts" else title[:70],
@@ -324,7 +325,7 @@ def suggest_caption_variants(clip: Dict, platform: str = "TikTok") -> List[str]:
     ]
     variants = []
     for variant in raw_variants:
-        variant = variant[:config.UPLOAD_CAPTION_MAX_CHARS].strip()
+        variant = trim_caption(variant).strip()
         if variant and variant not in variants:
             variants.append(variant)
         if len(variants) >= 3:

@@ -20,6 +20,7 @@ from loguru import logger
 
 import config
 from . import ai_providers as ai
+from .utils import trim_caption
 
 CONTEXT_SEC = 30.0
 
@@ -441,7 +442,7 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
         clip["ai_title"] = str(d["title"]).strip()[:95]
         clip["thumb_text"] = str(d.get("thumb_text") or "").strip()[:48]
         clip["thumb_alternatives"] = [str(t).strip()[:48] for t in (d.get("thumb_alternatives") or []) if str(t).strip()][:2]
-        clip["upload_caption"] = str(d["caption"]).strip()[:config.UPLOAD_CAPTION_MAX_CHARS]
+        clip["upload_caption"] = trim_caption(str(d["caption"]))
         tags = []
         for tag in d.get("hashtags") or []:
             tag = "#" + re.sub(r"[^\w]", "", str(tag).lstrip("#"), flags=re.UNICODE)

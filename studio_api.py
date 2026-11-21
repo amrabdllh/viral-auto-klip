@@ -56,6 +56,11 @@ def _wrap(fn, *args):
 @router.get("/status")
 def status():
     current = jobs.CURRENT.get("id")
+    if not current:
+        # Job BACKGROUND (campaign/live/upload) tidak mengisi CURRENT, jadi status
+        # dulu bilang null padahal ada job berjalan. Ambil yang running dari DB.
+        running = [j for j in db.list_jobs(limit=20) if j.get("status") == "running"]
+        current = running[0]["id"] if running else None
     return {
         "version": "6.8",
         "ffmpeg": ffx.available(),
@@ -69,8 +74,102 @@ def status():
 
 @router.get("/catalog")
 def catalog():
+    from core import viral_standard
+
     return {**creator.catalog(), "edit_styles": ["minimal", "dinamis", "maksimal"],
-            "color_grades": ["none", "natural", "vibrant", "cinematic"], "job_kinds": sorted(jobs.HANDLERS)}
+            "color_grades": ["none", "natural", "vibrant", "cinematic"],
+            "job_kinds": sorted(jobs.HANDLERS),
+            "viral_standard": viral_standard.summary()}
+
+
+class YouTubeCookiesRequest(BaseModel):
+    text: str = ""
+
+
+@router.get("/youtube/cookies")
+def youtube_cookies_status():
+    """Status cookies YouTube — tidak pernah mengembalikan isi cookie."""
+    from core import youtube_browser
+    return youtube_browser.cookie_status()
+
+
+@router.post("/youtube/cookies")
+def youtube_cookies_save(req: YouTubeCookiesRequest):
+    """Simpan cookies dari teks (JSON atau Netscape cookies.txt)."""
+    from core import youtube_browser
+    return _wrap(youtube_browser.save_cookies, req.text)
+
+
+@router.delete("/youtube/cookies")
+def youtube_cookies_clear():
+    from core import youtube_browser
+    return _wrap(youtube_browser.clear_cookies)
+
+
+@router.post("/youtube/test")
+def youtube_test():
+    """Cek sesi cookies tanpa upload (headless, tanpa popup)."""
+    from core import youtube_browser
+    return _wrap(youtube_browser.test_session)
+
+
+class TikTokCookiesRequest(BaseModel):
+    text: str = ""
+
+
+@router.get("/tiktok/cookies")
+def tiktok_cookies_status():
+    """Status cookies TikTok — tidak pernah mengembalikan isi cookie."""
+    from core import tiktok_browser
+    return tiktok_browser.cookie_status()
+
+
+@router.post("/tiktok/cookies")
+def tiktok_cookies_save(req: TikTokCookiesRequest):
+    from core import tiktok_browser
+    return _wrap(tiktok_browser.save_cookies, req.text)
+
+
+@router.delete("/tiktok/cookies")
+def tiktok_cookies_clear():
+    from core import tiktok_browser
+    return _wrap(tiktok_browser.clear_cookies)
+
+
+@router.post("/tiktok/test")
+def tiktok_test():
+    """Cek sesi cookies TikTok tanpa upload (headless, tanpa popup)."""
+    from core import tiktok_browser
+    return _wrap(tiktok_browser.test_session)
+
+
+@router.get("/campaign/presets")
+def campaign_presets():
+    """Daftar preset MotionKlip di presets/, lengkap dengan ringkasan isinya."""
+    from core import campaign
+
+    folder = Path(config.BASE_DIR) / "presets"
+    out: List[Dict[str, Any]] = []
+    if folder.is_dir():
+        for path in sorted(folder.glob("*.json")):
+            try:
+                preset = campaign.load_preset(path)
+            except Exception as exc:  # noqa: BLE001 - preset rusak jangan mematikan halaman
+                out.append({"file": path.name, "error": str(exc)[:200]})
+                continue
+            out.append({
+                "file": path.name,
+                "layout": preset["layout"],
+                "subtitle_provider": preset.get("subtitle_provider") or "none",
+                "intro_voice": preset.get("intro_voice") or "none",
+                "fps": preset.get("fps"),
+                "hashtags": preset.get("hashtags", ""),
+                "discord_tag": preset.get("discord_tag", ""),
+                "watermark": Path(preset["watermark"]).name,
+                "outro": Path(preset["outro"]).name,
+            })
+    return {"presets": out, "folder": str(folder),
+            "default": getattr(config, "CAMPAIGN_DEFAULT_PRESET", "") or ""}
 
 
 @router.get("/tts/voices")
@@ -339,6 +438,16 @@ def storage():
             "disk_free_bytes": shutil.disk_usage(str(config.BASE_DIR)).free}
 
 
+@router.get("/assets/{asset_id}")
+def get_asset(asset_id: str):
+    """Detail satu aset + judul/deskripsi otomatis (dipakai modal Jadwalkan upload)."""
+    asset = db.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Aset tidak ditemukan")
+    asset["exists"] = Path(asset["path"]).exists()
+    return {**asset, "copy": _asset_copy(asset)}
+
+
 @router.delete("/assets/{asset_id}")
 def delete_asset(asset_id: str, file: bool = True):
     asset = db.delete_asset(asset_id)
@@ -561,6 +670,7 @@ class BulkScheduleRequest(BaseModel):
     start_at: float = 0
     per_day: int = 3
     hours: List[int] = []
+    gap_min: int = 0          # jeda antar upload dalam menit; 0 = sebar otomatis per hari
 
 
 def _asset_copy(asset: Dict) -> Dict:
@@ -636,8 +746,14 @@ def bulk_schedule(req: BulkScheduleRequest):
     assets = [a for a in (db.get_asset(i) for i in req.asset_ids) if a and Path(a["path"]).exists()]
     if not assets:
         raise HTTPException(400, "Tidak ada klip valid")
-    slots = scheduler.smart_cadence([a["path"] for a in assets], req.start_at or time.time(), max(1, min(req.per_day, 6)),
-                                    req.hours or None)
+    start = req.start_at or time.time()
+    if req.gap_min and req.gap_min > 0:
+        # Jeda tetap: upload berurutan tiap N menit.
+        gap = max(1, min(int(req.gap_min), 24 * 60)) * 60
+        slots = [start + i * gap for i in range(len(assets))]
+    else:
+        slots = scheduler.smart_cadence([a["path"] for a in assets], start, max(1, min(req.per_day, 6)),
+                                        req.hours or None)
     platforms = [p for p in req.platforms if p in scheduler.PLATFORMS] or ["youtube"]
     _require_ready(platforms)
     out = []
