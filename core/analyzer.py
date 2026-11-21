@@ -23,6 +23,7 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 import config
 from . import ai_providers as ai
+from .utils import trim_caption
 
 vader_analyzer = SentimentIntensityAnalyzer()
 LLM_RATE_LIMITED = False
@@ -875,7 +876,7 @@ def _build_upload_caption(text: str, category: str) -> str:
         "engagement": "Kamu pilih yang mana?",
         "general": "Menurut kamu gimana?",
     }
-    return f"{first_line}. {ctas.get(category, ctas['general'])}"[:config.UPLOAD_CAPTION_MAX_CHARS].rstrip()
+    return trim_caption(f"{first_line}. {ctas.get(category, ctas['general'])}")
 
 
 def _suggest_hashtags(category: str, keywords: List[str]) -> List[str]:
@@ -1030,7 +1031,7 @@ def _ai_package_clips(clips: List[Dict]) -> None:
         if str(data.get("title", "")).strip():
             clip["ai_title"] = str(data["title"]).strip()[:95]
         if str(data.get("caption", "")).strip():
-            clip["upload_caption"] = str(data["caption"]).strip()[:config.UPLOAD_CAPTION_MAX_CHARS]
+            clip["upload_caption"] = trim_caption(str(data["caption"]))
         tags = []
         for tag in data.get("hashtags") or []:
             tag = "#" + re.sub(r"[^\w]", "", str(tag).lstrip("#"), flags=re.UNICODE)

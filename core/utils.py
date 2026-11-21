@@ -26,6 +26,23 @@ def _safe_print(msg) -> None:
         print(str(msg).encode(enc, "replace").decode(enc, "replace"), end="")
 
 
+def trim_caption(text: str, limit: Optional[int] = None) -> str:
+    """Potong caption ke batas karakter dengan rapi: utamakan akhir kalimat, lalu
+    batas kata — tidak pernah berhenti di tengah kata (mis. "…Setuju ini ca")."""
+    text = str(text or "").strip()
+    limit = int(limit or getattr(config, "UPLOAD_CAPTION_MAX_CHARS", 140))
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "), cut.rfind("\n"))
+    if end >= limit // 3:
+        return cut[: end + 1].strip()
+    space = cut.rfind(" ")
+    if space >= limit // 2:
+        return cut[:space].rstrip(" ,;:–—-") + "…"
+    return cut.rstrip() + "…"
+
+
 def setup_logging():
     logger.remove()
     logger.add(

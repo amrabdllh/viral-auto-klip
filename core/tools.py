@@ -424,11 +424,12 @@ def clip_quick(ctx: JobContext) -> Dict:
             clean = "#" + re.sub(r"[^\w]", "", tag.lstrip("#"), flags=re.UNICODE)
             if len(clean) > 1 and clean.lower() not in {t.lower() for t in tags_override}:
                 tags_override.append(clean)
+    from .utils import trim_caption
     for c in selected:
         if title_override:
             c["ai_title"] = title_override[:95]
         if description_override:
-            c["upload_caption"] = description_override[:config.UPLOAD_CAPTION_MAX_CHARS]
+            c["upload_caption"] = trim_caption(description_override)
         if tags_override:
             c["hashtags"] = tags_override[:config.MAX_HASHTAGS]
     if p.get("streamer_only", True):
