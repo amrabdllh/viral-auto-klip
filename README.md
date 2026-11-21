@@ -33,9 +33,12 @@ jangan di-bind ke `0.0.0.0`.
 ## Test
 
 ```powershell
-.venv\Scripts\python.exe tests	est_campaign.py
-.venv\Scripts\python.exe tests	est_live_media.py     # 24 test buffer HLS
-.venv\Scripts\python.exe tests	est_chat_spikes.py    # 13 cek spike detector
+.venv\Scripts\python.exe tests\test_campaign.py
+.venv\Scripts\python.exe tests\test_live_media.py         # 24 test buffer HLS
+.venv\Scripts\python.exe tests\test_chat_spikes.py        # 13 cek spike detector
+.venv\Scripts\python.exe tests\test_caption_trim.py       # caption/judul tidak terpotong di tengah kata
+.venv\Scripts\python.exe tests\test_platform_caption.py   # caption per platform (TikTok vs YouTube)
+.venv\Scripts\python.exe tests\test_schedule_retry.py     # retry upload tidak mengunggah ulang
 ```
 
 ## Kebutuhan
