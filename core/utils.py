@@ -76,6 +76,45 @@ def get_video_info(video_path: str) -> Dict:
         return {"duration": 0, "width": 1920, "height": 1080, "path": video_path}
 
 
+def js_runtime_opts() -> Dict:
+    """yt-dlp (2025.11+) butuh runtime JavaScript untuk tantangan YouTube; bawaan hanya mencari deno. Pakai deno bila
+    ada, selain itu node/bun yang sudah terpasang — tanpa ini sebagian format (termasuk 1080p) bisa hilang."""
+    import shutil
+    for name in ("deno", "node", "bun"):
+        path = shutil.which(name)
+        if path:
+            return {"js_runtimes": {name: {"path": path}}}
+    return {}
+
+
+def _is_bot_check(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "not a bot" in msg or "sign in to confirm" in msg or "429" in msg or "too many requests" in msg
+
+
+def saved_youtube_cookiefile() -> str:
+    """Cookie YouTube yang disimpan di Pengaturan (untuk upload) → file Netscape sementara untuk yt-dlp.
+    Dipakai HANYA saat YouTube meminta verifikasi bot, agar unduhan tetap jalan tanpa langkah tambahan."""
+    try:
+        from .youtube_browser import load_cookies
+    except Exception:  # noqa: BLE001
+        return ""
+    cookies = load_cookies()
+    if not cookies:
+        return ""
+    TAB, NL = chr(9), chr(10)
+    lines = ["# Netscape HTTP Cookie File"]
+    for c in cookies:
+        dom = str(c.get("domain") or "")
+        lines.append(TAB.join([dom, "TRUE" if dom.startswith(".") else "FALSE", str(c.get("path") or "/"),
+                                "TRUE" if c.get("secure") else "FALSE", str(int(c.get("expires") or 0) if (c.get("expires") or 0) > 0 else 0),
+                                str(c.get("name")), str(c.get("value"))]))
+    path = Path(config.BASE_DIR) / "data" / "youtube" / "ytdlp_cookies.txt"  # di-gitignore (data/)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(NL.join(lines) + NL, encoding="utf-8")
+    return str(path)
+
+
 def _cookie_opts(cookies_from_browser: str = "", cookies_file: str = "") -> Dict:
     """Opsi cookiefile/cookiesfrombrowser untuk yt-dlp."""
     opts: Dict = {}
@@ -103,6 +142,41 @@ def _find_cached_source(cache_dir: Path, video_id: str) -> Optional[Path]:
         if path.is_file() and path.stem == video_id and path.suffix.lower() in _VIDEO_EXTS:
             return path
     return None
+
+
+def prune_source_cache(cache_dir: Optional[Path] = None, keep: Optional[Path] = None) -> int:
+    """Batasi cache sumber video (satu live 5 jam ±10 GB): hapus yang PALING LAMA tidak dipakai sampai total
+    ≤ SOURCE_CACHE_MAX_GB, plus sisa unduhan setengah jadi (.part/.ytdl/fragmen) yang > 1 hari. Return byte dibebaskan."""
+    cache_dir = Path(cache_dir or SOURCE_CACHE_DIR)
+    if not cache_dir.is_dir():
+        return 0
+    limit = float(getattr(config, "SOURCE_CACHE_MAX_GB", 60)) * 1024 ** 3
+    freed, now = 0, time.time()
+    files = [f for f in cache_dir.iterdir() if f.is_file()]
+    for f in files:
+        partial = f.suffix.lower() in (".part", ".ytdl") or "Frag" in f.name or ".part-" in f.name
+        if partial and now - f.stat().st_mtime > 86400:
+            try:
+                freed += f.stat().st_size
+                f.unlink()
+            except OSError:
+                pass
+    files = sorted((f for f in cache_dir.iterdir() if f.is_file()), key=lambda f: f.stat().st_mtime)
+    total = sum(f.stat().st_size for f in files)
+    for f in files:
+        if total <= limit:
+            break
+        if keep is not None and f.resolve() == Path(keep).resolve():
+            continue
+        try:
+            size = f.stat().st_size
+            f.unlink()
+            total -= size
+            freed += size
+            logger.info(f"Cache sumber dibersihkan: {f.name} ({size / 1024 ** 3:.1f} GB, paling lama tidak dipakai)")
+        except OSError:
+            pass  # sedang dipakai proses lain
+    return freed
 
 
 def _best_format_height(info: Dict) -> int:
@@ -188,6 +262,7 @@ def download_video(
     if progress_cb is not None:
         base_opts["progress_hooks"] = [_progress_hook(progress_cb)]
     base_opts.update(_cookie_opts(cookies_from_browser, cookies_file))
+    base_opts.update(js_runtime_opts())
 
     # Client YouTube: default dulu, lalu alternatif. Client dipilih dari format yang
     # tersedia SEBELUM mengunduh — dulu file diunduh penuh, dicek resolusinya, lalu
@@ -200,7 +275,12 @@ def download_video(
     chosen: Optional[Tuple[str, Optional[List[str]]]] = None
     info: Optional[Dict] = None
     best_height = -1
-    for label, clients in client_attempts:
+    bot_retry = "youtu" in url.lower() and "cookiefile" not in base_opts and "cookiesfrombrowser" not in base_opts
+    attempts = list(client_attempts)
+    i = 0
+    while i < len(attempts):
+        label, clients = attempts[i]
+        i += 1
         probe_opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True,
                       **{k: v for k, v in base_opts.items() if k != "progress_hooks"}}
         if clients:
@@ -211,6 +291,13 @@ def download_video(
         except Exception as exc:  # DownloadError / ExtractorError
             last_error = exc
             logger.warning(f"Probe yt-dlp gagal dengan client={label}: {str(exc)[:160]}")
+            if bot_retry and _is_bot_check(exc):
+                cookie_path = saved_youtube_cookiefile()
+                if cookie_path:
+                    bot_retry = False
+                    base_opts["cookiefile"] = cookie_path
+                    logger.warning("YouTube meminta verifikasi bot → ulang memakai cookie YouTube dari Pengaturan")
+                    attempts[i:i] = [(label, clients)]  # ulangi client yang sama dengan cookie
             continue
         height = _best_format_height(probe)
         logger.info(f"Probe yt-dlp client={label}: hingga {height}p")
@@ -236,7 +323,13 @@ def download_video(
     cached = _find_cached_source(cache_dir, cache_key) if (cache_dir is not None and cache_key) else None
     if cached is not None:
         logger.info(f"Menggunakan sumber dari cache: {cached}")
+        try:
+            os.utime(cached)  # tandai baru dipakai (pembersihan cache membuang yang paling lama tidak dipakai)
+        except OSError:
+            pass
         return str(cached)
+    if cache_dir is not None:
+        prune_source_cache(cache_dir)
 
     # Unduh sekali dengan client terbaik; client lain hanya dicoba bila unduhan GAGAL.
     ordered = [chosen] + [a for a in client_attempts if a[0] != chosen[0]]
@@ -270,6 +363,27 @@ def download_video(
                 ) from exc
             logger.warning(f"yt-dlp gagal dengan client={label}: {message[:160]}")
             filename = None
+            # Video 'post_live' (live baru selesai, YouTube masih memproses) diunduh sebagai fragmen live. Fragmen sisa
+            # unduhan yang terputus membuat yt-dlp membaca ulang manifest live → "This live event has ended" dan
+            # file setengah jadi. Hapus sisa itu lalu ulangi SEKALI dari awal dengan client yang sama.
+            if "live event has ended" in message.lower() and cache_dir is not None and cache_key \
+                    and not ydl_opts.get("_fresh_retry"):
+                stale = [f for f in cache_dir.glob(f"{cache_key}*") if f.is_file()]
+                for f in stale:
+                    f.unlink(missing_ok=True)
+                logger.warning(f"Sisa unduhan live dihapus ({len(stale)} file) → unduh ulang dari awal")
+                base_opts["_fresh_retry"] = True
+                ordered.insert(ordered.index((label, clients)) + 1, (label, clients))
+            continue
+        except (yt_dlp.utils.UnavailableVideoError, OSError) as exc:
+            # Fragmen live (video post_live) kadang hilang saat diunduh 8 koneksi paralel (FileNotFoundError
+            # '...part-FragNN'). Lanjutkan dari posisi tersimpan (.ytdl) dengan 1 koneksi — tidak mengulang dari nol.
+            last_error = exc
+            filename = None
+            if base_opts.get("concurrent_fragment_downloads", 1) > 1:
+                logger.warning(f"Fragmen unduhan hilang ({str(exc)[:120]}) → lanjutkan dengan 1 koneksi")
+                base_opts["concurrent_fragment_downloads"] = 1
+                ordered.insert(ordered.index((label, clients)) + 1, (label, clients))
             continue
 
     if filename:

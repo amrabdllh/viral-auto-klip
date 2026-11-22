@@ -508,8 +508,9 @@ function mediaCard(c, { selectable = false } = {}) {
   const tags = (Array.isArray(rawTags) ? rawTags : String(rawTags).split(/\s+/)).filter(Boolean);
   const tagText = tags.slice(0, 3).map((t) => (String(t).startsWith("#") ? String(t) : "#" + String(t))).join(" ");
   const baseCaption = c.upload_caption || meta.upload_caption || meta.description || "";
-  const caption = [baseCaption, tags.filter((t) => !baseCaption.includes("#" + String(t).replace(/^#/, ""))).join(" ")]
-    .join(" ").trim();
+  // sama dengan yang benar-benar diunggah: caption AI + hashtag AI + hashtag tambahan dari Pengaturan
+  const capTags = withGlobalTags(tags).filter((t) => !baseCaption.toLowerCase().includes(t.toLowerCase()));
+  const caption = [baseCaption, capTags.join(" ")].filter(Boolean).join("\n\n").trim();
   const thumb = c.thumbnail || meta.thumbnail;
   const score = c.score ?? meta.score;
   const dur = c.duration ?? meta.duration;
@@ -530,6 +531,17 @@ function mediaCard(c, { selectable = false } = {}) {
       ${isVideo(path) && id ? UI.btn("", { ico: "calendar", size: "sm", kind: "ghost", title: "Jadwalkan upload", attrs: "data-sched" }) : ""}
       ${isVideo(path) ? UI.btn("", { ico: "upload", size: "sm", kind: "ghost", title: "Upload ke YouTube (headless, tanpa popup)", attrs: "data-yt" }) : ""}
       ${isVideo(path) ? UI.btn("", { ico: "music", size: "sm", kind: "ghost", title: "Upload ke TikTok", attrs: "data-tt" }) : ""}</div></article>`;
+}
+
+/** Hashtag klip + hashtag tambahan dari Pengaturan (GLOBAL_HASHTAGS), tanpa duplikat — sama dengan core/autopublish. */
+function withGlobalTags(tags) {
+  const out = [];
+  const extra = String(STATE.status?.global_hashtags || "").match(/#?[\p{L}\p{N}_]+/gu) || [];
+  for (const t of [...(tags || []), ...extra]) {
+    const tag = "#" + String(t).replace(/^#/, "").replace(/[^\p{L}\p{N}_]/gu, "");
+    if (tag.length > 1 && !out.some((x) => x.toLowerCase() === tag.toLowerCase())) out.push(tag);
+  }
+  return out.slice(0, 15);
 }
 
 function bindCards(root) {
@@ -591,7 +603,7 @@ function renderResult(el, job) {
     $("[data-bulk]", el).onclick = () => bulkScheduleModal(r.clips.map((c) => c.asset_id).filter(Boolean));
   } else if (r.file && (isVideo(r.file) || isAudio(r.file))) {
     const caps = r.storyboard?.captions || {};
-    const tags = (r.storyboard?.hashtags || []).join(" ");
+    const tags = withGlobalTags(r.storyboard?.hashtags || []).join(" ");
     const side = Object.entries(caps).map(([k, v]) => `<div class="stack"><div class="row"><b class="small">Caption ${esc(k)}</b><span class="spacer"></span>${UI.btn("Salin", { ico: "copy", size: "sm", kind: "ghost", attrs: `data-copy="${esc(v + "\n\n" + tags)}"` })}</div><p class="small ink2">${esc(v)}</p></div>`).join('<hr style="border:0;border-top:1px solid var(--line);margin:0">');
     el.innerHTML = UI.panel({ title: "Hasil", sub: esc(r.storyboard?.title || job.title || ""), body: `<div class="layout wide-aside" style="grid-template-columns:minmax(0,300px) minmax(0,1fr)">
       <div>${mediaCard({ ...r, file_path: r.file, title: r.storyboard?.title || job.title })}</div>

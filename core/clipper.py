@@ -782,6 +782,9 @@ def _process_single_clip(
             "file_path": str(final_clip_path),
             "thumbnail": str(thumb_path),
             "thumbnail_alt": str(thumb_alt_path) if thumb_alt_path else None,
+            # v6.9: tata letak facecam (relatif ke video sumber) → thumbnail AI mengambil wajah bersih dari sumber
+            **({"stream_layout": {k: layout[k] for k in ("cam_box", "face", "cam_ratio") if k in layout}}
+               if isinstance(layout, dict) else {}),
             "edit_style": edit,
             # durasi nyata file akhir (cold open, freeze, tempo ikut terhitung)
             "duration": round(float(get_video_info(str(final_clip_path)).get("duration") or (clip_info["end"] - clip_info["start"])), 2),

@@ -67,6 +67,7 @@ def status():
         "ai": {"provider": config.AI_PROVIDER, "model": config.LLM_MODEL, "providers": ai.provider_status()},
         "media": media_ai.capabilities(),
         "platforms": scheduler.platform_status(),
+        "global_hashtags": str(getattr(config, "GLOBAL_HASHTAGS", "") or ""),  # ikut di tombol Salin caption
         "current_job": db.get_job(current) if current else None,
         "queued": len(db.queued_job_ids()),
     }
@@ -106,11 +107,50 @@ def youtube_cookies_clear():
     return _wrap(youtube_browser.clear_cookies)
 
 
+def _session_test(pf: str) -> Dict:
+    """Tes sesi sekarang (headless) + catat hasilnya untuk status platform di halaman Jadwal Upload."""
+    rec = scheduler.check_sessions(force=True, only=pf).get(pf)
+    if rec is None:
+        return {"ok": False, "error": "Cookies belum diatur"}
+    return {"ok": rec["ok"], "error": rec["error"], "channel": rec.get("who", ""), "username": rec.get("who", "")}
+
+
 @router.post("/youtube/test")
 def youtube_test():
     """Cek sesi cookies tanpa upload (headless, tanpa popup)."""
-    from core import youtube_browser
-    return _wrap(youtube_browser.test_session)
+    return _session_test("youtube")
+
+
+class ClientSecretRequest(BaseModel):
+    content: str = ""
+
+
+@router.get("/youtube/api")
+def youtube_api_status():
+    """Status YouTube Data API (resmi): library, client_secret, login — tanpa isi secret."""
+    from core import publisher
+    return publisher.youtube_api_status()
+
+
+@router.post("/youtube/api/secret")
+def youtube_api_secret(req: ClientSecretRequest):
+    from core import publisher
+    if len(req.content) > 50_000:
+        raise HTTPException(400, "File terlalu besar untuk client_secret.json")
+    return _wrap(publisher.save_youtube_client_secret, req.content)
+
+
+@router.post("/youtube/api/login")
+def youtube_api_login():
+    """Membuka halaman izin Google di browser laptop yang menjalankan server (pemakaian lokal)."""
+    from core import publisher
+    return _wrap(publisher.youtube_api_login)
+
+
+@router.delete("/youtube/api/login")
+def youtube_api_logout():
+    from core import publisher
+    return _wrap(publisher.youtube_api_logout)
 
 
 class TikTokCookiesRequest(BaseModel):
@@ -139,8 +179,7 @@ def tiktok_cookies_clear():
 @router.post("/tiktok/test")
 def tiktok_test():
     """Cek sesi cookies TikTok tanpa upload (headless, tanpa popup)."""
-    from core import tiktok_browser
-    return _wrap(tiktok_browser.test_session)
+    return _session_test("tiktok")
 
 
 @router.get("/campaign/presets")
@@ -159,6 +198,7 @@ def campaign_presets():
                 continue
             out.append({
                 "file": path.name,
+                "name": str(preset.get("name") or path.stem),
                 "layout": preset["layout"],
                 "subtitle_provider": preset.get("subtitle_provider") or "none",
                 "intro_voice": preset.get("intro_voice") or "none",
@@ -688,25 +728,32 @@ def platforms():
 
 
 @router.get("/upload-insights")
-def upload_insights(niche: str = "general"):
-    """v6.8: jam upload hari ini per platform (jangkar/terbukti/eksplorasi) + apa yang sudah dipelajari."""
-    import random
+def upload_insights(niche: str = ""):
+    """Jadwal upload HARI INI per platform (dari antrean nyata) + ringkasan riset jam FYP hari ini + yang sudah dipelajari.
+    Sejak v6.9 jam dipilih per hari oleh core/fyp_research — bukan lagi jam jangkar tetap."""
     from datetime import datetime
-    from core import autopublish, slot_learning
+    from core import fyp_research, slot_learning
     now = datetime.now()
+    niche = niche or str(db.kv_get("autopublish_last_niche", "") or "general")
+    # riset memakai data pasar yang sudah tersimpan saja (halaman ini tidak boleh menunggu ±20 dtk riset baru)
+    cached = bool(db.kv_get(f"fyp_research_{niche}", None))
+    todays = [s for s in db.list_schedules()
+              if datetime.fromtimestamp(float(s["run_at"])).date() == now.date() and s.get("status") != "failed"]
     out = {}
     for pf in scheduler.PLATFORMS:
-        wins = autopublish._windows(niche, pf)
-        plan = slot_learning.plan_hours([float(a) for a, _ in wins[:2]], [float(a) for a, _ in wins[2:]], pf, now, 3,
-                                        random.Random(0))
         ins = slot_learning.insights(pf)
         best = sorted(((d, h, s) for (d, h), s in ins["hours"].items() if s["n"] >= slot_learning.MIN_SAMPLES_HOUR),
                       key=lambda x: -x[2]["score"])[:5]
-        out[pf] = {"today": [{"time": f"{int(h):02d}:{int(round((h % 1) * 60)):02d}", "why": why} for h, why in sorted(plan[:4])],
+        mine = sorted(float(s["run_at"]) for s in todays if pf in (s.get("platforms") or []))
+        out[pf] = {"today": [{"time": datetime.fromtimestamp(t).strftime("%H:%M"),
+                              "why": next((s["status"] for s in todays if float(s["run_at"]) == t), "pending")} for t in mine],
+                   "research": fyp_research.research_day(niche, pf, now, use_market=cached)["summary"],
                    "measured": ins["total"], "needed": slot_learning.MIN_SAMPLES_TOTAL, "learning": ins["ready"],
                    "best": [{"daytype": d, "hour": h, "score": s["score"], "n": s["n"]} for d, h, s in best],
                    "median_views": ins["median"]}
-    return {"platforms": out, "day": now.strftime("%A"), "tiktok_profile": bool(getattr(config, "TIKTOK_PROFILE", ""))}
+    from core.autopublish import slot_mode
+    return {"platforms": out, "day": now.strftime("%A"), "niche": niche, "mode": slot_mode(),
+            "tiktok_profile": bool(getattr(config, "TIKTOK_PROFILE", ""))}
 
 
 @router.get("/schedules")

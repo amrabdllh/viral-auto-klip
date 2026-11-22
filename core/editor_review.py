@@ -174,7 +174,10 @@ def _prompt(clip: Dict, transcript: List[Dict], source_title: str, feedback: str
         "hook_text: teks layar 3 detik pertama, maks 8 kata, membuka pertanyaan yang baru terjawab di klip. "
         "hook_quote: kutipan PERSIS (≥3 kata) dari ucapan di klip yang mendasari hook.\n"
         "thumb_text: teks thumbnail 2–5 kata, sangat singkat & kuat, terbaca dalam 1 detik (boleh '?' atau '!'), "
-        "berbeda dari hook_text. thumb_alternatives: 2 opsi thumb_text lain dengan teknik berbeda.\n"
+        "berbeda dari hook_text, dan JELAS bagi orang yang BELUM menonton: sebut subjek dengan nama yang dikenal "
+        "(game/tokoh/benda), bukan potongan ucapan, slang, atau julukan yang hanya nyambung setelah menonton "
+        "(buruk: 'NGGAK SLOP, MEN', 'UFO NGULIK IBU'; bagus: 'LUCIA GENDONG JASON?!', 'UFO BENERAN MUNCUL?!'). "
+        "thumb_alternatives: 2 opsi thumb_text lain dengan teknik berbeda.\n"
         "title: maks 70 karakter, kata paling memancing di depan, tanpa awalan kategori; format bagus: "
         "'X, tapi Y', 'Kenapa …?', kutipan berani dalam tanda petik. title_quote: kutipan PERSIS dari klip yang mendasarinya.\n"
         f"caption: maks {config.UPLOAD_CAPTION_MAX_CHARS} karakter. Baris pertama = kalimat penasaran (BUKAN ringkasan), "
@@ -183,9 +186,20 @@ def _prompt(clip: Dict, transcript: List[Dict], source_title: str, feedback: str
         "hook_alternatives: 2 hook lain dengan teknik berbeda (juga berdasar isi klip).\n"
         "Bahasa sama dengan transkrip, gaya natural kreator. Tulis hook/judul/caption dengan suara kreator atau kutipan "
         "langsung; JANGAN memakai kata 'pembicara', 'narator', atau 'dia' sebagai subjek."
+        + (_CLICKBAIT if str(getattr(config, "TITLE_STYLE", "normal")).lower() == "clickbait" else "")
         + (f"\n\nPERBAIKI: {feedback}" if feedback else "")
     )
 
+
+# v6.9: gaya clickbait ala kanal clip Indonesia — tetap lolos pemeriksaan "didukung ucapan klip" (grounding)
+_CLICKBAIT = (
+    "\n\nGAYA CLICKBAIT (aktif): title & thumb_text bergaya kanal clip Indonesia yang ramai: "
+    "1–2 KATA KUNCI dalam HURUF BESAR, akhiri dengan '?!', '!!' atau '…' yang menggantung, boleh SATU emoji ekspresif di akhir "
+    "title (😱🤣🔥😭😳), sebut nama kreator/game bila memang ada di judul video atau diucapkan. Pola: 'X SAMPAI Y?!', "
+    "'NEKAT X… Malah Y!', 'Baru Kali Ini X 🤣', 'X Bikin Y SHOCK!'. thumb_text: 2–4 kata HURUF BESAR SEMUA, sangat ekspresif. "
+    "Baris pertama caption juga dramatis. TETAP JUJUR: tidak ada fakta/nama/peristiwa yang tidak terjadi di klip, tidak "
+    "menyiratkan hal sensitif (politik, kematian/kecelakaan nyata, skandal, konten dewasa) yang tidak ada di klip."
+)
 
 def _audio_note(clip: Dict) -> str:
     """Catatan cara bicara (diukur dari audio) — transkrip saja tidak memuat nada, tekanan, dan tawa."""
@@ -464,4 +478,5 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
         kept.append(clip)
     logger.info(f"🎞️ Editor-AI: {len(kept)} lolos, {rejected} ditolak, {trimmed} batasnya dirapikan")
     kept = an()._remove_overlapping_clips(sorted(kept, key=lambda c: c["score"], reverse=True))
+    kept = an()._remove_topic_duplicates(kept)
     return kept[:limit]

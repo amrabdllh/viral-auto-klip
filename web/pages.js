@@ -134,7 +134,7 @@ PAGES.jobs = { render(view) {
   }
   $("#jt").onclick = async (e) => {
     const b = e.target.closest("[data-a]"); if (!b) return;
-    const id = b.closest("tr").dataset.id;
+    const id = b.closest("[data-id]").dataset.id;
     try {
       if (b.dataset.a === "open") modal({ title: "Detail job", lg: true, body: `<div data-jd></div>` }, (m) => attachJob($("[data-jd]", m), id, { inModal: true }));
       else if (b.dataset.a === "cancel") { await api(`/api/jobs/${id}/cancel`, { body: {} }); load(); }
@@ -187,7 +187,7 @@ PAGES.analisis = { render(view, q) {
     const list = r.presets || [];
     sel.innerHTML = `<option value="">Tanpa template</option>` + (list.map((p) => p.error
       ? `<option value="${esc(p.file)}" disabled>${esc(p.file)} — ${esc(p.error)}</option>`
-      : `<option value="${esc(p.file)}">${esc(p.file)} · ${esc(p.layout)} · ${esc(p.fps)} fps</option>`).join("")
+      : `<option value="${esc(p.file)}">${esc(p.name || p.file)} · ${esc(p.fps)} fps</option>`).join("")
       || `<option value="" disabled>Tidak ada preset</option>`);
     sel.value = "";
   }).catch(() => {});
@@ -248,7 +248,7 @@ PAGES.live = { render(view, q) {
     const list = r.presets || [];
     sel.innerHTML = list.map((p) => p.error
       ? `<option value="${esc(p.file)}" disabled>${esc(p.file)} — ${esc(p.error)}</option>`
-      : `<option value="${esc(p.file)}">${esc(p.file)} · ${esc(p.layout)}</option>`).join("")
+      : `<option value="${esc(p.file)}">${esc(p.name || p.file)}</option>`).join("")
       || `<option value="">Tidak ada preset</option>`;
     if (r.default) sel.value = r.default;
   }).catch(() => {});
@@ -789,23 +789,38 @@ PAGES.upload = { render(view) {
       bodyCls: "flush", body: `<div class="cal" id="cal"></div>` })}
     ${UI.panel({ title: "Daftar jadwal", bodyCls: "flush", body: `<div class="table-wrap"><table><thead><tr><th>Klip</th><th>Platform</th><th>Waktu</th><th>Status</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>` })}</div>`;
   const pf = STATE.status?.platforms || {};
-  $("#pf").innerHTML = Object.entries(pf).map(([, v]) => UI.panel({ title: v.label, head: v.ready ? UI.pill("Terhubung", "ok") : UI.pill("Belum diset", "warn"),
-    body: v.ready ? `<p class="small muted">Siap mengunggah.</p>` : `<p class="small ink2">${esc(v.hint)}</p>${UI.btn("Buka Pengaturan", { size: "sm", href: "#settings", ico: "sliders" })}` })).join("");
+  // status sesi: dicek server tiap 3 jam & ±45 mnt sebelum upload (sekaligus menyegarkan cookie yang dirotasi situs)
+  const checked = (s) => (s?.at ? ` · dicek ${new Date(s.at * 1000).toLocaleString("id-ID", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "");
+  $("#pf").innerHTML = Object.entries(pf).map(([, v]) => {
+    const dead = v.ready && v.session && !v.session.ok && !v.logged_in;  // API resmi aktif → cookie hanya cadangan
+    return UI.panel({ title: v.label,
+      head: dead ? UI.pill("Sesi mati", "bad") : v.ready ? UI.pill("Terhubung", "ok") : UI.pill("Belum diset", "warn"),
+      body: dead ? `<p class="small ink2"><b>Upload ke ${esc(v.label)} akan gagal</b> sampai cookies diperbarui: ${esc(v.session.error || "sesi kedaluwarsa")}${checked(v.session)}.</p>
+          <p class="tiny muted">Login di jendela Incognito → export cookies → simpan di Pengaturan → tutup jendela itu tanpa logout (agar sesi tidak dirotasi browser).</p>${UI.btn("Perbarui cookies", { size: "sm", href: "#settings", ico: "sliders", kind: "primary" })}`
+        : v.ready ? `<p class="small muted">${v.logged_in ? "Upload lewat YouTube API resmi (login awet). " : ""}Siap mengunggah${v.session?.ok ? ` · sesi valid${v.session.who ? " (" + esc(v.session.who) + ")" : ""}${checked(v.session)}` : ""}.</p>${v.limit_until ? `<p class="small ink2">${UI.pill("Batas upload harian", "warn")} Video yang sudah terjadwal aman. Sisanya diunggah otomatis lagi mulai ±${esc(fmtDate(v.limit_until))}. Verifikasi channel sekali di <a href="https://www.youtube.com/verify" target="_blank" rel="noopener">youtube.com/verify</a> agar batas ±15 video/hari hilang.</p>` : ""}`
+        : `<p class="small ink2">${esc(v.hint)}</p>${UI.btn("Buka Pengaturan", { size: "sm", href: "#settings", ico: "sliders" })}` });
+  }).join("");
   // v6.8: jam upload otomatis hari ini + yang sudah dipelajari dari views 24 jam
-  const WHY = { jangkar: ["Jangkar", "teal"], terbukti: ["Terbukti ramai", "ok"], eksplorasi: ["Coba jam baru", "accent"] };
+  const WHY = { pending: ["Menunggu", ""], uploading: ["Mengunggah", "accent"], scheduled: ["Terjadwal di platform", "teal"], done: ["Tayang", "ok"], paused: ["Dijeda", "warn"] };
   const DT = { weekday: "hari kerja", weekend: "akhir pekan" };
   api("/api/upload-insights").then((d) => {
-    $("#ins").innerHTML = UI.panel({ title: "Jam upload otomatis", sub: "Jam jangkar stabil, disesuaikan per hari, lalu bergeser ke jam yang terbukti ramai untuk channel-mu",
+    const jangkar = d.mode === "jangkar";
+    $("#ins").innerHTML = UI.panel({ title: "Jam upload hari ini",
+      head: `${UI.pill(jangkar ? "Mode: jam jangkar" : "Mode: riset per hari", "teal")} ${UI.btn("Ubah", { size: "sm", kind: "ghost", href: "#settings" })}`,
+      sub: jangkar ? "Jam tetap tiap hari kerja & akhir pekan + 1 slot eksplorasi bergiliran (±1 jam), lalu beralih ke jam yang terbukti ramai untuk channel-mu"
+        : "Tiap hari diriset dulu (pola penonton Indonesia per hari + Shorts nyata di niche-mu), lalu bergeser ke jam yang terbukti ramai untuk channel-mu",
       body: `<div class="cols-2">${Object.entries(d.platforms).map(([k, v]) => `<div><b class="small">${k === "youtube" ? "YouTube Shorts" : "TikTok"}</b>
-        <div class="row" style="margin:6px 0">${v.today.map((t) => UI.pill(`${t.time} · ${WHY[t.why]?.[0] || t.why}`, WHY[t.why]?.[1] || "")).join("")}</div>
+        <div class="row" style="margin:6px 0;flex-wrap:wrap">${v.today.length ? v.today.map((t) => UI.pill(`${t.time} · ${WHY[t.why]?.[0] || t.why}`, WHY[t.why]?.[1] || "")).join("") : '<span class="tiny muted">Tidak ada upload hari ini.</span>'}</div>
+        <p class="tiny ink2" style="margin:0 0 4px">Riset: ${esc(v.research || "")}</p>
         <p class="tiny muted" style="margin:0">${v.learning ? `Belajar aktif dari ${v.measured} upload (median ${fmtNum(v.median_views)} views 24 jam).` : `Mengumpulkan data: ${v.measured}/${v.needed} upload terukur.`}
         ${v.best.length ? " Jam terbaik: " + v.best.map((b) => `${String(b.hour).padStart(2, "0")}:00 ${DT[b.daytype]} (${b.score}×)`).join(", ") : ""}
         ${k === "tiktok" && !d.tiktok_profile ? " Isi <a href='#settings'>Username TikTok</a> agar views TikTok bisa diukur." : ""}</p></div>`).join("")}</div>` });
   }).catch(() => {});
   let cursor = new Date(); cursor.setDate(1);
   let items = [];
-  const STL = { pending: "Menunggu", uploading: "Mengunggah", done: "Berhasil", failed: "Gagal", paused: "Dijeda" };
-  const STK = { pending: "", uploading: "accent run", done: "ok", failed: "bad", paused: "warn" };
+  const PF_SHORT = { youtube: "YouTube", tiktok: "TikTok" };
+  const STL = { pending: "Menunggu", uploading: "Mengunggah", scheduled: "Terjadwal di platform", done: "Berhasil", failed: "Gagal", paused: "Dijeda" };
+  const STK = { pending: "", uploading: "accent run", scheduled: "teal", done: "ok", failed: "bad", paused: "warn" };
   function drawCal() {
     $("#mon").textContent = cursor.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
     const start = new Date(cursor); start.setDate(1 - cursor.getDay());
@@ -814,22 +829,62 @@ PAGES.upload = { render(view) {
     for (let i = 0; i < 42; i++) {
       const d = new Date(start); d.setDate(start.getDate() + i);
       const ev = items.filter((s) => new Date(s.run_at * 1000).toDateString() === d.toDateString());
+      // satu entri per KLIP (YouTube + TikTok digabung), bukan satu per platform — maks 5 klip/hari terlihat 5
+      const clipsDay = [];
+      for (const s of ev.sort((x, y) => x.run_at - y.run_at)) {
+        const g = clipsDay.find((c) => c.key === (s.file_path || s.id));
+        if (g) g.rows.push(s); else clipsDay.push({ key: s.file_path || s.id, title: s.title, rows: [s] });
+      }
+      const hm = (t) => new Date(t * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+      const worst = (rows) => ["failed", "uploading", "pending", "paused", "scheduled", "done"].find((st) => rows.some((r) => r.status === st)) || "pending";
       html += `<div class="day ${d.getMonth() !== cursor.getMonth() ? "out" : ""} ${d.toDateString() === todayKey ? "today" : ""}"><span class="d">${d.getDate()}</span>
-        ${ev.map((s) => `<span class="ev ${s.status}" title="${esc(s.title)}">${new Date(s.run_at * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} ${esc(s.title)}</span>`).join("")}</div>`;
+        ${clipsDay.map((g) => `<span class="ev ${worst(g.rows)}" title="${esc(g.rows.map((r) => `${r.platforms.map((p) => PF_SHORT[p] || p).join("+")} ${hm(r.run_at)} · ${STL[r.status] || r.status}`).join("\n") + "\n" + g.title)}">${hm(g.rows[0].run_at)} ${esc(g.title)}</span>`).join("")}</div>`;
     }
     $("#cal").innerHTML = html;
     const c = (st) => items.filter((s) => s.status === st).length;
-    $("#counts").innerHTML = UI.pill(`${items.length} total`) + UI.pill(`${c("pending")} menunggu`) + UI.pill(`${c("done")} berhasil`, "ok") + (c("failed") ? UI.pill(`${c("failed")} gagal`, "bad") : "");
+    $("#counts").innerHTML = UI.pill(`${items.length} total`) + UI.pill(`${c("pending")} menunggu`) + (c("scheduled") ? UI.pill(`${c("scheduled")} terjadwal di platform`, "teal") : "") + UI.pill(`${c("done")} berhasil`, "ok") + (c("failed") ? UI.pill(`${c("failed")} gagal`, "bad") : "");
   }
   async function load() {
     items = await api("/api/schedules");
     drawCal();
-    $("#tb").innerHTML = items.map((s) => `<tr data-id="${s.id}"><td style="max-width:360px"><b class="clip1" style="display:block">${esc(s.title || baseName(s.file_path))}</b>${s.result ? `<span class="tiny muted clip1" style="display:block">${esc(JSON.stringify(s.result))}</span>` : ""}</td>
-      <td><div class="row" style="gap:4px">${s.platforms.map((p) => UI.pill(p)).join("")}</div></td><td class="small nowrap">${fmtDate(s.run_at)}</td>
-      <td><span class="pill ${STK[s.status] || ""}">${s.status === "uploading" ? '<span class="dot"></span>' : ""}${STL[s.status] || s.status}</span></td>
-      <td class="r"><div class="btn-row" style="justify-content:flex-end;flex-wrap:nowrap">${s.status !== "done" ? UI.btn("Upload sekarang", { size: "sm", attrs: 'data-a="now"' }) : ""}
+    // satu baris per KLIP: klip yang sama diunggah sekali ke tiap platform (YouTube + TikTok), bukan diunggah ulang
+    const groups = [];
+    const byKey = {};
+    for (const s of items) {
+      const k = s.file_path || s.id;
+      if (!byKey[k]) { byKey[k] = { title: s.title || baseName(s.file_path), rows: [] }; groups.push(byKey[k]); }
+      byKey[k].rows.push(s);
+    }
+    groups.forEach((g) => g.rows.sort((a, b) => a.run_at - b.run_at));
+    // yang masih menunggu di atas, urut dari upload terdekat; yang sudah selesai di bawah, terbaru dulu
+    const live = (g) => g.rows.some((s) => s.status !== "done");
+    groups.sort((a, b) => (live(b) - live(a)) || (live(a) ? a.rows[0].run_at - b.rows[0].run_at : b.rows[0].run_at - a.rows[0].run_at));
+    const line = (s, html) => `<div class="sched-line" data-id="${s.id}">${html}</div>`;
+    // hasil upload dalam kalimat (bukan JSON mentah)
+    const resultLine = (s) => {
+      const out = [];
+      for (const [pf, r] of Object.entries(s.result || {})) {
+        if (!r || typeof r !== "object") continue;
+        const name = PF_SHORT[pf] || pf;
+        const st = String(r.status || "").toLowerCase();
+        const link = r.url ? ` · <a href="${esc(r.url)}" target="_blank" rel="noopener">lihat</a>` : "";
+        if (st === "scheduled") out.push(`${name}: sudah diunggah, tayang otomatis ${esc(fmtDate(Number(r.publish_at) || s.run_at))}${link}`);
+        else if (st === "failed" || r.ok === false) out.push(`${name}: gagal — ${esc(String(r.reason || r.error || "").slice(0, 140))}`);
+        else if (st === "done" || r.ok) out.push(`${name}: ${r.mode === "draft" ? "tersimpan di Draf" : "terunggah"}${link}`);
+      }
+      if (s.status === "pending" && s.result?._preupload_error_at) out.push("Unggah lebih awal gagal — dicoba lagi otomatis");
+      return out.map((t) => `<span class="tiny muted clip1" style="display:block">${t}</span>`).join("");
+    };
+    $("#tb").innerHTML = groups.map((g) => `<tr>
+      <td style="max-width:360px"><b class="clip1" style="display:block">${esc(g.title)}</b>
+        <span class="tiny muted">${g.rows.length > 1 ? `1 klip · diunggah sekali ke ${g.rows.length} platform` : "1 klip"}</span>
+        ${g.rows.map(resultLine).filter(Boolean).join("")}</td>
+      <td>${g.rows.map((s) => line(s, s.platforms.map((p) => UI.pill(PF_SHORT[p] || p)).join(""))).join("")}</td>
+      <td class="small nowrap">${g.rows.map((s) => line(s, fmtDate(s.run_at))).join("")}</td>
+      <td>${g.rows.map((s) => line(s, `<span class="pill ${STK[s.status] || ""}">${s.status === "uploading" ? '<span class="dot"></span>' : ""}${STL[s.status] || s.status}</span>`)).join("")}</td>
+      <td class="r">${g.rows.map((s) => line(s, `<div class="btn-row" style="justify-content:flex-end;flex-wrap:nowrap">${!["done", "scheduled", "uploading"].includes(s.status) ? UI.btn("Upload sekarang", { size: "sm", attrs: 'data-a="now"' }) : ""}
         ${s.status === "pending" ? UI.btn("", { ico: "pause", size: "sm", kind: "ghost", title: "Jeda", attrs: 'data-a="pause"' }) : ["paused", "failed"].includes(s.status) ? UI.btn("", { ico: "play", size: "sm", kind: "ghost", title: "Antrekan lagi", attrs: 'data-a="resume"' }) : ""}
-        ${UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Hapus", attrs: 'data-a="del"' })}</div></td></tr>`).join("")
+        ${UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Hapus jadwal platform ini", attrs: 'data-a="del"' })}</div>`)).join("")}</td></tr>`).join("")
       || `<tr><td colspan="5">${UI.empty("calendar", "Belum ada jadwal", "Klik Jadwalkan klip atau Smart Cadence untuk mulai.")}</td></tr>`;
   }
   $("#tb").onclick = async (e) => {
@@ -943,94 +998,131 @@ PAGES.brand = { render(view) {
 
 /* ================================================================== SETTINGS */
 const PRETTY = { edge: "Edge", openai: "OpenAI", gemini: "Gemini", elevenlabs: "ElevenLabs", pollinations: "Pollinations", card: "Kartu teks" };
-/* ---------- YouTube: kredensial cookies + upload headless (tanpa popup) ---------- */
-function mountYouTube() {
-  const box = document.getElementById("ytbox");
-  if (!box) return;
+/* ---------- Kredensial upload: cookies (YouTube/TikTok) + YouTube Data API — headless, tanpa popup ---------- */
+const COOKIE_TIPS = (site) => `<ol class="steps-list">
+  <li><span>Pasang extension <b>Get cookies.txt LOCALLY</b> (Chrome/Edge) atau <b>Cookie-Editor</b>. Keduanya membaca cookie login (HttpOnly) dan tidak mengirimnya ke mana pun.</span></li>
+  <li><span>Buka <b>${site}</b> di browser dan pastikan kamu <b>sudah login</b> ke akun yang mau dipakai upload.</span></li>
+  <li><span>Klik ikon extension → <b>Export</b> (Get cookies.txt: format Netscape · Cookie-Editor: Export → JSON). Filenya terunduh.</span></li>
+  <li><span>Klik <b>Pilih file</b> di bawah (atau tempel isinya) → <b>Simpan cookies</b> → <b>Tes sesi</b>.</span></li>
+</ol>
+<div class="tiny muted">Jangan menyalin dari tab Console / <code>document.cookie</code>: cookie login tidak ikut, jadi sesi selalu "kedaluwarsa".
+Jangan logout dari browser setelah export (logout mematikan sesi). Kalau sesi cepat mati: login di jendela Incognito, export, lalu tutup jendela itu tanpa logout.</div>`;
+
+function cookieCard({ box, key, title, sub, site, who }) {
+  const el = document.getElementById(box);
+  if (!el) return;
   const when = (t) => (t ? new Date(t * 1000).toLocaleString("id-ID") : "—");
+  const $id = (s) => document.getElementById(`${key}${s}`);
   const paint = (s) => {
-    box.innerHTML = UI.panel({
-      title: "YouTube — upload lewat browser",
-      sub: "Tidak memakai kuota API (API hanya ~6 upload/hari). Sepenuhnya headless: tidak ada jendela atau popup yang muncul saat dipakai.",
-      body: `<div class="row" style="gap:8px;flex-wrap:wrap">
-          ${UI.pill(s.configured ? "Cookies aktif" : "Belum diatur", s.configured ? "ok" : "")}
-          <span class="tiny muted">${s.count || 0} cookie · disimpan ${when(s.saved_at)} · kedaluwarsa ${when(s.expires_at)}</span>
-        </div>
-        ${UI.field("Tempel cookies", `<textarea id="ytText" rows="5" spellcheck="false" placeholder="JSON hasil export extension, atau isi cookies.txt (format Netscape)"></textarea>`,
-          { hint: "Export cookies untuk youtube.com dari browser yang sudah login, lalu tempel di sini. Aplikasi tidak pernah membuka jendela login." })}
-        <div class="row" style="gap:8px">${UI.btn("Simpan cookies", { kind: "primary", size: "sm", id: "ytSave" })}
-          ${UI.btn("Tes sesi", { size: "sm", id: "ytTest" })}${UI.btn("Hapus", { size: "sm", id: "ytClear" })}</div>
-        <div id="ytRes" class="small muted"></div>`,
+    const state = s.configured ? UI.pill("Login aktif", "ok")
+      : s.incomplete ? UI.pill("Cookie tidak lengkap — belum login", "warn") : UI.pill("Belum diatur", "");
+    el.innerHTML = UI.panel({
+      title, sub,
+      body: `<div class="row" style="gap:8px;flex-wrap:wrap">${state}
+          <span class="tiny muted">${s.count || 0} cookie · disimpan ${when(s.saved_at)} · sesi berlaku s/d ${when(s.expires_at)}</span></div>
+        ${UI.field("Cookies", `<textarea id="${key}Text" rows="4" spellcheck="false" placeholder="Pilih file hasil export, atau tempel isinya di sini (JSON atau cookies.txt format Netscape)"></textarea>`,
+          { hint: `Cukup salah satu: pilih file <b>atau</b> tempel. Isi cookie tidak pernah ditampilkan lagi setelah disimpan.` })}
+        <input type="file" id="${key}File" accept=".txt,.json,text/plain,application/json" hidden>
+        <div class="row" style="gap:8px;flex-wrap:wrap">${UI.btn("Pilih file…", { size: "sm", id: `${key}Pick`, ico: "upload" })}
+          ${UI.btn("Simpan cookies", { kind: "primary", size: "sm", id: `${key}Save` })}
+          ${UI.btn("Tes sesi", { size: "sm", id: `${key}Test` })}${UI.btn("Hapus", { size: "sm", id: `${key}Clear` })}</div>
+        <div id="${key}Res" class="small muted"></div>
+        ${UI.more(`Cara mengambil cookies ${site}`, COOKIE_TIPS(site), !s.configured)}`,
     });
-    document.getElementById("ytSave").onclick = (e) => busy(e.currentTarget, async () => {
-      const text = document.getElementById("ytText").value.trim();
-      if (!text) { document.getElementById("ytRes").textContent = "Tempel cookies dulu."; return; }
+    const res = $id("Res");
+    const save = async (text) => {
+      if (!text.trim()) { res.textContent = "Pilih file atau tempel cookies dulu."; return; }
       try {
-        const r = await api("/api/youtube/cookies", { body: { text } });
-        document.getElementById("ytRes").innerHTML = UI.pill(`${r.count} cookie tersimpan`, "ok");
+        const r = await api(`/api/${key}/cookies`, { body: { text } });
         paint(r);
-      } catch (err) { document.getElementById("ytRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
-    });
-    document.getElementById("ytTest").onclick = (e) => busy(e.currentTarget, async () => {
-      document.getElementById("ytRes").innerHTML = `<span class="ink2">Memeriksa sesi (headless, ±15 dtk)…</span>`;
+        $id("Res").innerHTML = UI.pill(`${r.count} cookie tersimpan · login terdeteksi`, "ok") + ` <span class="ink2">Klik Tes sesi untuk memastikan.</span>`;
+      } catch (err) { res.innerHTML = UI.pill("Ditolak", "bad") + " " + esc(err.message); }
+    };
+    $id("Pick").onclick = () => $id("File").click();
+    $id("File").onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      if (f.size > 1_000_000) { res.innerHTML = UI.pill("Ditolak", "bad") + " File terlalu besar untuk cookies."; return; }
+      const text = await f.text();
+      $id("Text").value = "";  // jangan pamerkan isi cookie di layar
+      res.innerHTML = `<span class="ink2">Menyimpan ${esc(f.name)}…</span>`;
+      await save(text);
+    };
+    $id("Save").onclick = (e) => busy(e.currentTarget, () => save($id("Text").value));
+    $id("Test").onclick = (e) => busy(e.currentTarget, async () => {
+      res.innerHTML = `<span class="ink2">Memeriksa sesi (headless, ±15 dtk)…</span>`;
       try {
-        const r = await api("/api/youtube/test", { body: {} });
-        document.getElementById("ytRes").innerHTML = r.ok
-          ? UI.pill("Sesi valid", "ok") + ` <span class="ink2">${esc(r.channel || "channel terdeteksi")}</span>`
+        const r = await api(`/api/${key}/test`, { body: {} });
+        res.innerHTML = r.ok ? UI.pill("Sesi valid", "ok") + ` <span class="ink2">${esc(r.channel || r.username || who)}</span>`
           : UI.pill("Tidak valid", "bad") + " " + esc(r.error || "");
-      } catch (err) { document.getElementById("ytRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
+      } catch (err) { res.innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
     });
-    document.getElementById("ytClear").onclick = (e) => busy(e.currentTarget, async () => {
-      try { paint(await api("/api/youtube/cookies", { method: "DELETE" })); toast("Cookies YouTube dihapus"); }
+    $id("Clear").onclick = (e) => busy(e.currentTarget, async () => {
+      try { paint(await api(`/api/${key}/cookies`, { method: "DELETE" })); toast("Cookies dihapus"); }
       catch (err) { fail(err); }
     });
   };
-  api("/api/youtube/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
+  api(`/api/${key}/cookies`).then(paint).catch(() => paint({ configured: false, count: 0 }));
 }
 
+const YT_API_TIPS = `<ol class="steps-list">
+  <li><span>Buka <b>console.cloud.google.com</b> → buat project baru (mis. "Viral Auto Klip").</span></li>
+  <li><span><b>APIs &amp; Services → Library</b> → cari <b>YouTube Data API v3</b> → <b>Enable</b>.</span></li>
+  <li><span><b>Google Auth Platform</b> (OAuth consent screen) → <b>Get started</b>: isi nama aplikasi &amp; email, Audience <b>External</b> → Create.
+    Lalu <b>Audience → Test users → Add users</b>: masukkan email akun YouTube-mu.</span></li>
+  <li><span><b>Clients → Create client</b> → Application type <b>Desktop app</b> → Create → <b>Download JSON</b>.</span></li>
+  <li><span>Di sini: <b>Pilih client_secret.json</b> → <b>Login YouTube API</b> → tab browser terbuka → pilih akun → izinkan.
+    Peringatan "Google hasn't verified this app" itu normal (aplikasimu sendiri): klik <b>Continue</b>.</span></li>
+</ol>
+<div class="tiny muted">Selama status aplikasi "Testing", Google mematikan login setiap 7 hari. Supaya awet: <b>Audience → Publish app</b> (untuk dipakai sendiri tidak perlu verifikasi).
+Kuota gratis 10.000 unit/hari; satu upload ±1.600 unit → sekitar 6 video/hari. Butuh lebih banyak? Pakai metode Browser (cookie) di atas.</div>`;
 
-function mountTikTok() {
-  const box = document.getElementById("ttbox");
-  if (!box) return;
-  const when = (t) => (t ? new Date(t * 1000).toLocaleString("id-ID") : "—");
+function mountYouTubeApi() {
+  const el = document.getElementById("ytapibox");
+  if (!el) return;
   const paint = (s) => {
-    box.innerHTML = UI.panel({
-      title: "TikTok — upload lewat browser",
-      sub: "Sepenuhnya headless: tidak ada jendela atau popup. Butuh cookies tiktok.com dari browser yang sudah login.",
-      body: `<div class="row" style="gap:8px;flex-wrap:wrap">
-          ${UI.pill(s.configured ? "Cookies aktif" : "Belum diatur", s.configured ? "ok" : "")}
-          <span class="tiny muted">${s.count || 0} cookie · disimpan ${when(s.saved_at)} · kedaluwarsa ${when(s.expires_at)}</span>
-        </div>
-        ${UI.field("Tempel cookies", `<textarea id="ttText" rows="5" spellcheck="false" placeholder="JSON hasil export extension, atau isi cookies.txt (format Netscape) untuk tiktok.com"></textarea>`,
-          { hint: "Export cookies tiktok.com dari browser yang sudah login, lalu tempel di sini." })}
-        <div class="row" style="gap:8px">${UI.btn("Simpan cookies", { kind: "primary", size: "sm", id: "ttSave" })}
-          ${UI.btn("Tes sesi", { size: "sm", id: "ttTest" })}${UI.btn("Hapus", { size: "sm", id: "ttClear" })}</div>
-        <div id="ttRes" class="small muted"></div>`,
+    const state = !s.library ? UI.pill("Library belum terpasang", "bad")
+      : s.logged_in ? UI.pill("Login aktif", "ok") : s.secret ? UI.pill("client_secret ada — belum login", "warn") : UI.pill("Belum diatur", "");
+    el.innerHTML = UI.panel({
+      title: "YouTube — API resmi (opsional)",
+      sub: "Cara resmi dari Google, paling aman untuk akun. Batasnya ±6 upload/hari. Kalau keduanya siap, metode Otomatis memakai API.",
+      body: `<div class="row" style="gap:8px;flex-wrap:wrap">${state}${s.project ? `<span class="tiny muted">project ${esc(s.project)}</span>` : ""}</div>
+        <input type="file" id="yaFile" accept=".json,application/json" hidden>
+        <div class="row" style="gap:8px;flex-wrap:wrap">${UI.btn(s.secret ? "Ganti client_secret.json…" : "Pilih client_secret.json…", { size: "sm", id: "yaPick", ico: "upload" })}
+          ${UI.btn("Login YouTube API", { kind: s.secret && !s.logged_in ? "primary" : "", size: "sm", id: "yaLogin" })}
+          ${s.logged_in ? UI.btn("Logout", { size: "sm", id: "yaLogout" }) : ""}</div>
+        <div id="yaRes" class="small muted"></div>
+        ${UI.more("Cara membuat client_secret.json (sekali saja, ±10 menit)", YT_API_TIPS, !s.secret)}`,
     });
-    document.getElementById("ttSave").onclick = (e) => busy(e.currentTarget, async () => {
-      const text = document.getElementById("ttText").value.trim();
-      if (!text) { document.getElementById("ttRes").textContent = "Tempel cookies dulu."; return; }
+    const res = document.getElementById("yaRes");
+    document.getElementById("yaPick").onclick = () => document.getElementById("yaFile").click();
+    document.getElementById("yaFile").onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
       try {
-        const r = await api("/api/tiktok/cookies", { body: { text } });
-        document.getElementById("ttRes").innerHTML = UI.pill(`${r.count} cookie tersimpan`, "ok");
-        paint(r);
-      } catch (err) { document.getElementById("ttRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
+        paint(await api("/api/youtube/api/secret", { body: { content: await f.text() } }));
+        document.getElementById("yaRes").innerHTML = UI.pill("client_secret tersimpan", "ok") + ` <span class="ink2">Sekarang klik Login YouTube API.</span>`;
+      } catch (err) { res.innerHTML = UI.pill("Ditolak", "bad") + " " + esc(err.message); }
+    };
+    document.getElementById("yaLogin").onclick = (e) => busy(e.currentTarget, async () => {
+      res.innerHTML = `<span class="ink2">Tab izin Google dibuka di browser laptop ini — selesaikan di sana (maks 5 menit)…</span>`;
+      try { paint(await api("/api/youtube/api/login", { body: {} })); toast("YouTube API tersambung"); }
+      catch (err) { res.innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
     });
-    document.getElementById("ttTest").onclick = (e) => busy(e.currentTarget, async () => {
-      document.getElementById("ttRes").innerHTML = `<span class="ink2">Memeriksa sesi (headless, ±15 dtk)…</span>`;
-      try {
-        const r = await api("/api/tiktok/test", { body: {} });
-        document.getElementById("ttRes").innerHTML = r.ok
-          ? UI.pill("Sesi valid", "ok") + ` <span class="ink2">${esc(r.username || "akun terdeteksi")}</span>`
-          : UI.pill("Tidak valid", "bad") + " " + esc(r.error || "");
-      } catch (err) { document.getElementById("ttRes").innerHTML = UI.pill("Gagal", "bad") + " " + esc(err.message); }
-    });
-    document.getElementById("ttClear").onclick = (e) => busy(e.currentTarget, async () => {
-      try { paint(await api("/api/tiktok/cookies", { method: "DELETE" })); toast("Cookies TikTok dihapus"); }
-      catch (err) { fail(err); }
+    const out = document.getElementById("yaLogout");
+    if (out) out.onclick = (e) => busy(e.currentTarget, async () => {
+      try { paint(await api("/api/youtube/api/login", { method: "DELETE" })); } catch (err) { fail(err); }
     });
   };
-  api("/api/tiktok/cookies").then(paint).catch(() => paint({ configured: false, count: 0 }));
+  api("/api/youtube/api").then(paint).catch(() => paint({ library: true }));
+}
+
+function mountUploadCreds() {
+  cookieCard({ box: "ytbox", key: "youtube", title: "YouTube — upload lewat browser (cookie)", site: "youtube.com", who: "channel terdeteksi",
+    sub: "Tanpa batas kuota API. Sepenuhnya headless: tidak ada jendela atau popup saat dipakai." });
+  mountYouTubeApi();
+  cookieCard({ box: "ttbox", key: "tiktok", title: "TikTok — upload lewat browser (cookie)", site: "tiktok.com", who: "akun terdeteksi",
+    sub: "Satu-satunya cara upload TikTok di aplikasi ini. Sepenuhnya headless: tidak ada jendela atau popup." });
 }
 
 PAGES.settings = { render(view) {
@@ -1040,7 +1132,7 @@ PAGES.settings = { render(view) {
       UI.btn("Setel otomatis (terbaik)", { ico: "sparkles", kind: "primary", size: "sm", id: "autoCfg" }))}
     ${UI.banner("info", "Bingung? Klik <b>Setel otomatis</b> — sistem membaca API key yang terpasang lalu memilih provider, model, suara, dan mesin transkripsi terbaik. Setelah itu cukup tempel link di Beranda.")}
     ${UI.banner("warn", "Upload lewat <b>browser headless</b> adalah otomatisasi tidak resmi. Gunakan <b>YouTube Data API</b> bila client_secret tersedia. Browser bisa berhenti bekerja atau memicu batasan akun jika tampilan YouTube Studio/TikTok berubah.")}
-    <div class="layout"><div class="stack lg"><div id="ytbox"></div><div id="ttbox"></div><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
+    <div class="layout"><div class="stack lg"><div id="ytbox"></div><div id="ytapibox"></div><div id="ttbox"></div><div id="conns"></div><div class="stack lg" id="groups">${UI.panel({ body: UI.empty("sliders", "Memuat pengaturan…") })}</div></div>
     <aside>${st ? UI.panel({ title: "Kemampuan aktif", body: `<div class="stack">${[["LLM", st.ai.providers.map((p) => pill(p.configured, p.provider))], ["Suara", Object.entries(st.media.tts).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
         ["Gambar", Object.entries(st.media.image).map(([k, v]) => pill(v.ready, PRETTY[k] || k))],
         ["Video AI", Object.entries(st.media.video || {}).map(([k, v]) => pill(v.ready, v.label))], ["Lainnya", [pill(st.media.elevenlabs, "ElevenLabs"), pill(st.media.stock, "Stok"), pill(st.media.youtube_api, "YouTube API"), pill(st.ffmpeg, "FFmpeg")]]]
@@ -1168,7 +1260,7 @@ PAGES.settings = { render(view) {
 
   api("/config").then((cfg) => {
     schema = cfg;
-    $("#groups").innerHTML = cfg.groups.map((g) => UI.panel({ title: g, body: `<div class="fields two">${cfg.schema.filter((s) => s.group === g).map((s) => {
+    $("#groups").innerHTML = cfg.groups.map((g) => UI.panel({ title: g, body: `<div class="fields two">${cfg.schema.filter((s) => s.group === g && !s.hidden).map((s) => {
       const v = cfg.values[s.key] ?? "";
       if (s.key === "LLM_MODEL") return UI.field(s.label, `<div class="input-row"><select data-key="LLM_MODEL" id="llmModel">${modelOpts(cfg.values.AI_PROVIDER, v)}</select>
           ${UI.btn("Deteksi", { ico: "refresh", size: "sm", id: "llmDetect", title: "Ambil daftar model yang bisa dipakai key ini" })}</div>`,
@@ -1203,6 +1295,5 @@ PAGES.settings = { render(view) {
     try { const r = await api("/config", { body: { values, clear: [...clear] } }); toast(`Tersimpan: ${r.saved.length} pengaturan`); clear.clear(); await refreshStatus(); route(); }
     catch (err) { fail(err); }
   });
-  mountYouTube();
-  mountTikTok();
+  mountUploadCreds();
 } };
