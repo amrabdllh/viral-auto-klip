@@ -261,6 +261,11 @@ TIKTOK_PROFILE = os.getenv("TIKTOK_PROFILE", "")  # @username TikTok — untuk m
 GLOBAL_HASHTAGS = os.getenv("GLOBAL_HASHTAGS", "")  # mis. "#veruclipper #fyp" — ditambahkan ke SEMUA upload
 AUTO_PUBLISH_PER_DAY = int(os.getenv("AUTO_PUBLISH_PER_DAY", "3"))  # maks upload otomatis per platform per hari
 AUTO_PUBLISH_MIN_GAP_H = float(os.getenv("AUTO_PUBLISH_MIN_GAP_H", "2.5"))  # jarak minimal antar upload (jam)
+THUMB_AI = os.getenv("THUMB_AI", "true").strip().lower() in ("1", "true", "yes", "on")  # thumbnail latar AI + wajah asli
+TITLE_STYLE = os.getenv("TITLE_STYLE", "normal").strip().lower()  # normal | clickbait (tetap jujur)
+UPLOAD_SLOT_MODE = os.getenv("UPLOAD_SLOT_MODE", "riset").strip().lower()  # riset = jam dipilih tiap hari · jangkar = jam tetap
+UPLOAD_NATIVE_SCHEDULE = os.getenv("UPLOAD_NATIVE_SCHEDULE", "true").strip().lower() in ("1", "true", "yes", "on")  # unggah lebih awal + jadwal bawaan YouTube/TikTok
+PREUPLOAD_DAYS = float(os.getenv("PREUPLOAD_DAYS", "10"))  # sejauh apa jadwal diunggah lebih awal (TikTok maks ±10 hari)
 SOURCE_CACHE_MAX_GB = float(os.getenv("SOURCE_CACHE_MAX_GB", "60"))  # batas cache video sumber (yang lama dihapus otomatis)
 VISION_REVIEW = os.getenv("VISION_REVIEW", "1").lower() in ("1", "true", "yes")  # Editor-AI melihat frame (live/gaming)
 VISION_PROVIDER = os.getenv("VISION_PROVIDER", "")  # kosong = otomatis (koneksi dengan model Claude/GPT-4o/Gemini)

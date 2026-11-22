@@ -792,19 +792,23 @@ PAGES.upload = { render(view) {
   // status sesi: dicek server tiap 3 jam & ±45 mnt sebelum upload (sekaligus menyegarkan cookie yang dirotasi situs)
   const checked = (s) => (s?.at ? ` · dicek ${new Date(s.at * 1000).toLocaleString("id-ID", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "");
   $("#pf").innerHTML = Object.entries(pf).map(([, v]) => {
-    const dead = v.ready && v.session && !v.session.ok;
+    const dead = v.ready && v.session && !v.session.ok && !v.logged_in;  // API resmi aktif → cookie hanya cadangan
     return UI.panel({ title: v.label,
       head: dead ? UI.pill("Sesi mati", "bad") : v.ready ? UI.pill("Terhubung", "ok") : UI.pill("Belum diset", "warn"),
       body: dead ? `<p class="small ink2"><b>Upload ke ${esc(v.label)} akan gagal</b> sampai cookies diperbarui: ${esc(v.session.error || "sesi kedaluwarsa")}${checked(v.session)}.</p>
           <p class="tiny muted">Login di jendela Incognito → export cookies → simpan di Pengaturan → tutup jendela itu tanpa logout (agar sesi tidak dirotasi browser).</p>${UI.btn("Perbarui cookies", { size: "sm", href: "#settings", ico: "sliders", kind: "primary" })}`
-        : v.ready ? `<p class="small muted">Siap mengunggah${v.session?.ok ? ` · sesi valid${v.session.who ? " (" + esc(v.session.who) + ")" : ""}${checked(v.session)}` : ""}.</p>`
+        : v.ready ? `<p class="small muted">${v.logged_in ? "Upload lewat YouTube API resmi (login awet). " : ""}Siap mengunggah${v.session?.ok ? ` · sesi valid${v.session.who ? " (" + esc(v.session.who) + ")" : ""}${checked(v.session)}` : ""}.</p>${v.limit_until ? `<p class="small ink2">${UI.pill("Batas upload harian", "warn")} Video yang sudah terjadwal aman. Sisanya diunggah otomatis lagi mulai ±${esc(fmtDate(v.limit_until))}. Verifikasi channel sekali di <a href="https://www.youtube.com/verify" target="_blank" rel="noopener">youtube.com/verify</a> agar batas ±15 video/hari hilang.</p>` : ""}`
         : `<p class="small ink2">${esc(v.hint)}</p>${UI.btn("Buka Pengaturan", { size: "sm", href: "#settings", ico: "sliders" })}` });
   }).join("");
   // v6.8: jam upload otomatis hari ini + yang sudah dipelajari dari views 24 jam
-  const WHY = { pending: ["Menunggu", ""], uploading: ["Mengunggah", "accent"], done: ["Berhasil", "ok"], paused: ["Dijeda", "warn"] };
+  const WHY = { pending: ["Menunggu", ""], uploading: ["Mengunggah", "accent"], scheduled: ["Terjadwal di platform", "teal"], done: ["Tayang", "ok"], paused: ["Dijeda", "warn"] };
   const DT = { weekday: "hari kerja", weekend: "akhir pekan" };
   api("/api/upload-insights").then((d) => {
-    $("#ins").innerHTML = UI.panel({ title: "Jam upload hari ini", sub: "Tiap hari diriset dulu (pola penonton Indonesia per hari + Shorts nyata di niche-mu), lalu bergeser ke jam yang terbukti ramai untuk channel-mu",
+    const jangkar = d.mode === "jangkar";
+    $("#ins").innerHTML = UI.panel({ title: "Jam upload hari ini",
+      head: `${UI.pill(jangkar ? "Mode: jam jangkar" : "Mode: riset per hari", "teal")} ${UI.btn("Ubah", { size: "sm", kind: "ghost", href: "#settings" })}`,
+      sub: jangkar ? "Jam tetap tiap hari kerja & akhir pekan + 1 slot eksplorasi bergiliran (±1 jam), lalu beralih ke jam yang terbukti ramai untuk channel-mu"
+        : "Tiap hari diriset dulu (pola penonton Indonesia per hari + Shorts nyata di niche-mu), lalu bergeser ke jam yang terbukti ramai untuk channel-mu",
       body: `<div class="cols-2">${Object.entries(d.platforms).map(([k, v]) => `<div><b class="small">${k === "youtube" ? "YouTube Shorts" : "TikTok"}</b>
         <div class="row" style="margin:6px 0;flex-wrap:wrap">${v.today.length ? v.today.map((t) => UI.pill(`${t.time} · ${WHY[t.why]?.[0] || t.why}`, WHY[t.why]?.[1] || "")).join("") : '<span class="tiny muted">Tidak ada upload hari ini.</span>'}</div>
         <p class="tiny ink2" style="margin:0 0 4px">Riset: ${esc(v.research || "")}</p>
@@ -815,8 +819,8 @@ PAGES.upload = { render(view) {
   let cursor = new Date(); cursor.setDate(1);
   let items = [];
   const PF_SHORT = { youtube: "YouTube", tiktok: "TikTok" };
-  const STL = { pending: "Menunggu", uploading: "Mengunggah", done: "Berhasil", failed: "Gagal", paused: "Dijeda" };
-  const STK = { pending: "", uploading: "accent run", done: "ok", failed: "bad", paused: "warn" };
+  const STL = { pending: "Menunggu", uploading: "Mengunggah", scheduled: "Terjadwal di platform", done: "Berhasil", failed: "Gagal", paused: "Dijeda" };
+  const STK = { pending: "", uploading: "accent run", scheduled: "teal", done: "ok", failed: "bad", paused: "warn" };
   function drawCal() {
     $("#mon").textContent = cursor.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
     const start = new Date(cursor); start.setDate(1 - cursor.getDay());
@@ -832,13 +836,13 @@ PAGES.upload = { render(view) {
         if (g) g.rows.push(s); else clipsDay.push({ key: s.file_path || s.id, title: s.title, rows: [s] });
       }
       const hm = (t) => new Date(t * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-      const worst = (rows) => ["failed", "uploading", "pending", "paused", "done"].find((st) => rows.some((r) => r.status === st)) || "pending";
+      const worst = (rows) => ["failed", "uploading", "pending", "paused", "scheduled", "done"].find((st) => rows.some((r) => r.status === st)) || "pending";
       html += `<div class="day ${d.getMonth() !== cursor.getMonth() ? "out" : ""} ${d.toDateString() === todayKey ? "today" : ""}"><span class="d">${d.getDate()}</span>
         ${clipsDay.map((g) => `<span class="ev ${worst(g.rows)}" title="${esc(g.rows.map((r) => `${r.platforms.map((p) => PF_SHORT[p] || p).join("+")} ${hm(r.run_at)} · ${STL[r.status] || r.status}`).join("\n") + "\n" + g.title)}">${hm(g.rows[0].run_at)} ${esc(g.title)}</span>`).join("")}</div>`;
     }
     $("#cal").innerHTML = html;
     const c = (st) => items.filter((s) => s.status === st).length;
-    $("#counts").innerHTML = UI.pill(`${items.length} total`) + UI.pill(`${c("pending")} menunggu`) + UI.pill(`${c("done")} berhasil`, "ok") + (c("failed") ? UI.pill(`${c("failed")} gagal`, "bad") : "");
+    $("#counts").innerHTML = UI.pill(`${items.length} total`) + UI.pill(`${c("pending")} menunggu`) + (c("scheduled") ? UI.pill(`${c("scheduled")} terjadwal di platform`, "teal") : "") + UI.pill(`${c("done")} berhasil`, "ok") + (c("failed") ? UI.pill(`${c("failed")} gagal`, "bad") : "");
   }
   async function load() {
     items = await api("/api/schedules");
@@ -856,14 +860,29 @@ PAGES.upload = { render(view) {
     const live = (g) => g.rows.some((s) => s.status !== "done");
     groups.sort((a, b) => (live(b) - live(a)) || (live(a) ? a.rows[0].run_at - b.rows[0].run_at : b.rows[0].run_at - a.rows[0].run_at));
     const line = (s, html) => `<div class="sched-line" data-id="${s.id}">${html}</div>`;
+    // hasil upload dalam kalimat (bukan JSON mentah)
+    const resultLine = (s) => {
+      const out = [];
+      for (const [pf, r] of Object.entries(s.result || {})) {
+        if (!r || typeof r !== "object") continue;
+        const name = PF_SHORT[pf] || pf;
+        const st = String(r.status || "").toLowerCase();
+        const link = r.url ? ` · <a href="${esc(r.url)}" target="_blank" rel="noopener">lihat</a>` : "";
+        if (st === "scheduled") out.push(`${name}: sudah diunggah, tayang otomatis ${esc(fmtDate(Number(r.publish_at) || s.run_at))}${link}`);
+        else if (st === "failed" || r.ok === false) out.push(`${name}: gagal — ${esc(String(r.reason || r.error || "").slice(0, 140))}`);
+        else if (st === "done" || r.ok) out.push(`${name}: ${r.mode === "draft" ? "tersimpan di Draf" : "terunggah"}${link}`);
+      }
+      if (s.status === "pending" && s.result?._preupload_error_at) out.push("Unggah lebih awal gagal — dicoba lagi otomatis");
+      return out.map((t) => `<span class="tiny muted clip1" style="display:block">${t}</span>`).join("");
+    };
     $("#tb").innerHTML = groups.map((g) => `<tr>
       <td style="max-width:360px"><b class="clip1" style="display:block">${esc(g.title)}</b>
         <span class="tiny muted">${g.rows.length > 1 ? `1 klip · diunggah sekali ke ${g.rows.length} platform` : "1 klip"}</span>
-        ${g.rows.filter((s) => s.result).map((s) => `<span class="tiny muted clip1" style="display:block">${esc(s.platforms.join(", "))}: ${esc(JSON.stringify(s.result))}</span>`).join("")}</td>
+        ${g.rows.map(resultLine).filter(Boolean).join("")}</td>
       <td>${g.rows.map((s) => line(s, s.platforms.map((p) => UI.pill(PF_SHORT[p] || p)).join(""))).join("")}</td>
       <td class="small nowrap">${g.rows.map((s) => line(s, fmtDate(s.run_at))).join("")}</td>
       <td>${g.rows.map((s) => line(s, `<span class="pill ${STK[s.status] || ""}">${s.status === "uploading" ? '<span class="dot"></span>' : ""}${STL[s.status] || s.status}</span>`)).join("")}</td>
-      <td class="r">${g.rows.map((s) => line(s, `<div class="btn-row" style="justify-content:flex-end;flex-wrap:nowrap">${s.status !== "done" ? UI.btn("Upload sekarang", { size: "sm", attrs: 'data-a="now"' }) : ""}
+      <td class="r">${g.rows.map((s) => line(s, `<div class="btn-row" style="justify-content:flex-end;flex-wrap:nowrap">${!["done", "scheduled", "uploading"].includes(s.status) ? UI.btn("Upload sekarang", { size: "sm", attrs: 'data-a="now"' }) : ""}
         ${s.status === "pending" ? UI.btn("", { ico: "pause", size: "sm", kind: "ghost", title: "Jeda", attrs: 'data-a="pause"' }) : ["paused", "failed"].includes(s.status) ? UI.btn("", { ico: "play", size: "sm", kind: "ghost", title: "Antrekan lagi", attrs: 'data-a="resume"' }) : ""}
         ${UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Hapus jadwal platform ini", attrs: 'data-a="del"' })}</div>`)).join("")}</td></tr>`).join("")
       || `<tr><td colspan="5">${UI.empty("calendar", "Belum ada jadwal", "Klik Jadwalkan klip atau Smart Cadence untuk mulai.")}</td></tr>`;

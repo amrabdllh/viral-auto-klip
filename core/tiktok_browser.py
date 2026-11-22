@@ -224,15 +224,150 @@ def _first(page, selectors, *, state="visible", timeout=8000):
     return None
 
 
+def _dismiss_overlays(page) -> None:
+    """Tutup tur/tutorial TikTok Studio (react-joyride: "Got it", "Last"...). Overlay-nya menutupi seluruh halaman,
+    sehingga klik ke kolom caption gagal dan caption tetap NAMA FILE."""
+    for _ in range(6):
+        btn = page.locator("#react-joyride-portal button, .react-joyride__tooltip button").first
+        try:
+            if not btn.count():
+                break
+            try:
+                btn.click(timeout=2000)
+            except Exception:  # noqa: BLE001
+                btn.evaluate("el => el.click()")
+        except Exception:  # noqa: BLE001
+            break
+        page.wait_for_timeout(600)
+    try:  # sisa overlay yang tidak punya tombol
+        page.evaluate("document.querySelectorAll('.react-joyride__overlay').forEach(e => e.remove())")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _fill_caption(page, editor, text: str) -> None:
+    """Ganti deskripsi default (nama file) dengan caption. Diverifikasi — lebih baik gagal daripada memposting
+    video dengan caption nama file."""
+    probe = " ".join(text.split()[:5])[:40]
+    for _ in range(3):
+        _dismiss_overlays(page)
+        try:
+            editor.click(timeout=5000)
+        except Exception:  # noqa: BLE001
+            editor.evaluate("el => el.focus()")
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+        page.keyboard.insert_text(text)
+        page.wait_for_timeout(800)
+        try:
+            got = " ".join(editor.inner_text().split())
+        except Exception:  # noqa: BLE001
+            got = ""
+        if probe and probe in got:
+            return
+    raise TikTokUploadError("Caption TikTok tidak bisa diisi (deskripsi masih nama file) — upload dibatalkan")
+
+
+def _set_cover(page, image: str) -> str:
+    """Edit cover → unggah gambar → Save. Tidak pernah menggagalkan upload video (cover hanya pemanis).
+    Catatan: TikTok memotong cover ke 3:4 di profil — thumbnail AI menaruh isi penting di zona itu."""
+    try:
+        _dismiss_overlays(page)
+        page.locator("text=Edit cover").first.click(timeout=8000)
+        page.wait_for_timeout(2000)
+        page.locator('input[type=file][accept*="image"]').first.set_input_files(str(image))
+        page.wait_for_timeout(4000)
+        page.locator('[role="dialog"] button', has_text="Save").first.click(timeout=8000)
+        page.wait_for_timeout(2500)
+        if page.locator('[role="dialog"] button', has_text="Save").count():
+            raise RuntimeError("dialog cover tidak tertutup")
+        return "set"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[tiktok-browser] Cover tidak terpasang (pakai frame bawaan): {str(exc)[:160]}")
+        try:  # tutup dialog yang mungkin masih terbuka
+            page.locator('[role="dialog"] button', has_text="Cancel").first.click(timeout=2000)
+        except Exception:  # noqa: BLE001
+            pass
+        return "skipped"
+
+
+def _set_schedule(page, publish_at: float) -> None:
+    """When to post -> Schedule, lalu pilih tanggal dari kalender & jam (kelipatan 5 menit). Zona waktu = lokal."""
+    import re as _re
+    from datetime import datetime
+    ts = round(publish_at / 300) * 300  # pemilih menit TikTok: kelipatan 5
+    when = datetime.fromtimestamp(ts)
+    if ts < time.time() + 16 * 60:
+        raise TikTokUploadError("Jadwal TikTok minimal 15 menit dari sekarang")
+    _dismiss_overlays(page)
+    radio = page.locator('input[name="postSchedule"][value="schedule"]').first
+    radio.wait_for(state="attached", timeout=20_000)
+    radio.evaluate("el => el.click()")
+    page.wait_for_timeout(1500)
+    if not page.evaluate("document.querySelector('input[name=postSchedule][value=schedule]').checked"):
+        raise TikTokUploadError("Opsi Schedule TikTok tidak bisa dipilih")
+    fields = page.locator("input.TUXTextInputCore-input")
+    want_t, want_d = when.strftime("%H:%M"), when.strftime("%Y-%m-%d")
+    day_re = _re.compile(rf"^{when.day}$")
+    # tanggal dulu (mengganti tanggal bisa mereset jam)
+    for _ in range(3):
+        if fields.nth(1).input_value() == want_d:
+            break
+        fields.nth(1).click()
+        page.wait_for_timeout(800)
+        day = page.locator(".calendar-wrapper .day.valid", has_text=day_re)
+        if not day.count():  # bulan berikutnya
+            page.locator(".calendar-wrapper .arrow").last.click()
+            page.wait_for_timeout(600)
+            day = page.locator(".calendar-wrapper .day.valid", has_text=day_re)
+        if not day.count():
+            raise TikTokUploadError(f"Tanggal {want_d} tidak bisa dipilih di TikTok (di luar batas jadwal)")
+        day.first.click()
+        page.wait_for_timeout(800)
+    # jam
+    fields.nth(0).click()
+    page.wait_for_timeout(800)
+    for side, val in (("left", when.strftime("%H")), ("right", when.strftime("%M"))):
+        opt = page.locator(f".tiktok-timepicker-option-text.tiktok-timepicker-{side}", has_text=_re.compile(rf"^{val}$")).first
+        opt.scroll_into_view_if_needed()
+        opt.click()
+        page.wait_for_timeout(500)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(500)
+    got_t, got_d = fields.nth(0).input_value(), fields.nth(1).input_value()
+    if (got_t, got_d) != (want_t, want_d):
+        raise TikTokUploadError(f"Jadwal TikTok tidak terpasang (terisi {got_d} {got_t}, seharusnya {want_d} {want_t})")
+
+
+def _in_content_list(page, probe: str, tries: int = 3) -> bool:
+    """Apakah postingan dengan awal caption `probe` ada di TikTok Studio → Konten (termasuk yang terjadwal)."""
+    want = " ".join(probe.split()).lower()
+    for i in range(tries):
+        try:
+            if "tiktokstudio/content" not in page.url or i:
+                page.goto("https://www.tiktok.com/tiktokstudio/content", wait_until="domcontentloaded", timeout=45_000)
+            page.wait_for_timeout(6000 + 3000 * i)
+            if want in " ".join(page.locator("body").inner_text().split()).lower():
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+    return False
+
+
 def upload_video(video: Path | str, *, description: str = "", timeout: int = 300,
-                 progress=None, mode: Optional[str] = None) -> Dict[str, Any]:
+                 progress=None, mode: Optional[str] = None, publish_at: Optional[float] = None,
+                 cover: Optional[str] = None) -> Dict[str, Any]:
     """Upload satu video ke TikTok Studio (headless). Tidak pernah membuka jendela.
 
     mode: "draft" (default — simpan ke Draf TikTok Studio) atau "post" (langsung posting).
+    publish_at (epoch detik): JADWAL BAWAAN TikTok ("When to post -> Schedule") — diunggah sekarang, TikTok sendiri
+    yang memposting pada waktu itu (dibulatkan ke 5 menit; TikTok hanya menerima >=15 menit s/d +-10 hari ke depan).
     """
     mode = str(mode or getattr(config, "TIKTOK_UPLOAD_MODE", "draft") or "draft").strip().lower()
     if mode not in ("draft", "post"):
         mode = "draft"
+    if publish_at:
+        mode = "schedule"
     def say(stage: str, pct: int, message: str) -> None:
         logger.info(f"[tiktok-browser] {message}")
         if progress:
@@ -281,16 +416,20 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
             say("Upload", 40, "Menunggu editor caption…")
             editor = _first(page, CAPTION_SELECTORS, timeout=60_000)
             if editor is not None and description:
-                try:
-                    editor.click()
-                    page.keyboard.press("Control+A")
-                    page.keyboard.press("Backspace")
-                    page.keyboard.insert_text(trim_caption(description, 2000))
-                except Exception:  # noqa: BLE001 - caption opsional
-                    pass
+                _fill_caption(page, editor, trim_caption(description, 2000))
+
+            cover_set = None
+            if cover and Path(cover).is_file():
+                say("Upload", 50, "Memasang cover (thumbnail)…")
+                cover_set = _set_cover(page, cover)
+
+            if publish_at:
+                say("Upload", 55, "Mengatur jadwal posting di TikTok…")
+                _set_schedule(page, float(publish_at))
 
             say("Upload", 60, "Menunggu video selesai diproses…")
-            target = SAVE_DRAFT_SELECTORS if mode == "draft" else POST_SELECTORS
+            target = SAVE_DRAFT_SELECTORS if mode == "draft" else (
+                ('button[data-e2e="post_video_button"]',) + tuple(POST_SELECTORS))
             action_btn = None
             while time.monotonic() < deadline:
                 action_btn = _first(page, target, timeout=3000)
@@ -311,28 +450,48 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                         "Ubah Pengaturan → Mode upload TikTok ke 'post' untuk langsung posting.")
                 raise TikTokUploadError("Tombol Post tidak muncul — UI TikTok mungkin berubah")
 
-            say("Upload", 80, "Menyimpan ke Draf…" if mode == "draft" else "Menekan Post…")
+            _dismiss_overlays(page)
+            say("Upload", 80, {"draft": "Menyimpan ke Draf…", "schedule": "Menekan Schedule…"}.get(mode, "Menekan Post…"))
             try:
                 action_btn.click(timeout=5000)
             except Exception:  # noqa: BLE001
                 action_btn.evaluate("el => el.click()")
 
-            # Tunggu konfirmasi: URL pindah ke halaman konten, atau muncul teks sukses.
+            # Tunggu konfirmasi. JANGAN mencocokkan kata umum ("Uploaded" = status file, "Save draft" = label tombol):
+            # dulu itu membuat upload dianggap sukses padahal browser ditutup sebelum TikTok menyimpan apa pun.
             uploaded = False
-            confirm = r"draf|draft|tersimpan|saved" if mode == "draft" else r"uploaded|berhasil|success"
-            for _ in range(60):
+            toast = (r"draft saved|saved to drafts|draf (berhasil )?disimpan|disimpan ke draf" if mode == "draft" else
+                     r"your video (has been|is being) (uploaded|posted|scheduled)|post(ed)? successfully|"
+                     r"scheduled successfully|video (berhasil )?(diposting|dijadwalkan)")
+            clicked_modal = False
+            for _ in range(45):
                 if time.monotonic() > deadline:
                     break
-                if "tiktokstudio/content" in page.url or "upload" not in page.url:
+                if "tiktokstudio/content" in page.url or "/upload" not in page.url:
                     uploaded = True
                     break
                 try:
-                    if page.locator(f"text=/{confirm}/i").count():
+                    if page.locator(f"text=/{toast}/i").count():
                         uploaded = True
                         break
+                    # dialog konfirmasi ("Post now?", "Continue to post?") → tekan tombol utamanya sekali
+                    if not clicked_modal:
+                        btn = page.locator('[role="dialog"] button').filter(
+                            has_text=__import__("re").compile(r"^(post now|post|schedule|continue|lanjutkan|posting)$", 2)).first
+                        if btn.count():
+                            btn.click(timeout=3000)
+                            clicked_modal = True
                 except Exception:  # noqa: BLE001
                     pass
                 page.wait_for_timeout(2000)
+
+            if mode != "draft":
+                # bukti terakhir: postingan (dengan caption ini) benar-benar ada di TikTok Studio → Konten
+                probe = " ".join(trim_caption(description, 2000).split()[:5])[:40] if description else ""
+                if probe and not _in_content_list(page, probe):
+                    raise TikTokUploadError("TikTok tidak menyimpan postingan (tidak ada di TikTok Studio → Konten) — "
+                                            "akan dicoba lagi")
+                uploaded = True
 
             if not uploaded:
                 if mode == "draft":
@@ -344,10 +503,13 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                             "privacy": "default", "description": description, "file": str(video)}
                 raise TikTokUploadError(
                     "Post ditekan tetapi konfirmasi tidak terlihat. Cek TikTok Studio → Konten.")
-            say("Upload", 100, "Draf TikTok tersimpan" if mode == "draft" else "Upload TikTok selesai")
+            say("Upload", 100, {"draft": "Draf TikTok tersimpan", "schedule": "Terjadwal di TikTok"}.get(mode, "Upload TikTok selesai"))
             persist_refreshed(context)  # simpan cookie hasil rotasi sesi
+            if mode == "schedule":
+                return {"ok": True, "status": "scheduled", "mode": "schedule", "publish_at": float(publish_at),
+                        "privacy": "everyone", "description": description, "file": str(video), "cover": cover_set}
             return {"ok": True, "mode": mode, "privacy": "default", "description": description,
-                    "file": str(video)}
+                    "file": str(video), "cover": cover_set}
         except TikTokUploadError:
             raise
         except Exception as exc:  # noqa: BLE001

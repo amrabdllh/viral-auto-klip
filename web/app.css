@@ -465,3 +465,4 @@ tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transpa
 .sched-line { min-height: 40px; display: flex; align-items: center; }
 .sched-line + .sched-line { border-top: 1px dashed var(--line, rgba(255,255,255,.08)); }
 td.r .sched-line { justify-content: flex-end; }
+.cal .ev.scheduled { background: var(--teal-soft); color: var(--teal); }

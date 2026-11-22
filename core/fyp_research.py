@@ -193,3 +193,70 @@ def pick_hours(niche: str, platform: str, dt: datetime, n: int, gap_h: float,
                             f"(skor {cands[i][1]:.0f})", cands[i][1]) for i in pickset]
     chosen.sort(key=lambda c: -c[2])
     return [(t, why) for t, why, _ in chosen]
+
+
+
+# ----------------------------------------------------------------------------- mode jam jangkar
+_ANCHOR_DAYS = 7.0  # jangkar dikunci seminggu → jam tetap stabil, tetap ikut riset terbaru tiap minggu
+
+
+def _canonical(dtype: str) -> datetime:
+    """Tanggal wakil jenis hari: hari kerja → Rabu, akhir pekan → Sabtu (minggu ini/depan)."""
+    from datetime import timedelta
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    target = 2 if dtype == "weekday" else 5
+    return today + timedelta(days=(target - today.weekday()) % 7)
+
+
+def anchor_hours(niche: str, platform: str, dtype: str, n: int, gap_h: float) -> List[Tuple[float, float]]:
+    """Jam jangkar TETAP untuk jenis hari `dtype` ("weekday" = Sen–Jum, "weekend" = Sab–Min): kombinasi n jam
+    terbaik berjarak ≥ gap_h dari riset hari wakilnya. Disimpan seminggu agar tiap hari kerja/akhir pekan jamnya
+    sama persis. Return [(jam, skor)] urut kronologis."""
+    key = f"slot_anchors_{niche}_{platform}_{dtype}_{n}_{gap_h:g}"
+    cached = db.kv_get(key, None)
+    if cached and time.time() - float(cached.get("at", 0)) < _ANCHOR_DAYS * 86400 and cached.get("hours"):
+        return [(float(h), float(s)) for h, s in cached["hours"]]
+    day = _canonical(dtype)
+    curve = {int(h): s for h, s in research_day(niche, platform, day)["hours"]}
+    picked = pick_hours(niche, platform, day, n, gap_h, [], 0.0)
+    hours = sorted((t, _score_at(curve, t)) for t, _ in picked)
+    db.kv_set(key, {"at": time.time(), "hours": hours})
+    return hours
+
+
+def _score_at(curve: Dict[int, float], t: float) -> float:
+    if t % 1 == 0:
+        return float(curve.get(int(t), 0))
+    return (curve.get(int(t), 0) + curve.get((int(t) + 1) % 24, 0)) / 2
+
+
+def anchor_plan(niche: str, platform: str, dt: datetime, n: int, gap_h: float) -> List[Tuple[float, str]]:
+    """Jam jangkar untuk tanggal `dt` + SATU slot eksplorasi: satu jangkar (bergiliran tiap hari, bukan jam terbaik)
+    digeser ±1 jam untuk menguji jam tetangga — hasilnya dipelajari core/slot_learning. Urut skor tertinggi dulu."""
+    dtype = "weekend" if dt.weekday() >= 5 else "weekday"
+    label = "akhir pekan" if dtype == "weekend" else "hari kerja"
+    anchors = anchor_hours(niche, platform, dtype, n, gap_h)
+    if not anchors:
+        return []
+    curve = {int(h): s for h, s in research_day(niche, platform, dt, use_market=False)["hours"]}
+    floor = 0.5 * max(curve.values() or [0])
+    hhmm = lambda t: f"{int(t):02d}:{'30' if t % 1 else '00'}"  # noqa: E731
+    # jangkar yang jatuh di jam sepi HARI INI (mis. Jumat siang saat salat Jumat) dilewati, bukan dipaksakan
+    keep = [(t, s) for t, s in anchors if _score_at(curve, t) >= floor]
+    out = [[t, s, f"jangkar {label} {hhmm(t)}"] for t, s in keep]
+    if len(keep) >= 2:
+        best = max(range(len(keep)), key=lambda i: keep[i][1])
+        feasible = []  # (indeks jangkar, geser) yang tetap berjarak ≥ gap_h & tidak jatuh di jam sepi
+        for i, (t, _) in enumerate(keep):
+            if i == best:
+                continue
+            others = [o for j, (o, _) in enumerate(keep) if j != i]
+            for shift in (1.0, -1.0, 0.5, -0.5):
+                t2 = t + shift
+                if 0 <= t2 < 24 and _score_at(curve, t2) >= floor and all(abs(t2 - o) >= gap_h for o in others):
+                    feasible.append((i, t2))
+        if feasible:  # bergiliran tiap hari → tiap jam tetangga ikut teruji
+            i, t2 = feasible[dt.toordinal() % len(feasible)]
+            out[i] = [t2, _score_at(curve, t2), f"eksplorasi {hhmm(t2)} (geser jangkar {hhmm(keep[i][0])})"]
+    out.sort(key=lambda x: -x[1])
+    return [(t, why) for t, _, why in out]

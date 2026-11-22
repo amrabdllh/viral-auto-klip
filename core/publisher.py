@@ -16,6 +16,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -174,6 +175,8 @@ def upload_to_youtube(
     privacy: Optional[str] = None,
     client_secrets_path: Optional[str] = None,
     category_id: Optional[str] = None,
+    publish_at: Optional[float] = None,
+    thumbnail: Optional[str] = None,
 ) -> Dict:
     """
     Upload satu video ke YouTube (Shorts otomatis bila durasi < 3 menit & vertikal).
@@ -230,20 +233,31 @@ def upload_to_youtube(
             "selfDeclaredMadeForKids": False,
         },
     }
+    if publish_at:  # jadwal bawaan YouTube: pribadi dulu, YouTube yang mempublikasikan pada waktunya
+        from datetime import datetime, timezone
+        body["status"]["privacyStatus"] = "private"
+        body["status"]["publishAt"] = datetime.fromtimestamp(float(publish_at), timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     media = MediaFileUpload(str(video_path), chunksize=-1, resumable=True)
     request = service.videos().insert(part="snippet,status", body=body, media_body=media)
     logger.info(f"⬆️ Uploading {Path(video_path).name} ke YouTube ({body['status']['privacyStatus']})...")
     response = None
-    while response is None:
-        status, response = request.next_chunk()
-        if status:
-            logger.info(f"  YouTube upload progress: {int(status.progress() * 100)}%")
+    try:
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                logger.info(f"  YouTube upload progress: {int(status.progress() * 100)}%")
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(_api_error(exc)) from exc
     video_id = response["id"]
     result = {
         "video_id": video_id,
         "url": f"https://youtube.com/shorts/{video_id}",
         "title": body["snippet"]["title"],
+        "method": "api",
+        **({"status": "scheduled", "publish_at": float(publish_at)} if publish_at else {}),
     }
+    if thumbnail and Path(thumbnail).is_file():
+        result["thumbnail"] = _api_thumbnail(service, video_id, thumbnail)
     logger.success(f"✅ YouTube upload selesai: {result['url']}")
     return result
 
@@ -359,6 +373,98 @@ def youtube_api_login() -> Dict:
         raise RuntimeError("Login dibatalkan atau melebihi 5 menit.")
     (config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE).write_text(creds.to_json())
     return youtube_api_status()
+
+
+def _api_error(exc: Exception) -> str:
+    """Pesan ramah untuk galat YouTube Data API (kuota habis & batas upload harian dikenali scheduler)."""
+    msg = str(exc)
+    if "quotaExceeded" in msg or "dailyLimitExceeded" in msg:
+        return "Kuota YouTube API hari ini habis (±6 upload/hari) — reset tengah malam waktu Pasifik (±15:00 WIB)"
+    if "uploadLimitExceeded" in msg:
+        return "Batas upload harian YouTube tercapai (channel belum diverifikasi) — coba lagi nanti"
+    if "invalid_grant" in msg or "Token has been expired or revoked" in msg:
+        return "Login YouTube API kedaluwarsa — klik Login YouTube API lagi di Pengaturan"
+    return msg[:300]
+
+
+def _api_thumbnail(service, video_id: str, image: str) -> str:
+    """thumbnails.set (50 unit kuota). Thumbnail kustom butuh channel terverifikasi — selain itu dilewati."""
+    from googleapiclient.http import MediaFileUpload
+    try:
+        service.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(str(image), mimetype="image/jpeg")).execute()
+        return "set"
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
+        if "429" in msg or "too many" in msg.lower():
+            # batas ganti thumbnail sementara dari YouTube → antre, dicoba lagi otomatis (core/scheduler)
+            queue_thumbnail_retry(video_id, image)
+            logger.warning("Thumbnail API dibatasi sementara (terlalu banyak) — dicoba lagi otomatis nanti")
+            return "queued: batas ganti thumbnail YouTube, dicoba lagi otomatis"
+        why = "channel belum terverifikasi" if ("forbidden" in msg.lower() or "403" in msg) else msg[:160]
+        logger.warning(f"Thumbnail API tidak terpasang ({why})")
+        return f"skipped: {why}"
+
+
+def queue_thumbnail_retry(video_id: str, image: str) -> None:
+    from . import db
+    q = [x for x in (db.kv_get("yt_thumb_retry", []) or []) if x.get("video_id") != video_id]
+    q.append({"video_id": video_id, "image": str(image), "since": time.time()})
+    db.kv_set("yt_thumb_retry", q)
+
+
+def retry_thumbnails(max_items: int = 3) -> int:
+    """Coba lagi thumbnail yang tertunda (dipanggil scheduler tiap jam). Return jumlah yang berhasil."""
+    from . import db
+    q = list(db.kv_get("yt_thumb_retry", []) or [])
+    if not q or not (config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE).exists():
+        return 0
+    done, keep = 0, []
+    for i, item in enumerate(q):
+        if i >= max_items or time.time() - float(item.get("since", 0)) > 7 * 86400 or not Path(item["image"]).is_file():
+            if i >= max_items:
+                keep.append(item)
+            continue
+        try:
+            from googleapiclient.http import MediaFileUpload
+            youtube_api_service().thumbnails().set(
+                videoId=item["video_id"], media_body=MediaFileUpload(item["image"], mimetype="image/jpeg")).execute()
+            done += 1
+            logger.info(f"Thumbnail tertunda terpasang: {item['video_id']}")
+        except Exception as exc:  # noqa: BLE001
+            logger.info(f"Thumbnail {item['video_id']} masih ditolak: {str(exc)[:120]}")
+            keep.append(item)
+            if "429" in str(exc):
+                keep.extend(q[i + 1:])
+                break
+    db.kv_set("yt_thumb_retry", keep)
+    return done
+
+
+def youtube_api_service():
+    """Klien YouTube Data API dari token tersimpan (tanpa membuka browser). Error bila belum login."""
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    token_path = config.BASE_DIR / config.YOUTUBE_OAUTH_TOKEN_FILE
+    if not token_path.exists():
+        raise RuntimeError("YouTube API belum login — Pengaturan → YouTube API → Login")
+    creds = Credentials.from_authorized_user_file(str(token_path), YT_SCOPES)
+    if not creds.valid:
+        if creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(_api_error(exc)) from exc
+            token_path.write_text(creds.to_json())
+        else:
+            raise RuntimeError("Login YouTube API kedaluwarsa — klik Login YouTube API lagi di Pengaturan")
+    return build("youtube", "v3", credentials=creds)
+
+
+def youtube_api_set_thumbnail(video_id: str, image: str) -> Dict:
+    """Pasang thumbnail ke video yang sudah ada lewat API resmi."""
+    res = _api_thumbnail(youtube_api_service(), video_id, image)
+    return {"ok": res == "set", "status": "set" if res == "set" else "skipped", "reason": "" if res == "set" else res}
 
 
 def youtube_api_logout() -> Dict:

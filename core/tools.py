@@ -457,6 +457,7 @@ def clip_quick(ctx: JobContext) -> Dict:
     else:
         clips = process_clips(video, selected, ctx.dir, **render_options(p))
     brand_clips(ctx, clips, p.get("brand_kit"))
+    ai_thumbnails(ctx, clips, video, p, info.get("content_type", ""), str(info.get("title") or ""))
     ctx.progress(92, "Publish", "Paket upload & metadata")
     publish = _publish(ctx, clips, p)
     register_clips(ctx, clips, "analisis_ai")
@@ -481,6 +482,26 @@ def clip_quick(ctx: JobContext) -> Dict:
             "transcription": tinfo, "publish_folder": publish, "source": video,
             "ai": f"{config.AI_PROVIDER}/{config.LLM_MODEL}" if llm else "local-only",
             "auto_publish": auto_pub}
+
+
+def ai_thumbnails(ctx: JobContext, clips: List[Dict], video: str, p: Dict, content_type: str = "",
+                  video_title: str = "") -> None:
+    """v6.9: (1) teks thumbnail & judul ditulis ulang: penulis + juri AI memilih yang JELAS tanpa konteks & memancing
+    (core/clickbait), (2) thumbnail gaya clipper — latar AI + wajah asli + cuplikan momen. Dipakai sebagai cover di
+    Library dan diunggah ke YouTube (thumbnail) & TikTok (cover)."""
+    from . import autopublish, clickbait, thumb_ai
+    if not clips:
+        return
+    ctx.progress(89, "Teks thumbnail", f"Menulis teks thumbnail & judul yang jelas + memancing untuk {len(clips)} klip…")
+    n = clickbait.apply(clips, video_title)
+    ctx.log(f"Teks thumbnail ditulis ulang (penulis + juri AI): {n}/{len(clips)} klip")
+    if p.get("thumb_ai") is False or not thumb_ai.enabled():
+        return
+    ctx.progress(90, "Thumbnail AI", f"Membuat thumbnail AI untuk {len(clips)} klip (latar AI + wajah asli)…")
+    done = thumb_ai.make_all(clips, source=video,
+                             niche_for=lambda c: autopublish.niche_for(c, p.get("publish_category") or "", content_type),
+                             progress=lambda n: ctx.progress(90, "Thumbnail AI", f"{n}/{len(clips)} thumbnail selesai"))
+    ctx.log(f"Thumbnail AI: {done}/{len(clips)} klip")
 
 
 # ============================================================================ Atur Manual

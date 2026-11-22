@@ -751,7 +751,8 @@ def upload_insights(niche: str = ""):
                    "measured": ins["total"], "needed": slot_learning.MIN_SAMPLES_TOTAL, "learning": ins["ready"],
                    "best": [{"daytype": d, "hour": h, "score": s["score"], "n": s["n"]} for d, h, s in best],
                    "median_views": ins["median"]}
-    return {"platforms": out, "day": now.strftime("%A"), "niche": niche,
+    from core.autopublish import slot_mode
+    return {"platforms": out, "day": now.strftime("%A"), "niche": niche, "mode": slot_mode(),
             "tiktok_profile": bool(getattr(config, "TIKTOK_PROFILE", ""))}
 
 

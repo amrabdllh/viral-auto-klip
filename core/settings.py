@@ -53,6 +53,22 @@ SCHEMA: List[Dict] = [
      "help": "Mis. @namakamu — views 24 jam tiap upload dibaca dari profil publik untuk menemukan jam paling ramai channel-mu"},
     {"key": "AUTO_PUBLISH_PER_DAY", "group": "Upload otomatis", "label": "Maks upload otomatis per hari (per platform)", "type": "int", "min": 1, "max": 8},
     {"key": "AUTO_PUBLISH_MIN_GAP_H", "group": "Upload otomatis", "label": "Jarak minimal antar upload (jam)", "type": "float", "min": 0.5, "max": 12},
+    {"key": "THUMB_AI", "group": "Upload otomatis", "label": "Thumbnail AI (latar AI + wajah asli + teks tebal)", "type": "bool",
+     "help": "Tiap klip dapat thumbnail gaya clipper: latar dibuat AI sesuai isi klip, wajah & cuplikan momen ASLI dari video, "
+             "teks dari Editor-AI. Ikut diunggah sebagai thumbnail YouTube (butuh channel terverifikasi) & cover TikTok."},
+    {"key": "TITLE_STYLE", "group": "Upload otomatis", "label": "Gaya judul & teks thumbnail", "type": "enum",
+     "options": ["normal", "clickbait"],
+     "labels": {"normal": "Normal — memancing rasa penasaran, natural",
+                "clickbait": "Clickbait — HURUF BESAR, ?!, emoji, ekspresif (tetap jujur sesuai isi klip)"}},
+    {"key": "UPLOAD_SLOT_MODE", "group": "Upload otomatis", "label": "Cara memilih jam upload", "type": "enum",
+     "options": ["riset", "jangkar"],
+     "labels": {"riset": "Riset per hari — jam dipilih ulang tiap hari mengikuti data terbaru",
+                "jangkar": "Jam jangkar — jam tetap (hari kerja & akhir pekan) + 1 slot eksplorasi per hari"},
+     "help": "Riset: paling mengikuti data harian, jam sedikit bergeser tiap hari. Jangkar: jam sama setiap hari kerja / akhir pekan "
+             "(penonton terbiasa & hasil mudah dibandingkan), satu slot digeser ±1 jam bergiliran untuk menguji jam baru. "
+             "Keduanya beralih ke jam yang terbukti ramai di channel-mu begitu datanya cukup."},
+    {"key": "UPLOAD_NATIVE_SCHEDULE", "group": "Upload otomatis", "label": "Unggah lebih awal pakai jadwal bawaan YouTube/TikTok", "type": "bool",
+     "help": "Jadwal diunggah sekarang dan YouTube/TikTok sendiri yang memposting pada jamnya — tidak terpengaruh sesi cookie mati atau laptop mati. TikTok butuh Mode upload 'post'."},
     {"key": "KLING_API_KEY", "group": "API key", "label": "Kling AI (video)", "type": "secret",
      "help": "Video AI gambar→video / teks→video (Kling 3.0). API Key dari konsol developer Kling (bukan AK/SK lama)"},
     # --- Media AI (v6)

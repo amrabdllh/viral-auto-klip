@@ -69,6 +69,12 @@ def _windows(niche: str, platform: str) -> List[Tuple[int, int]]:
     return out or [(19, 21), (12, 14)]
 
 
+def slot_mode() -> str:
+    """"riset" (jam dipilih ulang tiap hari) atau "jangkar" (jam tetap per jenis hari + 1 slot eksplorasi)."""
+    m = str(getattr(config, "UPLOAD_SLOT_MODE", "riset") or "riset").strip().lower()
+    return m if m in ("riset", "jangkar") else "riset"
+
+
 def _proven_hours(platform: str, day: datetime) -> List[float]:
     """Jam yang sudah TERBUKTI ramai untuk channel ini (core/slot_learning), bila datanya cukup."""
     from .slot_learning import MIN_SAMPLES_HOUR, day_type, insights
@@ -85,14 +91,20 @@ def _day_slots(niche: str, platform: str, day: datetime, want: int, start: float
                gap_h: float, rnd: random.Random) -> List[Tuple[float, str]]:
     """≤ want waktu upload di tanggal `day` untuk satu platform: jam terbukti (channel ini) dulu, lalu jam hasil
     RISET hari itu (core/fyp_research), berjarak ≥ gap_h dari satu sama lain & dari `busy` (jadwal yang sudah ada)."""
-    from .fyp_research import pick_hours
+    from .fyp_research import anchor_plan, pick_hours
     d0 = day.timestamp()
     # jam yang sudah terisi (termasuk larut malam kemarin & dini hari besok) — dihindari optimizer
     fixed = [(x - d0) / 3600 for x in busy if -6 * 3600 < x - d0 < 30 * 3600]
     min_hour = max(0.0, (start - d0) / 3600 - 1.5) if start > d0 else 0.0
     proven = [(h, "terbukti di channel ini") for h in _proven_hours(platform, day)
               if h >= min_hour and all(abs(h - f) >= gap_h for f in fixed)]
-    picked = pick_hours(niche, platform, day, want, gap_h, fixed + [p[0] for p in proven], min_hour)
+    if slot_mode() == "jangkar":
+        # jam tetap per jenis hari (+1 slot eksplorasi bergiliran); yang bentrok/lewat dibuang
+        cap = max(1, min(8, int(getattr(config, "AUTO_PUBLISH_PER_DAY", 3))))
+        picked = [(h, why) for h, why in anchor_plan(niche, platform, day, cap, gap_h)
+                  if h >= min_hour and all(abs(h - f) >= gap_h for f in fixed + [p[0] for p in proven])]
+    else:
+        picked = pick_hours(niche, platform, day, want, gap_h, fixed + [p[0] for p in proven], min_hour)
     cands = sorted(proven + picked, key=lambda c: 0 if c[1].startswith("terbukti") else 1)
     # menit bervariasi agar tidak terlihat bot: geser harian 5–20 mnt + 0–6 mnt per slot (jarak tetap terjaga)
     day_off = rnd.randint(5, 20)

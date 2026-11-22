@@ -25,10 +25,14 @@ def _add(fp, title, desc, pfs, ts):
 
 
 db.add_schedule = _add
+_kv = {}
+db.kv_get = lambda k, d=None: _kv.get(k, d)   # jangan menulis ke database asli
+db.kv_set = lambda k, v: _kv.__setitem__(k, v)
 fyp_research.market_samples = lambda niche, force=False: []          # tanpa jaringan
 slot_learning.insights = lambda platform: {"ready": False, "total": 0, "median": 0, "hours": {}}
 autopublish.ready_platforms = lambda wanted=None: list(wanted or ["youtube"])
 config.AUTO_PUBLISH_PER_DAY = 5
+config.UPLOAD_SLOT_MODE = "riset"  # bagian awal menguji mode riset (setelan .env pengguna tidak ikut)
 config.AUTO_PUBLISH_MIN_GAP_H = 2.5
 
 START = datetime(2026, 11, 22, 0, 30).timestamp()  # Minggu 00:30
@@ -83,6 +87,24 @@ for pf in ("youtube", "tiktok"):
 order = {pf: [s["file_path"] for s in sorted((s for s in store if s["platforms"][0] == pf), key=lambda s: s["run_at"])]
          for pf in ("youtube", "tiktok")}
 assert order["youtube"] == order["tiktok"], order
+
+# --- mode JAM JANGKAR: jam sama tiap hari kerja (kecuali 1 slot eksplorasi/hari), Jumat siang dilewati
+config.UPLOAD_SLOT_MODE = "jangkar"
+store.clear()
+MON = datetime(2026, 11, 23, 0, 30).timestamp()
+j = autopublish.schedule_clips(clips(30, "J"), platforms=["youtube"], content_type="gaming_stream", start=MON)
+rows = [(datetime.fromtimestamp(s["run_at"]), s.get("slot", "")) for s in j["scheduled"]]
+weekday_sets = {}
+for dt, why in rows:
+    if dt.weekday() <= 3 and not why.startswith("eksplorasi"):
+        weekday_sets.setdefault(dt.date(), set()).add(dt.hour * 2 + (1 if dt.minute >= 30 else 0))
+anchor_union = set().union(*weekday_sets.values())
+assert len(anchor_union) <= 6, f"jam jangkar Sen–Kam harus tetap: {sorted(anchor_union)}"
+expl = Counter(dt.date() for dt, why in rows if why.startswith("eksplorasi"))
+assert all(v == 1 for v in expl.values()) and len(expl) >= 4, expl
+assert not any(dt.weekday() == 4 and 11 <= dt.hour < 13 for dt, _ in rows), "Jumat siang (salat Jumat) harus dilewati"
+assert all(v <= 5 for v in Counter(dt.date() for dt, _ in rows).values())
+config.UPLOAD_SLOT_MODE = "riset"
 
 print("Semua uji upload otomatis multi-hari lulus")
 for line in a["plans"] + b["plans"]:
