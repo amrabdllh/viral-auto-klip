@@ -70,6 +70,14 @@ saved = {k: getattr(config, k) for k in ("CAPTION_FONT", "CAPTION_CASE", "CAPTIO
 try:
     # ------------------------------------------------------------ registrasi
     check("37 preset", len(cp.PRESETS) == 37)
+    # (v7) parameter persis klipers (tabel u2): font, warna sorot, garis, kapitalisasi
+    pr = cp.resolve("pill-slide")
+    check("klipers: pill-slide = Montserrat 800, sorot #A3E635, garis 7, ABC",
+          (pr["font"], pr["act_color"], pr["bord"], pr["case"]) == ("montserrat800", "A3E635", 7, "upper"))
+    check("klipers: 37 preset punya padanan parameter", all(cp.KLIPERS.get(cp._KLIPERS_ALIAS.get(k, k)) for k in cp.PRESETS))
+    check("klipers: word-stack Anton, chat-bubble Poppins biru, minimal Quicksand huruf biasa",
+          cp.resolve("word-stack")["font"] == "anton" and cp.resolve("chat-bubble")["bubble_color"] == "0A84FF"
+          and (cp.resolve("minimal-apple")["font"], cp.resolve("minimal-apple")["case"]) == ("quicksand", "asis"))
     check("semua preset ada di CAPTION_STYLES", all(config.CAPTION_STYLES.get(p, {}).get("preset") == p for p in cp.PRESETS))
     check("gaya lama tetap ada", all(k in config.CAPTION_STYLES and not config.CAPTION_STYLES[k].get("preset")
                                      for k in ("viral", "modern", "tiktok_bold", "neon", "gradient", "minimal", "emoji")))
@@ -139,13 +147,15 @@ try:
 
         def render(ass, t, png, w=W, h=H):
             esc = str(ass).replace(BS, "/").replace(":", BS + ":")
+            fonts = Path(config.FONT_DIR)  # sama dengan render asli: font klipers di fonts/
+            fd = (":fontsdir='" + str(fonts).replace(BS, "/").replace(":", BS + ":") + "'") if any(fonts.glob("*.[ot]tf")) else ""
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"color=c=black:s={w}x{h}:d=5",
-                            "-vf", f"subtitles='{esc}'", "-ss", f"{t:.2f}", "-frames:v", "1", str(png)], check=True)
+                            "-vf", f"subtitles='{esc}'{fd}", "-ss", f"{t:.2f}", "-frames:v", "1", str(png)], check=True)
             return np.asarray(Image.open(png).convert("RGB")).astype(int)
 
         # metrik: render 'HHHH' di \pos dan bandingkan dengan prediksi
         okm = []
-        for kind in ("black", "impact", "bold", "semi", "serif"):
+        for kind in ("black", "impact", "bold", "semi", "serif", "montserrat800", "anton", "poppins", "fredoka", "bebas", "teko", "bangers"):
             f = cp.font(kind)
             if not f.path:
                 continue

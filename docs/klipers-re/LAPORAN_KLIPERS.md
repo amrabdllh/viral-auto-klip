@@ -283,3 +283,160 @@ Dua perbaikan:
 - **Jumlah klip 7, bukan 10.** Editor-AI menolak 8 dari 15 kandidat (rubrik 32–46). Jumlah klip adalah batas atas, bukan target.
 - **Momen yang sama:** 3/10 adegan klipers run 1 dan 2/5 adegan run 2. Dari momen terbaik klipers, "Gua yang tembak tuh" (skor 88) sekarang ikut. Bazoka "cuma 1 dolar" (skor 92) masih tidak masuk kandidat AI Moment Finder.
 - **Durasi masih lebih pendek dari klipers** (rata-rata 63 dtk, sampai 135 dtk). Batas 90 dtk sengaja dipertahankan untuk retensi Shorts/TikTok.
+
+## 12. Lapisan dalam — bundle klien, CSS template, changelog (518 entri)
+
+Sumber: bundle `index.BmjhGM2J.js`, CSS publik `index.THCjFetH.css`, dan chunk `ChangelogPage` (518 entri,
+10 Des 2025 – 23 Nov 2026). Hasil ekstraksi (JSON) ada di scratchpad sesi; yang dicatat di sini hanya parameter dan perilakunya.
+
+### 12.1 Preset subtitle (37, tabel `u2` di bundle)
+Semua preset dirender sebagai **ASS/libass**; pratinjau di browser memakai libass WebAssembly (JASSUB).
+Font yang tersedia: Montserrat, Orbitron, Teko, Archivo Black, Fredoka One, Anton, Bebas Neue, Creepster,
+Quicksand, Rubik Glitch, Roboto, Lato, Open Sans, Poppins, Oswald, Roboto Mono, Bangers (semua Google Fonts).
+Default pengguna baru: **pill-slide** dengan emoji aktif. Posisi bawaan `yOffset` 25, ukuran 60.
+
+| Preset | Font | Teks / sorot / garis | Tebal garis | Kapital |
+|---|---|---|---|---|
+| pill-slide | Montserrat 800 | #FFF / #a3e635 / #000 | 7 | ABC |
+| stabilo | Montserrat 800 | #FFF / #fde047 / #000 | 7 | ABC |
+| word-stack | Anton | #FFF / #FACC15 / #000 | 7 | ABC |
+| sticker | Fredoka One | #FFF / #fde047 / #111 | 8 | ABC |
+| chat-bubble | Poppins | #FFF / #0A84FF / — | 0 | Abc |
+| liquid-glass | Poppins | #FFF / #FFF / — | 0 | Abc |
+| marker-circle | Montserrat 800 | #FFF / #FF3B30 / #000 | 7 | ABC |
+| slam | Anton | #FFF / #FF2D55 / #000 | 8 | ABC |
+| jelly | Fredoka One | #FFF / #FDE68A / #7C3AED | 8 | Abc |
+| counter-roll | Poppins | #FFF / #4ADE80 / #000 | 6 | Abc |
+| live-reaction | Poppins | #FFF / #FDE047 / #000 | 3 | Abc |
+| emoji-swap / flip-3d | Montserrat 800 | #FFF / #FACC15 · #22d3ee / #000 | 7 | ABC |
+| focus-blur | Poppins | #FFF / #FFF / #000 | 4 | Abc |
+| karaoke / pop / bounce / shake / box | Montserrat | sorot #FBBF24 · #22c55e · #eab308 · #ef4444 · box #22c55e | 6–8 | ABC |
+| glitch | Roboto Mono | #00FFFF / #FF00FF / #FF00FF | 8 | ABC |
+| neon-pulse | Orbitron | #00FFFF / #FF00FF / #0a0a2e | 8 | ABC |
+| gradient-slide | Teko | #FFF / #f97316 / #000 | 8 | ABC |
+| color-burst | Bangers | #FFF / #ff3366 / #000 | 8 | ABC |
+| bold-impact | Archivo Black | #FFF / #fbbf24 / #000 | 8 | ABC |
+| outline-pop | Bebas Neue | #FFF / #22c55e / #000 | 8 | ABC |
+| street-bold | Anton | #FFD700 / #FFF / #000 | 10 | ABC |
+| minimal-apple | Quicksand | #FFF / #60a5fa / #000 | 4 | Abc |
+| horror-glitch | Creepster | #FF6B6B / #FF1744 / #1a0000 | 8 | Abc |
+| candy-pop | Fredoka One | #FFF / #f472b6 / #000 | 3 | ABC |
+| klipers-motion / dynamic | Montserrat 800 | #FFF / #22c55e / #000 (motion: 5 kata/layar) | 8 | ABC |
+| glow / wave / shadow / fade / flicker | Montserrat | sorot #f0abfc · #0ea5e9 · #facc15 · #FFF · #fbbf24 | 8 | ABC |
+
+### 12.2 Template teks hook & B-roll (22, array `hm` di bundle + 201 aturan CSS `tm-*`, 67 keyframe)
+- **Daftar template:** 18 hook + CapCut Quote + 3 template teks B-roll yang belum kita punya: **Lakban** (Oswald, miring −4°),
+  **Pin Lokasi** (ikon pin + pil putih, posisi bawah), dan **Label Sinematik** (Bebas Neue, spasi 0,32em, garis tumbuh).
+- **Parameter per template:** `accent`, `position`, `topFrac`/`bottomFrac` (zona aman), `textCase`, dan format bagian `|`.
+- **Ukuran:** relatif lebar video (`cqw`, satuan `--u`).
+- **Font:** Inter (kartu UI), Archivo (Breaking), Montserrat 800 (Stabilo / Coret), Bangers (Stiker), Anton (Blok, Angka, VS, Stempel),
+  Instrument Serif italic (Editorial), mono (Mesin Ketik).
+- **Timing kunci (detik):**
+  - Breaking: label slide 0,45 → bar wipe 0,55 @0,3 → teks @0,75.
+  - Stabilo: kata naik 0,4 → marker menyapu 0,45 @0,7.
+  - Chat: titik mengetik 1,15 → pesan pop @1,05.
+  - Coret & Ganti: lama 0,4 → coret @0,55 → baru pop @1,05.
+  - Polling: pilihan A/B menyala bergantian @0,9 → CTA @2,0.
+  - Stempel: kartu 0,45 → stempel slam @1,05 + getar @1,27 + cincin @1,42.
+  - Pencarian: ketik per huruf → tombol ditekan → loading → hasil.
+  - VS: kubu A/B masuk dari dua sisi → "VS" slam @0,55 + kilat.
+  - Pencapaian: koin pop → pil membuka @0,55 → koin berputar @1,05 → bintang @1,15–1,55.
+  - Checklist: butir masuk bertahap → kotak dicentang berurutan.
+- **Render server:** changelog 14 Okt 2026 menyebut "pratinjau di layar sama dengan hasil video karena memakai font dan animasi yang sama",
+  jadi template HTML/CSS yang sama dirender di server.
+
+### 12.3 Perilaku pipeline (dari changelog)
+- **Durasi klip:** sejak 15 Okt ditentukan AI per momen, 30 dtk–3 mnt, mengikuti awal dan akhir momen. Klip tidak dipaksa masuk rentang tertentu.
+- **Teaser:** momen terkuat diputar dulu sebagai pembuka (otomatis untuk klip ber-hook), dan durasi klip bertambah sepanjang teaser.
+- **Buat B-roll:**
+  - 6 gaya kolase; AI memilih 2–3 momen per klip dan menyisipkan kolase 1,5–3 dtk dengan judul besar. Suara asli tetap jalan.
+  - Latar diambil dari koleksi per gaya × topik (umum, teknologi, makanan, jalan-jalan, bisnis, gaya hidup), tanpa kredit.
+  - Orang dipotong dengan garis stiker putih. Bila di detik itu tidak ada orang, wajah diambil dari bagian lain klip.
+  - Judul `*kata*` beraksen.
+- **Hook B-roll:** potongan orang bisa dirapikan (tambah/buang area); posisi dan ukuran orang serta judul bisa diatur; judul tidak pernah menutupi wajah.
+- **Layout:**
+  - Gaming dipilih hanya bila gambar menunjukkan facecam kecil. Facecam dikenali dari **ukuran ±1% layar**, bukan posisi; kata "gaming" di judul tidak lagi menentukan.
+  - Split hanya saat dua orang terlihat bersama; 3+ orang → blur.
+  - Kamera bertahan di pembicara terakhir saat jeda; perpindahan tepat di frame ganti shot.
+- **Analisis:**
+  - Video >15 menit dianalisis per bagian, lalu kandidat diseleksi ulang; "momen spesifik" kini ikut ke tahap seleksi akhir.
+  - Transkrip memakai Groq Whisper; mesin pemilih momennya `generateShortsIdeas`; admin bisa mengganti "otak AI" analisis.
+  - Maksimal 3 Quick Process per akun berjalan paralel.
+- **Highlight Bola:**
+  - Gemini 2.0 Flash membaca video (gawang, aksi, skor), dengan cadangan transkrip komentator.
+  - Puncak gol berpatokan pada teriakan komentator; gol offside/VAR dibuang.
+  - Micro-clip 2,5–3 dtk menjaga total rekaman di bawah batas Content ID; reel 60–90 dtk (maks 120) dengan Square Blur dan papan skor.
+- **Subtitle:**
+  - Editor live (17 Nov): ubah kata, geser waktu per kata/kalimat, gabung/pecah kalimat, ganti preset/ukuran/posisi tanpa render ulang.
+  - Terjemahan (26 Okt) ke Indonesia, English, Malaysia; bila gagal, tetap bahasa asli.
+  - Worker memulihkan font yang tidak valid ke font resmi preset.
+- **Infrastruktur:**
+  - Backend Node.js (cluster PM2, 3 proses), PostgreSQL, Nginx (prerender untuk bot SEO), SSE untuk notifikasi, bot Telegram dua arah.
+  - Deteksi wajah lokal TinyFaceDetector + COCO-SSD.
+  - TTS gratis = Edge-TTS; premium = ElevenLabs / Fish Audio / MiniMax.
+  - Unduhan YouTube memakai yt-dlp + failover proxy lokal (geo-block).
+
+## 13. Lapisan luar — semua fitur dijalankan sampai jadi (23 Nov 2026, lanjutan)
+
+Dijalankan lewat API resmi dari sesi login (payload sesuai spesifikasi/bundle). Kredit 359 → 338 (21 terpakai).
+
+| Fitur | Job | Biaya | Hasil |
+|---|---|---|---|
+| Atur Manual (`/manual-segment/submit`) | 367328 | 2 | 42 dtk, `9:16-gaming`, Pill Slide ter-burn (`captioned-local`), 73 kata Whisper, Brand Kit otomatis terpasang |
+| Buat B-roll (`/broll-collage/plans` → `/apply`) | plan 5777 → 367436 | 0 | 3 momen @2,5 dtk: komik ("Kena *Scam* Lagi" + label "RUGI DONG!"), kolase, sobek. Latar dari koleksi `gaya:topik-N` |
+| Highlight Bola (`/sports-highlight/submit`) | 367413 | 2 | Reel 111 dtk 25 fps, Square Blur, papan skor + daftar pencetak gol bertambah (0–0 → 3–1). Narasi Gemini TTS gratis |
+| WA Story (`/wa-story/optimize`) | 367415 | 2 | 35,7 → 15,7 MB, 1080×1920 30 fps |
+| Loop (`/seamless-loop/submit`) | 367416 | 3 | 2× + crossfade 0,5 → 83,18 dtk (overlap nyata ±0,95 dtk), 88 MB |
+| Konten Tempel (`/overlay/upload-video` → `/overlay/export`) | 367423 | 2 | Latar video blur + video utama + teks + CTA; 28 MB |
+| AI Content Creator (`/content-creator/create`) | 367425 | ±8 | 45 dtk, gambar stok/AI + Ken Burns + Pill Slide, Edge-TTS |
+| TTS (`/tts/generate`) | — | 0 | Edge-TTS gratis (56 suara); Fish Audio 14; ElevenLabs perlu kunci |
+| Generate Prompt (`/prompt-generator/generate`) | — | 1 | Prompt jadi, **tapi blok `<think>` model reasoning ikut terkirim ke pengguna** |
+
+Tidak dijalankan:
+- **Story Studio dan export Video Editor:** alur proyek multi-langkah. Biayanya: gambar 2, TTS 1, video 4–6, export 4; editor 1 kredit/menit.
+- **Clone Suara:** perlu suara orang + izin pemiliknya.
+- **Auto Upload:** akan memposting ke akun sosial.
+- **Motion Graphic / Music Generator:** dimatikan admin.
+
+Biaya Content Creator: 8 kredit/menit (stok + AI), 12 (gambar AI saja), AI Video Full nonaktif; Enterprise 2×/jam, 2×/hari, maks 72 dtk.
+
+### 13.1 Forensik file output (9 file, diunduh dengan izin)
+
+| File | Video | Encoder x264 | Bitrate | Audio | Loudness |
+|---|---|---|---|---|---|
+| Klip Quick Process / Atur Manual / B-roll | H.264 High@4.0 1080×1920 30 fps | CPU core 165, 24 thread, **CRF 18**, setara preset *fast* (subme 6, ref 2, b 3), VBV maks 8 Mbps, GOP 2 dtk | 6–7 Mbps | AAC 48 kHz 2ch 130 kbps | −13,7 LUFS, **true peak 0 sampai +0,2 dBFS (clipping)**, LRA 15–16 |
+| Klip ber-Hook B-roll (365905) | sama | sama | 4,9 Mbps | sama | **−9,0 LUFS** (jauh lebih keras), LRA 5,6 |
+| Loop & Konten Tempel | **Constrained Baseline** | **ultrafast** (subme 0, tanpa B-frame / AQ / deblock), CRF 23 | 5,5–8,3 Mbps | AAC 44,1/48 kHz | −13,7 |
+| WA Story | High@4.1 | **2-pass 2,8 Mbps**, subme 8, AQ 2, psy-trellis 0,15, deblock −1 | 2,8 Mbps | AAC 44,1 kHz | −13,7 |
+| Highlight Bola | High 25 fps bt709 | CRF 22 veryfast (subme 2) | 3,7 Mbps | AAC 44,1 kHz | **−20,6 LUFS** (pelan) |
+| Content Creator | High **yuvj420p (full range)** | CRF 23 veryfast, GOP 2 dtk | 2,3 Mbps | AAC 44,1 kHz **mono** | −17,3 LUFS |
+
+Semua file: muxer Lavf 62.12 (FFmpeg 8.x). **Tidak ada encode GPU (NVENC)**; semuanya x264 di CPU 24 thread.
+
+### 13.2 Bug & kelemahan baru yang terlihat
+1. **B-roll menghapus subtitle.** Klip yang diberi Buat B-roll (365866 → 367436) dirender ulang tanpa subtitle sama sekali,
+   padahal klip aslinya ber-subtitle.
+2. **Brand Kit menutupi wajah.** Logo ditempatkan di `y=1455` (mulut/dagu streamer) di semua klip gaming, juga di sisipan B-roll.
+3. **Tepi potongan orang di B-roll patah-patah** (mask beresolusi rendah).
+4. **Konten Tempel:** teks widget jatuh ke font serif cadangan, spasinya rusak di sekitar angka.
+5. **Audio tidak konsisten:** true peak > 0 dBFS (clipping) di klip utama; klip Hook B-roll −9 LUFS, Bola −20,6 LUFS,
+   Content Creator mono −17,3 LUFS.
+6. **Kualitas encode:** Loop & Konten Tempel memakai preset ultrafast Baseline (blok/artefak di bitrate tinggi).
+   Content Creator full-range `yuvj420p` (berisiko warna pucat/kontras salah di pemutar).
+7. **Token stream** disimpan di memori 1 proses, sementara backend berjalan di 3 proses PM2. Unduhan/pemutaran ±2/3 kali
+   gagal 401 "Link sudah tidak valid" (perlu sampai 8 percobaan).
+8. **Generate Prompt** membocorkan blok `<think>` (sama dengan Transcript Improve).
+9. **Loop:** crossfade 0,5 dtk menghasilkan overlap ±0,95 dtk.
+
+### 13.3 Pelajaran untuk viral-auto-klip
+- **Yang sudah lebih baik di kita:**
+  - encode NVENC p7 + CQ 17 dengan VBR, atau x264 *slow*;
+  - mastering −14 LUFS dengan limiter, intro B-roll ikut −14 LUFS;
+  - logo/hook menghindari wajah;
+  - subtitle tetap ada setelah burn ulang (tes subtitle live).
+- **Yang layak ditiru:**
+  - parameter preset subtitle persis (12.1) dan font Google (Montserrat 800, Anton, Poppins, Fredoka One, dll.);
+  - template teks B-roll (Lakban, Pin Lokasi, Label Sinematik);
+  - durasi klip ditentukan AI sampai 3 menit;
+  - Buat B-roll per momen di tengah klip dengan latar per topik;
+  - deteksi facecam berbasis ukuran (±1% layar).
