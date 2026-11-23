@@ -597,6 +597,11 @@ def smooth_face_trajectory(bboxes: List[Tuple[int, int, int, int]], window: int 
 
 def generate_ass_subtitles(segments: List[Dict], style: Dict, output_path: str, video_width: int, video_height: int):
     """Generate advanced ASS subtitle file with animations"""
+    if style.get("preset"):  # (v7) preset bergaya: tata letak per kata + animasi (core/caption_presets)
+        from . import caption_presets
+        info = caption_presets.write_ass(segments, style, output_path, video_width, video_height)
+        logger.info(f"ASS subtitles (preset {info['preset']}, {info['chunks']} layar, font {info['font']}): {output_path}")
+        return
     font_size = int(style.get("font_size", 48))
     outline = int(style.get("stroke_width", style.get("border_thickness", 3)))
     vertical_position = int(style.get("vertical_position", 95))

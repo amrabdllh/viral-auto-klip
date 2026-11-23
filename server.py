@@ -60,6 +60,8 @@ def _start_background_workers():
     studio_scheduler.start()
     from core import trends as studio_trends  # v6.8: riset tren diperbarui otomatis di latar
     studio_trends.start()
+    from core import autopilot as studio_autopilot  # (v7) Auto Pilot: pantau channel → klip otomatis
+    studio_autopilot.start()
 
 # Keamanan v4: server ini bisa menulis .env (API key) & mengupload video atas namamu.
 # Dulu CORS "*" -> website APA PUN yang kamu buka bisa memanggil localhost:8000.

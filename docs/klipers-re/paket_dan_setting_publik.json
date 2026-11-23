@@ -1,0 +1,161 @@
+{
+ "plans": [
+  {
+   "id": 1,
+   "plan_name": "demo",
+   "display_name": "Demo",
+   "description": "Coba gratis tanpa batas waktu",
+   "segments_included": 0,
+   "price_idr": 0,
+   "can_create_videos": false,
+   "storage_limit_gb": 0,
+   "features": [
+    "Mode lihat saja",
+    "Kredit trial gratis sekali per akun",
+    "Trial: Quick Process dan Video Editor",
+    "Trial: Viral Suggestion, Title Optimizer, Transcript Generator, Prompt Generator",
+    "Fitur lain butuh paket berbayar"
+   ],
+   "created_at": "2026-01-21T08:55:07.009Z",
+   "is_sold_out": false,
+   "activeDiscount": null
+  },
+  {
+   "id": 2,
+   "plan_name": "basic",
+   "display_name": "Basic",
+   "description": "Sempurna untuk content creator pemula",
+   "segments_included": 200,
+   "price_idr": 60000,
+   "can_create_videos": true,
+   "storage_limit_gb": 2,
+   "features": [
+    "200 kredit (tanpa expired)",
+    "Penyimpanan 2 GB",
+    "Semua mode video: Quick Process, Atur Manual, Split-Cam, Konten Tempel",
+    "Video Editor dan semua preset subtitle",
+    "Semua AI Tools: Viral Analytics, Text to Speech, Voice Clone, AI Content Creator, dll.",
+    "Story Studio, Studio B-roll, Hook B-roll + suara",
+    "Brand Kit: logo di semua klip",
+    "Jadwal upload ke YouTube, TikTok, Facebook",
+    "Tanpa Seamless Loop, Motion Graphic, dan akses API"
+   ],
+   "created_at": "2026-01-21T08:55:07.009Z",
+   "is_sold_out": false,
+   "activeDiscount": {
+    "id": 13,
+    "code": "DISKON10",
+    "description": "Diskon 10% Plan Basic dan Lifetime",
+    "type": "percentage",
+    "value": 10,
+    "amount": 6000,
+    "finalPrice": 54000
+   }
+  },
+  {
+   "id": 3,
+   "plan_name": "pro",
+   "display_name": "Pro",
+   "description": "Untuk kreator profesional",
+   "segments_included": 500,
+   "price_idr": 165000,
+   "can_create_videos": true,
+   "storage_limit_gb": 5,
+   "features": [
+    "500 kredit (tanpa expired)",
+    "Penyimpanan 5 GB",
+    "Semua mode video: Quick Process, Atur Manual, Split-Cam, Konten Tempel",
+    "Video Editor dan semua preset subtitle",
+    "Semua AI Tools: Viral Analytics, Text to Speech, Voice Clone, AI Content Creator, dll.",
+    "Story Studio, Studio B-roll, Hook B-roll + suara",
+    "Brand Kit: logo di semua klip",
+    "Jadwal upload ke YouTube, TikTok, Facebook",
+    "Tanpa Seamless Loop, Motion Graphic, dan akses API"
+   ],
+   "created_at": "2026-01-21T08:55:07.009Z",
+   "is_sold_out": false,
+   "activeDiscount": {
+    "id": 18,
+    "code": "DISKONNOVEMBER",
+    "description": "Diskon 45% bulan november",
+    "type": "percentage",
+    "value": 45,
+    "amount": 74250,
+    "finalPrice": 90750
+   }
+  },
+  {
+   "id": 4,
+   "plan_name": "enterprise",
+   "display_name": "Enterprise",
+   "description": "Solusi untuk tim & bisnis",
+   "segments_included": 1000,
+   "price_idr": 250000,
+   "can_create_videos": true,
+   "storage_limit_gb": 8,
+   "features": [
+    "1.000 kredit (tanpa expired)",
+    "Penyimpanan 8 GB",
+    "Semua fitur Pro",
+    "Seamless Loop Video",
+    "Motion Graphic"
+   ],
+   "created_at": "2026-01-21T08:55:07.009Z",
+   "is_sold_out": false,
+   "activeDiscount": {
+    "id": 18,
+    "code": "DISKONNOVEMBER",
+    "description": "Diskon 45% bulan november",
+    "type": "percentage",
+    "value": 45,
+    "amount": 112500,
+    "finalPrice": 137500
+   }
+  },
+  {
+   "id": 25,
+   "plan_name": "lifetime",
+   "display_name": "Lifetime",
+   "description": "Akses seumur hidup dengan unlimited credits",
+   "segments_included": -1,
+   "price_idr": 1550000,
+   "can_create_videos": true,
+   "storage_limit_gb": 50,
+   "features": [
+    "Kredit tanpa batas (pemakaian wajar harian)",
+    "Penyimpanan 50 GB",
+    "Semua fitur Enterprise",
+    "Seamless Loop Video",
+    "Motion Graphic",
+    "Akses API (diaktifkan admin)"
+   ],
+   "created_at": "2026-04-24T09:25:20.283Z",
+   "is_sold_out": true,
+   "activeDiscount": {
+    "id": 1,
+    "code": "DISKON30",
+    "description": "DISKON 30% Plan Pro",
+    "type": "percentage",
+    "value": 30,
+    "amount": 465000,
+    "finalPrice": 1085000
+   }
+  }
+ ],
+ "public_settings": {
+  "auto_subtitle_feature_enabled": true,
+  "seamless_loop_max_count": 500,
+  "seamless_loop_max_crossfade": 3,
+  "seamless_loop_max_duration": 7200,
+  "announcement_active": false,
+  "overlay_export_cost": 2,
+  "announcement_text": "🔥 UPDATE! Harga mulai 1 Credit! Generate Video AI Seedance 2.5 & Generate Image GPT Image 2.5 sekarang sudah READY di Klipers AI 🚀",
+  "announcement_type": "promo",
+  "announcement_link": "https://ai.klipers.pro",
+  "announcement_link_text": "Coba Sekarang ",
+  "announcement_link_style": "solid-white",
+  "editor_export_max_duration": 300,
+  "editor_export_max_clips": 100,
+  "seamless_loop_cost": 3
+ }
+}

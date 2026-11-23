@@ -215,8 +215,18 @@ def process_clips(
         "edit_overrides": dict(edit_opts or {}),
         "stream_layout": stream_layout,
         "lower_third": lower_third or {},
+        "style_name": style_name,  # (v7) dicatat untuk subtitle live
     }
     logger.info(f"  Gaya editing: {opts['edit']}")
+    if _hook_mode() == "broll":  # (v7) pembuka B-roll + narasi menggantikan hook teks & cold open
+        from . import hook_broll
+        recent_b: List[str] = []
+        for c in clips_data:
+            c["no_cold_open"] = True
+            c["hook_broll_style"] = hook_broll.pick_style(c, recent_b)
+            recent_b.append(c["hook_broll_style"])
+        logger.info(f"  Hook B-roll: {', '.join(recent_b)}")
+    _plan_hook_styles(clips_data)
 
     workers = max(1, int(config.PARALLEL_CLIPS)) if config.PARALLEL_PROCESSING else 1
     results: Dict[int, Optional[Dict]] = {}
@@ -524,8 +534,11 @@ def _process_single_clip(
             clip_style["margin_zones"] = [(a, b, out_h // 2 - int(clip_style.get("font_size", 70)))
                                           for a, b in stacked_zones]
         stickers: List[Dict] = []
-        if edit.get("caption_fx"):
-            clip_style["fx"] = True
+        # (v7) preset subtitle Emoji / Live Reaction: emoji berwarna tetap muncul walau caption_fx mati
+        emoji_mode = clip_style.get("emoji_stickers") if opts.get("enable_captions", True) else None
+        if edit.get("caption_fx") or emoji_mode:
+            if edit.get("caption_fx"):
+                clip_style["fx"] = True
             clip_style["power_words"] = sorted(editing.power_word_set(words_rel))
             margin_v = int(clip_style.get("vertical_position", 420))
             size = int(out_w * 0.17)
@@ -533,7 +546,9 @@ def _process_single_clip(
             busy = [(b["t"] - 0.3, b["t"] + b["dur"] + 0.3) for b in broll]
             if freeze_at:
                 busy.append((freeze_at - 0.5, freeze_at + editing.FREEZE_SEC + 0.6))
-            for k, st in enumerate(editing.plan_stickers(words_rel, clip_duration, skip_until=cold_shift)):
+            sticker_kw = {"limit": 7, "min_spacing": 3.0} if emoji_mode == "swap" else \
+                {"limit": 10, "min_spacing": 2.2} if emoji_mode == "reaction" else {}
+            for k, st in enumerate(editing.plan_stickers(words_rel, clip_duration, skip_until=cold_shift, **sticker_kw)):
                 if any(st["t"] <= b and st["t"] + st["dur"] >= a for a, b in busy):
                     continue
                 png = editing.emoji_png(st["emoji"])
@@ -554,10 +569,27 @@ def _process_single_clip(
             ass_for_burn = str(subtitle_path)
         # v4: kartu hook + watermark + CTA akhir digabung ke encode yang sama (dulu 2 encode tambahan)
         overlays, overlay_files = [], []
+        # (v7) Hook B-roll + suara: intro bergaya dirender dulu; bila jadi, hook teks/kartu dilewati
+        intro = None
+        if _hook_mode() == "broll" and not clip_info.get("no_hook_card"):
+            from . import hook_broll
+            try:
+                region = (0.0, float(layout["cam_ratio"])) if isinstance(layout, dict) and layout.get("cam_ratio") else None
+                intro = hook_broll.build(clip_info, input_for_caption, out_w, out_h, clip_dir, _video_encode_args(crf=17),
+                                         region=region)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Hook B-roll gagal, pakai hook teks: {str(exc)[:200]}")
+                intro = None
+            if intro:
+                clip_info["no_hook_card"] = True
+                clip_info["hook_broll"] = {k: intro[k] for k in ("style", "title", "dur", "voice", "provider", "people", "cast")}
+                logger.info(f"  Hook B-roll {intro['style']} ({intro['dur']} dtk, {intro['cast']}): {intro['title']!r}")
+        # (v7) hook bergaya per klip (core/hook_styles) menggantikan kartu hook / teks di belakang orang
+        hook_seq = _render_hook_seq(clip_info, out_w, out_h, clip_dir)
         # (v6.7) efek visual pro: teks hook di belakang orang, flash transisi, light leak, motion blur punch-in
         behind, fx_str, leaks = None, "", []
         pro_fx = bool(edit.get("pro_fx")) and not layout
-        if pro_fx and config.ENABLE_BROLL and not clip_info.get("no_hook_card") and clip_info.get("hook_text"):
+        if pro_fx and config.ENABLE_BROLL and not clip_info.get("no_hook_card") and clip_info.get("hook_text") and not hook_seq:
             try:
                 mask_file = clip_dir / "person_mask.mkv"
                 mask_avg = editing.person_mask(input_for_caption, str(mask_file), until=2.6)
@@ -583,7 +615,7 @@ def _process_single_clip(
             except Exception as exc:
                 logger.warning(f"Teks di belakang orang dilewati: {str(exc)[:160]}")
                 behind = None
-        if config.ENABLE_BROLL and not clip_info.get("no_hook_card") and not behind:
+        if config.ENABLE_BROLL and not clip_info.get("no_hook_card") and not behind and not hook_seq:
             f, files = bumper_filters(clip_info, str(final_clip_path))
             overlays += f
             overlay_files += files
@@ -599,14 +631,16 @@ def _process_single_clip(
                 if t >= 3.0 and t <= clip_duration - 1.2 and not any(a <= t <= b for a, b in busy_b) and all(abs(t - q) > 6 for q in leaks):
                     leaks.append(round(t, 2))
             leaks = leaks[:2]
-            clip_info["pro_fx"] = {"hook_style": ("headline" if behind and behind.get("front") else "behind" if behind else "card"),
+            clip_info["pro_fx"] = {"hook_style": (hook_seq["style"] if hook_seq else "headline" if behind and behind.get("front")
+                                                  else "behind" if behind else "card"),
                                    "flashes": flashes, "motion_blur": blur_starts, "leaks": leaks}
         end_cta = edit["end_cta"] and config.ADD_END_SCREEN
         f, files = extras_filters(str(final_clip_path), clip_duration, add_watermark=opts["add_watermark"], end_cta=end_cta)
         overlays += f
         overlay_files += files
         lt_items = _lower_third_items(opts.get("lower_third") or {}, speaker_plan, clip_duration,
-                                      t_min=max(cold_shift + 0.4, 2.9 if config.ENABLE_BROLL and not clip_info.get("no_hook_card") else 0.6))
+                                      t_min=max(cold_shift + 0.4, (hook_seq["dur"] + 0.3) if hook_seq else
+                                                2.9 if config.ENABLE_BROLL and not clip_info.get("no_hook_card") else 0.6))
         if edit.get("lower_third") and lt_items:
             # Split/campaign: kartu nama di area gameplay, di atas subtitle dan
             # banner (0.86 dulu menabrak banner MotionKlip di y=1584).
@@ -617,22 +651,39 @@ def _process_single_clip(
         polish = dict(width=out_w, height=out_h, duration=clip_duration, ass_path=ass_for_burn, grade=edit["color_grade"],
                       zoom_chain=zoom_chain, progress_bar=edit["progress_bar"], encode_args=_video_encode_args(crf=17),
                       escape_path=_escape_ffmpeg_filter_path, overlays=overlays)
-        fx = dict(fx_chain=fx_str, behind_text=behind if behind and behind.get("mask") else None, leaks=leaks)
+        # (v7) subtitle live: encode yang sama juga menulis versi tanpa caption (lihat core/subtitle_live)
+        clean_file = clip_dir / "clean.mp4"
+        clean_file.unlink(missing_ok=True)
+        if getattr(config, "SUBTITLE_LIVE", True):
+            polish["clean_path"] = str(clean_file)
+        fx = dict(fx_chain=fx_str, behind_text=behind if behind and behind.get("mask") else None, leaks=leaks, hook_seq=hook_seq)
         try:
             try:
-                editing.render_polish(input_for_caption, str(final_clip_path), stickers=stickers, broll=broll, **fx, **polish)
+                try:
+                    editing.render_polish(input_for_caption, str(final_clip_path), stickers=stickers, broll=broll, **fx, **polish)
+                except subprocess.CalledProcessError as exc:
+                    if not polish.get("clean_path"):
+                        raise
+                    # mis. batas sesi NVENC (2 keluaran sekaligus) → ulangi tanpa master bersih
+                    logger.warning(f"Master tanpa caption dilewati ({(exc.stderr or b'')[-200:]!r})")
+                    polish.pop("clean_path", None)
+                    clean_file.unlink(missing_ok=True)
+                    editing.render_polish(input_for_caption, str(final_clip_path), stickers=stickers, broll=broll, **fx, **polish)
             except subprocess.CalledProcessError as exc:
-                if not stickers and not broll and not fx_str and not behind and not leaks:
+                if not stickers and not broll and not fx_str and not behind and not leaks and not hook_seq:
                     raise
                 logger.warning(f"Stiker/b-roll/efek pro dilewati ({(exc.stderr or b'')[-300:]!r})")
                 stickers, broll = [], []
-                if behind and behind.get("mask"):  # teks di belakang orang gagal → kembalikan kartu hook biasa
+                if hook_seq:
+                    clip_info.pop("hook_overlay", None)
+                if (behind and behind.get("mask")) or hook_seq:  # hook bergaya/di belakang orang gagal → kartu hook biasa
                     f, files = bumper_filters(clip_info, str(final_clip_path))
                     polish["overlays"] = f + polish["overlays"]
                     overlay_files += files
                 editing.render_polish(input_for_caption, str(final_clip_path), **polish)
         except subprocess.CalledProcessError as exc:
             logger.warning(f"Polish render gagal ({(exc.stderr or b'')[-300:]!r}); fallback caption saja.")
+            clean_file.unlink(missing_ok=True)
             if ass_for_burn:
                 burn_subtitles(input_for_caption, ass_for_burn, str(final_clip_path), clip_style)
             else:
@@ -640,6 +691,8 @@ def _process_single_clip(
         finally:
             for text_file in overlay_files:
                 Path(text_file).unlink(missing_ok=True)
+            if hook_seq:
+                shutil.rmtree(hook_seq["dir"], ignore_errors=True)
 
         if enhanced_audio and enhanced_audio.exists():
             audio_replaced_path = clip_dir / f"{clip_name}_audio.mp4"
@@ -663,10 +716,17 @@ def _process_single_clip(
         # (v6.4) Sound design: impact di hook/awal cerita, riser→impact di puncak, whoosh di punch-in, pop di stiker.
         # (v4) tanpa sound design: whoosh halus di titik punch-in saja
         sfx_out = clip_dir / f"{clip_name}_sfx.mp4"
+        hook_sfx = []
+        if clip_info.get("hook_overlay") and getattr(config, "HOOK_OVERLAY_SFX", True) and not cold_shift:
+            from . import hook_styles
+            hook_sfx = hook_styles.sfx_events(clip_info["hook_overlay"]["style"], float(clip_info["hook_overlay"]["dur"]))
         try:
-            if edit.get("sound_design") or mute_spans:
+            if edit.get("sound_design") or mute_spans or hook_sfx:
                 events = editing.plan_sound_design(clip_duration, emphasis, stickers, peaks_rel, cold_shift=cold_shift) \
                     if edit.get("sound_design") else []
+                if hook_sfx:  # bunyi pembuka sesuai gaya hook menggantikan dentuman hook generik
+                    events = [e for e in events if not (e[0] < 0.3 and e[1] == "impact")] + hook_sfx
+                    events.sort()
                 if edit.get("sound_design"):
                     events += [(max(b["t"] - 0.15, 0), "whoosh", 0.32) for b in broll]
                     events += [(t, "impact", 0.45) for t in shakes if all(abs(t - e[0]) > 0.3 for e in events)]
@@ -749,6 +809,37 @@ def _process_single_clip(
 
         if not Path(final_clip_path).exists() or Path(final_clip_path).stat().st_size == 0:
             raise RuntimeError(f"Final clip was not created: {final_clip_path}")
+
+        # (v7) subtitle live: data caption + audio final disimpan → caption bisa diedit & di-burn ulang
+        clip_info.pop("subtitle_live", None)
+        if clean_file.exists():
+            from . import subtitle_live
+            try:
+                live_segs = segments_for_sub if ass_for_burn else build_subtitle_segments_for_clip(clip_info)
+                if subtitle_live.save(clip_dir, style_name=opts.get("style_name") or "viral", clip_style=clip_style,
+                                      segments=live_segs, width=out_w, height=out_h, enabled=bool(ass_for_burn),
+                                      tempo=float(clip_info.get("tempo") or 1.0), final_path=str(final_clip_path)):
+                    clip_info["subtitle_live"] = True
+                    clip_info["caption_style"] = opts.get("style_name") or "viral"
+            except Exception as exc:
+                logger.warning(f"Data subtitle live tidak disimpan: {exc}")
+        if intro:  # intro disambung di depan klip final (setelah audio live disimpan)
+            from . import hook_broll
+            intro_mp4 = clip_dir / "intro.mp4"
+            try:
+                hook_broll.mux_intro(intro["video"], intro["audio"], str(final_clip_path), str(intro_mp4))
+                hook_broll.prepend(str(final_clip_path), str(intro_mp4), _video_encode_args(crf=17))
+                clip_info["hook_cover"] = intro.get("cover")
+                if clip_info.get("subtitle_live"):
+                    from . import subtitle_live
+                    subtitle_live.set_intro(clip_dir, intro_mp4.name)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Intro hook B-roll tidak tersambung: {str(exc)[:200]}")
+                clip_info.pop("hook_broll", None)
+            for tmp_f in (intro["video"], intro["audio"], str(clip_dir / "hook_voice.mp3")):
+                Path(tmp_f).unlink(missing_ok=True)
+            if not clip_info.get("subtitle_live"):
+                intro_mp4.unlink(missing_ok=True)
 
         # Cleanup temp files.
         # FIX: dulu hanya raw/virtual_bg/eye_contact/reframed yang dihapus; versi antara
@@ -1966,6 +2057,56 @@ def _write_drawtext_file(output_path: str, label: str, text: str) -> str:
     with open(text_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(str(text))
     return str(text_path)
+
+
+def _hook_mode() -> str:
+    """(v7) 'text' = hook bergaya di atas video (default), 'broll' = intro B-roll + narasi."""
+    return str(getattr(config, "HOOK_MODE", "text") or "text").strip().lower()
+
+
+def _plan_hook_styles(clips: List[Dict]) -> None:
+    """(v7) Pilih gaya hook untuk semua klip SEBELUM render (bisa paralel) agar gaya antar-klip bervariasi."""
+    if not config.ENABLE_BROLL:
+        return
+    from . import hook_styles
+    recent: List[str] = []
+    for c in clips:
+        if c.get("no_hook_card") or not c.get("hook_text"):
+            continue
+        try:
+            p = hook_styles.plan(c, recent)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Rencana gaya hook dilewati: {str(exc)[:160]}")
+            p = None
+        if p:
+            p["for_hook"] = c.get("hook_text")
+            c["hook_plan"] = p
+            recent.append(p["style"])
+    if recent:
+        logger.info(f"  Gaya hook: {', '.join(recent)}")
+
+
+def _render_hook_seq(clip_info: Dict, width: int, height: int, clip_dir: Path) -> Optional[Dict]:
+    """Urutan PNG hook bergaya untuk klip ini, atau None (kartu hook lama / tanpa hook)."""
+    if not config.ENABLE_BROLL or clip_info.get("no_hook_card") or not clip_info.get("hook_text"):
+        return None
+    from . import hook_styles
+    try:
+        plan = clip_info.get("hook_plan")
+        if not plan or plan.get("for_hook") != clip_info.get("hook_text"):  # hook berubah sesudah direncanakan
+            plan = hook_styles.plan(clip_info, [])
+        if not plan:
+            return None
+        # layout gaming: di panel gameplay (di bawah caption sambungan); biasa: zona aman atas
+        y = float(clip_info["hook_y"]) if clip_info.get("hook_y") else 0.11
+        seq = hook_styles.render_sequence(plan, width, height, clip_dir, y_frac=y)
+        if seq:
+            clip_info["hook_overlay"] = {"style": seq["style"], "text": seq["text"], "dur": seq["dur"], "by": plan.get("by")}
+            logger.info(f"  Hook {seq['style']}: {hook_styles.plain(seq['text'])!r}")
+        return seq
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Hook bergaya gagal, pakai kartu hook: {str(exc)[:200]}")
+        return None
 
 
 def bumper_filters(clip_info: Dict, output_path: str) -> Tuple[List[str], List[str]]:

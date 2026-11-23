@@ -13,6 +13,7 @@ import json
 import math
 import re
 import shutil
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -95,7 +96,7 @@ def transcribe(ctx: JobContext, video: str, params: Dict, pct: int = 20) -> tupl
 def register_clips(ctx: JobContext, clips: List[Dict], source: str) -> None:
     for c in clips:
         meta = {k: c.get(k) for k in ("score", "category", "hook_text", "ai_title", "upload_caption", "hashtags",
-                                       "duration", "thumbnail", "reason", "fyp_grade")}
+                                       "duration", "thumbnail", "reason", "fyp_grade", "subtitle_live")}
         meta["source"] = source
         meta["title"] = c.get("ai_title") or c.get("hook_text") or Path(c["file_path"]).stem
         c["asset_id"] = ctx.asset("clip", c["file_path"], name=meta["title"], meta=meta)["id"]
@@ -110,6 +111,9 @@ def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> No
             if out != src:
                 Path(out).replace(src)
                 c["duration"] = round(ffx.probe(src)["duration"], 2)  # penutup klip menambah durasi
+                if c.get("subtitle_live"):  # (v7) burn ulang subtitle memasang Brand Kit lagi
+                    from . import subtitle_live
+                    subtitle_live.mark_branded(src, force)
         except Exception as exc:
             ctx.log(f"Logo Brand Kit gagal di {Path(c['file_path']).name}: {exc}")
 
@@ -158,6 +162,63 @@ def enforce_clip_duration(clips: List[Dict], *, tolerance: float = 0.75,
         if lo - tolerance <= d <= hi + tolerance:
             kept.append(c)
     return kept
+
+
+def parse_time(value) -> Optional[float]:
+    """'1:02:30' / '62:30' / '3750' / 3750 → detik. Kosong/tidak valid → None."""
+    if value is None or str(value).strip() == "":
+        return None
+    s = str(value).strip().replace(".", ":") if re.fullmatch(r"\d+\.\d{2}\.\d{2}", str(value).strip()) else str(value).strip()
+    try:
+        if ":" in s:
+            total = 0.0
+            for part in s.split(":"):
+                total = total * 60 + float(part)
+            return max(0.0, total)
+        return max(0.0, float(s))
+    except ValueError:
+        return None
+
+
+def parse_focus(raw) -> List[str]:
+    """Momen spesifik: kata kunci dipisah koma/baris/titik koma, maks 20, tanpa duplikat."""
+    items = raw if isinstance(raw, list) else re.split(r"[,;\n]+", str(raw or ""))
+    out: List[str] = []
+    for it in items:
+        k = " ".join(str(it).split()).strip(" #")
+        if k and k.lower() not in (x.lower() for x in out):
+            out.append(k[:60])
+    return out[:20]
+
+
+def trim_range(ctx: JobContext, video: str, p: Dict) -> str:
+    """(v7) Proses hanya rentang waktu tertentu dari video (mis. 1:00:00–1:30:00): dipotong tanpa encode ulang
+    lalu semua tahap (transkrip, analisis, render) bekerja di potongan itu — video panjang jauh lebih cepat."""
+    rs, re_ = parse_time(p.get("range_start")), parse_time(p.get("range_end"))
+    if rs is None and re_ is None:
+        return video
+    from .utils import get_video_info
+    dur = float(get_video_info(video).get("duration") or 0)
+    a = rs or 0.0
+    b = min(re_ if re_ is not None else dur, dur) if dur else (re_ or 0)
+    if b - a < 20:
+        ctx.log(f"Rentang waktu diabaikan (terlalu pendek / di luar durasi video: {a:.0f}–{b:.0f} dtk)")
+        return video
+    if a <= 0.5 and dur and b >= dur - 0.5:
+        return video
+    out = ctx.dir / f"range_{int(a)}_{int(b)}{Path(video).suffix or '.mp4'}"
+    if not out.exists():
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{a:.2f}", "-to", f"{b:.2f}", "-i", str(video),
+                        "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-avoid_negative_ts", "make_zero", str(out)],
+                       check=True, capture_output=True)
+    p["_range_offset"] = a
+    ctx.log(f"Rentang waktu proses: {_hms(a)}–{_hms(b)} ({(b - a) / 60:.0f} menit dari {dur / 60:.0f} menit)")
+    return str(out)
+
+
+def _hms(sec: float) -> str:
+    sec = int(sec)
+    return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
 
 
 def render_options(params: Dict) -> Dict:
@@ -367,6 +428,7 @@ def clip_quick(ctx: JobContext) -> Dict:
             return {"_message": "Video ini masih live — Mode Live dimulai, klip muncul tiap ±10 menit",
                     "live_job": child["id"], "clips": [], "total_clips": 0}
     video = resolve_source(ctx, p)
+    video = trim_range(ctx, video, p)  # (v7) rentang waktu proses
     info = get_video_info(video)
     info["title"] = _source_title(p, video)
     info["content_type"] = content_type(p, info["title"], p.get("url", ""))
@@ -391,14 +453,21 @@ def clip_quick(ctx: JobContext) -> Dict:
     # Kartu nama hanya muncul bila pengguna mengisi "Nama pembicara".
     p["_lower_third"] = build_lower_third(p, transcript)
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
+    focus = parse_focus(p.get("keyword") or p.get("specific_moments"))
+    info["focus_moments"] = focus
     clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video, auto_count=auto_mode)
     clips_data = enforce_clip_duration(clips_data, max_available=float(info.get("duration") or 0))
     if p.get("categories"):
         clips_data = [c for c in clips_data if c.get("category") in p["categories"]]
-    if p.get("keyword"):
-        kw = p["keyword"].lower()
-        boosted = [c for c in clips_data if kw in (c.get("transcript") or c.get("text", "")).lower()]
-        clips_data = boosted + [c for c in clips_data if c not in boosted]
+    if focus:  # (v7) momen spesifik: klip yang menyebut lebih banyak kata kunci didahulukan
+        def _hits(c: Dict) -> int:
+            txt = (c.get("transcript") or c.get("text", "")).lower()
+            return sum(1 for k in focus if k.lower() in txt)
+        for c in clips_data:
+            c["focus_hits"] = _hits(c)
+        clips_data = sorted(clips_data, key=lambda c: -min(c["focus_hits"], 1))
+        n_hit = sum(1 for c in clips_data if c["focus_hits"])
+        ctx.log(f"Momen spesifik ({', '.join(focus)}): {n_hit} klip menyebutnya")
     else:  # v6.8: tanpa kata kunci → momen yang menyebut topik yang SEDANG naik diutamakan otomatis
         try:
             from . import trends
@@ -447,6 +516,11 @@ def clip_quick(ctx: JobContext) -> Dict:
                 c["words"] = [w for s in kept for w in (s.get("words") or [])]
             except Exception:  # noqa: BLE001 - filter opsional
                 pass
+    if selected and not p.get("campaign"):
+        from . import clickbait
+        ctx.progress(56, "Judul & thumbnail", f"Menulis paket judul + thumbnail + hook yang sinkron untuk {len(selected)} klip…")
+        n_pkg = clickbait.apply(selected, str(info.get("title") or ""), prerender=True)
+        ctx.log(f"Paket judul/thumbnail/hook sinkron (penulis + juri AI): {n_pkg}/{len(selected)} klip")
     ctx.progress(58, "Render", f"Merender {n_render} klip (reframe wajah, caption, editing)"
                  + (f" — mode otomatis, perkiraan ±{max(1, round(n_render * 4))} menit…" if auto_n else "…"))
     if p.get("campaign"):
@@ -492,9 +566,11 @@ def ai_thumbnails(ctx: JobContext, clips: List[Dict], video: str, p: Dict, conte
     from . import autopublish, clickbait, thumb_ai
     if not clips:
         return
-    ctx.progress(89, "Teks thumbnail", f"Menulis teks thumbnail & judul yang jelas + memancing untuk {len(clips)} klip…")
-    n = clickbait.apply(clips, video_title)
-    ctx.log(f"Teks thumbnail ditulis ulang (penulis + juri AI): {n}/{len(clips)} klip")
+    todo = [c for c in clips if not c.get("copy_package")]
+    if todo:  # klip tanpa paket (mis. campaign): hook sudah tercetak → dikunci, judul & thumbnail mengikutinya
+        ctx.progress(89, "Teks thumbnail", f"Menulis judul & teks thumbnail yang sinkron untuk {len(todo)} klip…")
+        n = clickbait.apply(todo, video_title)
+        ctx.log(f"Judul & teks thumbnail sinkron dengan hook (penulis + juri AI): {n}/{len(todo)} klip")
     if p.get("thumb_ai") is False or not thumb_ai.enabled():
         return
     ctx.progress(90, "Thumbnail AI", f"Membuat thumbnail AI untuk {len(clips)} klip (latar AI + wajah asli)…")

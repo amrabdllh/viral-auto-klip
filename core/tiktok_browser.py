@@ -15,6 +15,7 @@ cookies.txt.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -339,19 +340,95 @@ def _set_schedule(page, publish_at: float) -> None:
         raise TikTokUploadError(f"Jadwal TikTok tidak terpasang (terisi {got_d} {got_t}, seharusnya {want_d} {want_t})")
 
 
+CONTENT_URL = "https://www.tiktok.com/tiktokstudio/content"
+_ACTION_MORE = '[data-tt="components_ActionCell_Clickable"]'  # tombol "…" tiap baris (Unduh / Hapus)
+
+
+def _search_content(page, probe: str, wait_ms: int = 6000) -> None:
+    """Buka TikTok Studio → Konten lalu saring dengan kolom 'Cari deskripsi postingan'. Daftar hanya memuat ±10 baris
+    pertama (urut jam tayang terbaru), jadi postingan terjadwal yang lebih awal tidak terlihat tanpa pencarian."""
+    page.goto(CONTENT_URL, wait_until="domcontentloaded", timeout=45_000)
+    page.wait_for_timeout(wait_ms)
+    _dismiss_overlays(page)
+    box = _first(page, ['input[placeholder*="Cari"]', 'input[placeholder*="Search"]', 'input[type="search"]'], timeout=8000)
+    if box is None:
+        return
+    box.fill(probe[:60])
+    box.press("Enter")
+    page.wait_for_timeout(4000)
+
+
 def _in_content_list(page, probe: str, tries: int = 3) -> bool:
     """Apakah postingan dengan awal caption `probe` ada di TikTok Studio → Konten (termasuk yang terjadwal)."""
     want = " ".join(probe.split()).lower()
+    seen = lambda: want in " ".join(page.locator("body").inner_text().split()).lower()  # noqa: E731
     for i in range(tries):
         try:
-            if "tiktokstudio/content" not in page.url or i:
-                page.goto("https://www.tiktok.com/tiktokstudio/content", wait_until="domcontentloaded", timeout=45_000)
+            # 1) daftar biasa, di-scroll: postingan terjadwal ada di urutan teratas (urut jam tayang), tetapi hanya
+            #    ±10 baris pertama yang dimuat. Pencarian TikTok belum mengindeks postingan yang baru diunggah.
+            page.goto(CONTENT_URL, wait_until="domcontentloaded", timeout=45_000)
             page.wait_for_timeout(6000 + 3000 * i)
-            if want in " ".join(page.locator("body").inner_text().split()).lower():
+            _dismiss_overlays(page)
+            for _ in range(6):
+                if seen():
+                    return True
+                page.mouse.move(800, 600)
+                page.mouse.wheel(0, 2500)
+                page.wait_for_timeout(1500)
+            # 2) cadangan: kolom pencarian (postingan lama yang tertimbun)
+            _search_content(page, " ".join(probe.split()[:8]), 4000)
+            if seen():
                 return True
         except Exception:  # noqa: BLE001
             pass
     return False
+
+
+def delete_posts(probes: List[str], progress=None) -> Dict[str, Any]:
+    """HAPUS PERMANEN postingan (mis. yang terjadwal, karena TikTok tidak bisa mengedit jadwal) berdasarkan awal
+    caption. Tiap postingan dicari, dihapus lewat menu "…" → Hapus → konfirmasi, lalu dipastikan sudah hilang.
+    Return {probe: "deleted" | "not_found" | "error: …"}."""
+    from playwright.sync_api import sync_playwright
+    say = progress or (lambda *_: None)
+    out: Dict[str, Any] = {}
+    with sync_playwright() as p:
+        browser = _launch(p)
+        try:
+            context = browser.new_context(user_agent=UA, viewport={"width": 1440, "height": 1000})
+            context.add_cookies(load_cookies())
+            page = context.new_page()
+            for probe in probes:
+                want = " ".join(probe.split()).lower()
+                try:
+                    _search_content(page, probe)
+                    if "/login" in page.url:
+                        raise TikTokUploadError("Cookies kedaluwarsa — perbarui di Pengaturan")
+                    rows = page.locator("div").filter(has_text=probe[:40]).filter(has=page.locator(_ACTION_MORE))
+                    if not rows.count() or want not in " ".join(page.locator("body").inner_text().split()).lower():
+                        out[probe] = "not_found"
+                        continue
+                    row = rows.last  # elemen terdalam = baris postingan itu sendiri
+                    if row.locator(_ACTION_MORE).count() != 1:
+                        out[probe] = "error: baris tidak unik"
+                        continue
+                    row.hover()
+                    row.locator(_ACTION_MORE).click()
+                    page.wait_for_timeout(800)
+                    page.get_by_text(re.compile(r"^\s*(Hapus|Delete)\s*$")).last.click(timeout=5000)
+                    page.wait_for_timeout(1200)
+                    page.locator('[role="dialog"] button').filter(
+                        has_text=re.compile(r"^\s*(Hapus|Delete)\s*$")).last.click(timeout=8000)
+                    page.wait_for_timeout(4000)
+                    _search_content(page, probe)
+                    gone = want not in " ".join(page.locator("body").inner_text().split()).lower()
+                    out[probe] = "deleted" if gone else "error: masih ada setelah dihapus"
+                    say("Hapus", 0, f"{probe[:50]} → {out[probe]}")
+                except Exception as exc:  # noqa: BLE001
+                    out[probe] = "error: " + str(exc).splitlines()[0][:200]
+            persist_refreshed(context)
+        finally:
+            browser.close()
+    return out
 
 
 def upload_video(video: Path | str, *, description: str = "", timeout: int = 300,
@@ -559,6 +636,6 @@ def test_session() -> Dict[str, Any]:
 
 
 __all__ = [
-    "TikTokUploadError", "COOKIE_FILE", "parse_cookies", "save_cookies",
+    "TikTokUploadError", "COOKIE_FILE", "parse_cookies", "save_cookies", "delete_posts",
     "load_cookies", "cookie_status", "clear_cookies", "upload_video", "test_session",
 ]

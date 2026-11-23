@@ -1,9 +1,13 @@
-"""Penulis teks thumbnail & judul clickbait (v6.9) — 2 tahap: PENULIS membuat kandidat, JURI menilai.
+"""Paket judul + teks thumbnail + teks hook yang SINKRON (v6.9) — 2 tahap: PENULIS membuat paket, JURI menilai.
 
-Kenapa perlu juri: Editor-AI cenderung mengutip potongan ucapan kreator ("NGGAK SLOP, MEN", "UFO NGULIK IBU") yang
-hanya nyambung bagi orang yang SUDAH menonton. Thumbnail justru dibaca orang yang BELUM menonton, dalam ±1 detik.
-Juri menilai tiap kandidat: (1) jelas tanpa konteks, (2) memicu rasa penasaran, (3) jujur terhadap isi klip.
-Yang menang dipakai; fakta/angka karangan tetap ditolak (core/editor_review.numbers_supported).
+Kenapa paket: dulu judul (Editor-AI), teks thumbnail, dan kartu hook di 3 detik pertama video ditulis terpisah — penonton
+melihat tiga kalimat berbeda untuk satu klip ("Mencuri dengan gampang…" / "MOBIL PERTAMA GUA" / "Mencuri mobil,
+ternyata segampang ini"). Sekarang ketiganya ditulis sebagai SATU paket tentang momen & sudut yang sama: thumbnail
+memancing, judul melengkapi, hook di video langsung menyambung rasa penasaran orang yang mengeklik.
+
+Juri menilai tiap paket: jelas tanpa konteks · memancing penasaran · jujur pada isi klip · sinkron antar-teks.
+Yang sudah terlanjur dipakai (judul yang sudah tayang, hook yang sudah tercetak di video) dikunci & diikuti paketnya.
+Dijalankan SEBELUM render (core/tools) agar kartu hook di video ikut paket; untuk klip yang sudah dirender, hook dikunci.
 """
 from __future__ import annotations
 
@@ -15,58 +19,56 @@ from loguru import logger
 
 import config
 
+_STYLE = {
+    "clickbait": ("Gaya CLICKBAIT kanal clip Indonesia: 1–2 KATA KUNCI di judul HURUF BESAR, boleh 1 emoji ekspresif di "
+                  "akhir judul (😱🤣🔥😭😳), akhiran '?!' / '!!' / '…' yang menggantung."),
+    "normal": "Gaya natural kreator: huruf biasa, tanpa emoji, tetap memancing rasa penasaran.",
+}
+
 _WRITER = """Kamu copywriter kanal clip YouTube Shorts/TikTok Indonesia yang videonya selalu FYP.
-Tulis teks THUMBNAIL dan JUDUL untuk klip di bawah.
+Tulis 5 PAKET untuk klip di bawah. Satu paket = THUMBNAIL + JUDUL + HOOK yang membahas MOMEN & SUDUT YANG SAMA.
 
-ATURAN TEKS THUMBNAIL (paling penting):
-- 2–5 kata, HURUF BESAR, terbaca dalam 1 detik di layar HP.
-- JELAS TANPA KONTEKS: orang yang BELUM menonton langsung paham siapa/apa yang terjadi. Sebut subjeknya dengan nama
-  yang dikenal penonton (nama game, tokoh, benda kunci: GTA 6, LUCIA, JASON, UFO, ALIEN, POLISI…).
-- DILARANG potongan ucapan/slang yang hanya dimengerti setelah menonton, kata ganti tanpa rujukan, atau kalimat rusak.
-  Contoh BURUK: "NGGAK SLOP, MEN" · "UFO NGULIK IBU" · "SIAPA-SIAPA COY" · "INI DIA".
-- Julukan/istilah yang hanya dikenal dari dalam klip (mis. "IBU GEMOY", "SI CLEAN") → ganti dengan nama/peran yang
-  dipahami orang awam (mis. LUCIA, NPC, POLISI) atau buang.
-- MEMICU PENASARAN: pakai salah satu teknik — celah informasi (akibat tanpa sebab), kontras/kejutan ("X TAPI Y"),
-  reaksi ekstrem, pertanyaan yang ingin dijawab, angka/fakta spesifik yang memang ada.
-- Boleh diakhiri ?! atau !! — tanpa emoji.
-  Contoh BAGUS: "UFO BENERAN DI GTA 6?!" · "LUCIA LEBIH SERU DARI JASON!" · "HEADSHOT = BAD ENDING?!" · "ALIEN INI CUMA BAYI?"
-
-ATURAN JUDUL:
-- Maks 70 karakter, jelas tanpa konteks, kata paling memancing di depan, 1–2 KATA KUNCI HURUF BESAR, boleh 1 emoji di akhir.
-- Bentuk yang terbukti: "X SAMPAI Y?!", "NEKAT X… Malah Y!", "Baru Kali Ini X 🤣", "Ternyata X Itu Y?!".
-
-JUJUR & SPESIFIK: teks harus menggambarkan kejadian/ucapan YANG ADA DI KLIP INI. Judul video sumber hanya untuk
-mengetahui nama game/tokoh — JANGAN memakai kejadian dari judul video yang tidak terjadi di klip ini (video punya banyak
-klip; tiap klip butuh teks tentang momennya sendiri). Jangan mengarang kejadian, angka, nama, atau hal sensitif.
-{avoid}
+THUMBNAIL (paling penting): 2–5 kata, HURUF BESAR, terbaca 1 detik di layar HP, JELAS bagi orang yang BELUM menonton
+(sebut subjek dengan nama yang dikenal: game/tokoh/benda — GTA 6, LUCIA, JASON, UFO, POLISI…). DILARANG potongan
+ucapan/slang/julukan yang hanya nyambung setelah menonton (buruk: "NGGAK SLOP, MEN", "UFO NGULIK IBU", "MOBIL PERTAMA GUA"
+bila judulnya soal mencuri mobil). Teknik: celah informasi, kontras/kejutan, reaksi ekstrem, pertanyaan.
+JUDUL: maks 70 karakter, jelas tanpa konteks, kata paling memancing di depan. {style}
+HOOK: teks layar 3 detik pertama video, maks 8 kata, kalimat biasa (bukan huruf besar semua) — MENYAMBUNG rasa
+penasaran dari thumbnail (orang yang mengeklik langsung merasa "ini dia jawabannya, tonton sampai habis").
+SINKRON: thumbnail, judul, dan hook membicarakan hal yang SAMA dan tidak bertentangan; jangan mengulang kata persis —
+saling melengkapi.
+SIAPA MELAKUKAN APA harus persis seperti di klip: "gua/aku/kita" = kreator/pemain; JANGAN menisbatkan tindakan ke tokoh
+bernama (mis. LUCIA, JASON) kecuali klip jelas menyebut tokoh itu yang melakukannya — salah pelaku = bohong.
+JUJUR & SPESIFIK: hanya kejadian/ucapan yang ADA DI KLIP INI. Judul video sumber hanya untuk tahu nama game/tokoh — bukan
+bukti kejadian. Jangan mengarang kejadian, angka, nama, atau hal sensitif.
+{locked}{avoid}
 Judul video sumber (hanya untuk nama): {video_title}
-Judul klip sekarang: {title}
 Isi klip (ucapan kreator):
 \"\"\"{text}\"\"\"
 
-Balas JSON: {{"thumb": ["6 kandidat teks thumbnail berbeda teknik"], "title": ["4 kandidat judul"]}}"""
+Balas JSON: {{"paket": [{{"thumb": "...", "title": "...", "hook": "..."}}]}}"""
 
-_JUDGE = """Kamu juri thumbnail YouTube Shorts/TikTok. Penonton yang BELUM menonton klip melihat teks ini 1 detik saat scroll.
-Nilai SETIAP kandidat:
-- jelas 0-10: orang asing paham siapa/apa yang terjadi tanpa menonton? (potongan ucapan/slang/kalimat rusak = maks 3;
-  julukan/istilah yang hanya dikenal penonton setia atau dari dalam klip — mis. "IBU GEMOY", "SI CLEAN", "SLOP" — = maks 4)
-- penasaran 0-10: seberapa kuat membuat orang berhenti scroll & ingin tahu jawabannya?
-- jujur true/false: kejadiannya BENAR-BENAR ada di ISI KLIP di bawah? (hanya ada di judul video = false; mengarang = false)
+_JUDGE = """Kamu juri paket Shorts/TikTok. Penonton yang BELUM menonton melihat THUMBNAIL + JUDUL 1 detik saat scroll;
+yang mengeklik langsung melihat HOOK di awal video.
+Nilai SETIAP paket (0-10, jujur true/false):
+- jelas: thumbnail & judul dipahami orang asing tanpa menonton? (potongan ucapan/slang/julukan dalam = maks 4)
+- penasaran: seberapa kuat membuat orang berhenti scroll & ingin tahu?
+- sinkron: thumbnail, judul, hook membahas hal yang sama & saling menyambung? (topik beda / bertentangan = maks 3)
+- jujur: semua yang diklaim BENAR-BENAR ada di ISI KLIP? Periksa PELAKU tiap tindakan: menisbatkan tindakan ke tokoh
+  bernama yang tidak disebut klip melakukannya = false. Hanya ada di judul video / dikarang = false.
+- (penasaran) thumbnail yang hanya nama game/tokoh tanpa KEJADIAN spesifik (mis. "GTA 6 LUCIA TEMBAK") = maks 5
 
 Isi klip: \"\"\"{text}\"\"\"
-Judul video sumber (hanya konteks nama, BUKAN bukti kejadian): {video_title}
+Judul video sumber (hanya konteks nama): {video_title}
 
-Kandidat THUMBNAIL:
-{thumbs}
+PAKET:
+{pakets}
 
-Kandidat JUDUL:
-{titles}
-
-Balas JSON: {{"thumb": [{{"i": 0, "jelas": 0, "penasaran": 0, "jujur": true}}], "title": [{{"i": 0, "jelas": 0, "penasaran": 0, "jujur": true}}]}}"""
-
+Balas JSON: {{"nilai": [{{"i": 0, "jelas": 0, "penasaran": 0, "sinkron": 0, "jujur": true}}]}}"""
 
 # model terkuat yang tersedia untuk tugas kecil tapi menentukan ini (2 panggilan per klip)
 _STRONG = (("DeepSeek", "deepseek-v4-pro"), ("Anthropic", "claude-sonnet-5-5"), ("OpenAI", "gpt-4.1"))
+_ROMAN = {"II": "2", "III": "3", "IV": "4", "V": "5", "VI": "6", "VII": "7", "VIII": "8", "IX": "9", "X": "10"}
 
 
 def _ask(prompt: str) -> str:
@@ -85,77 +87,94 @@ def _json(raw: str) -> Dict:
     return json.JSONDecoder().raw_decode(raw[raw.index("{"):])[0]
 
 
-def _rank(cands: List[str], scores: List[Dict], src: str) -> List[str]:
-    """Kandidat jujur, urut skor (jelas 55% + penasaran 45%). Yang jelas ≥7 didahulukan; sisanya cadangan."""
+def _clean_pkg(p: Dict, fixed_title: Optional[str], fixed_hook: Optional[str]) -> Optional[Dict]:
+    thumb = re.sub(r"\s+", " ", str(p.get("thumb") or "")).strip().upper()
+    title = fixed_title or re.sub(r"\s+", " ", str(p.get("title") or "")).strip()
+    hook = fixed_hook or re.sub(r"\s+", " ", str(p.get("hook") or "")).strip()
+    if not (2 <= len(thumb.split()) <= 6 and len(thumb) <= 38) or not (10 <= len(title) <= 95):
+        return None
+    if not hook or len(hook.split()) > 12:
+        return None
+    return {"thumb": thumb, "title": title, "hook": hook}
+
+
+def _rank(pkgs: List[Dict], scores: List[Dict], src: str) -> List[Dict]:
+    """Paket jujur & sinkron, urut skor. Yang jelas ≥7 didahulukan; sisanya cadangan bila skornya masih layak."""
     from .editor_review import numbers_supported
     good, weak = [], []
     for sc in scores or []:
         try:
-            text = cands[int(sc.get("i"))]
+            p = pkgs[int(sc.get("i"))]
         except (TypeError, ValueError, IndexError):
             continue
-        clear, curious = float(sc.get("jelas") or 0), float(sc.get("penasaran") or 0)
-        if not sc.get("jujur", False) or not numbers_supported(text, src):
+        clear, curious, sync = (float(sc.get(k) or 0) for k in ("jelas", "penasaran", "sinkron"))
+        if not sc.get("jujur", False) or sync < 7 or not all(numbers_supported(p[k], src) for k in ("thumb", "title", "hook")):
             continue
-        (good if clear >= 7 else weak).append((clear * 0.55 + curious * 0.45, text))
-    return [t for _, t in sorted(good, reverse=True)] + [t for _, t in sorted(weak, reverse=True) if _ >= 5.5]
+        s = clear * 0.4 + curious * 0.35 + sync * 0.25
+        (good if clear >= 7 else weak).append((s, p))
+    good.sort(key=lambda x: -x[0])
+    weak.sort(key=lambda x: -x[0])
+    return [p for _, p in good] + [p for s, p in weak if s >= 6.0]
 
 
-def write(clip: Dict, video_title: str = "", avoid: Optional[List[str]] = None) -> Dict:
-    """{"thumb": [kandidat lolos, terbaik dulu], "title": [...]} — kosong bila gagal (pemanggil memakai teks lama)."""
+def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, fixed_hook: Optional[str] = None,
+          avoid: Optional[List[str]] = None) -> List[Dict]:
+    """Paket {thumb, title, hook} lolos juri, terbaik dulu. Kosong bila gagal (pemanggil memakai teks lama)."""
     text = str(clip.get("transcript") or clip.get("text") or "")[:1500]
-    out: Dict[str, List[str]] = {"thumb": [], "title": []}
     if len(text.split()) < 3:
-        return out
+        return []
+    style = "clickbait" if str(getattr(config, "TITLE_STYLE", "normal")).lower() == "clickbait" else "normal"
+    locked = ""
+    if fixed_title:
+        locked += f"JUDUL SUDAH TAYANG & TIDAK BOLEH DIUBAH (semua paket memakai persis ini): «{fixed_title}»\n"
+    if fixed_hook:
+        locked += f"HOOK SUDAH TERCETAK DI VIDEO & TIDAK BOLEH DIUBAH (semua paket memakai persis ini): «{fixed_hook}»\n"
+    avoid_txt = ("Thumbnail klip lain dari video yang sama (JANGAN mirip): " + " · ".join(avoid) + "\n") if avoid else ""
     try:
-        avoid_txt = ("Teks thumbnail klip lain dari video yang sama (JANGAN mirip): " + " · ".join(avoid)) if avoid else ""
-        gen = _json(_ask(_WRITER.format(video_title=video_title or "-", title=clip.get("ai_title") or "-", text=text,
-                                        avoid=avoid_txt)))
-        thumbs = [re.sub(r"\s+", " ", str(t)).strip().upper() for t in gen.get("thumb") or [] if str(t).strip()]
-        thumbs = [t for t in thumbs if 2 <= len(t.split()) <= 6 and len(t) <= 38][:8]
-        titles = [re.sub(r"\s+", " ", str(t)).strip() for t in gen.get("title") or [] if str(t).strip()]
-        titles = [t for t in titles if 12 <= len(t) <= 80][:5]
-        old_thumb = str(clip.get("thumb_text") or "").strip()
-        if old_thumb and old_thumb.upper() not in thumbs:
-            thumbs.append(old_thumb.upper())  # teks lama ikut dinilai — hanya dipakai bila memang menang
-        if not thumbs:
-            return out
-        judge = _json(_ask(_JUDGE.format(
-            text=text, video_title=video_title or "-",
-            thumbs="\n".join(f"{i}. {t}" for i, t in enumerate(thumbs)),
-            titles="\n".join(f"{i}. {t}" for i, t in enumerate(titles)) or "-")))
-        roman = {"II": "2", "III": "3", "IV": "4", "V": "5", "VI": "6", "VII": "7", "VIII": "8", "IX": "9", "X": "10"}
-        src = f"{text} {video_title} " + " ".join(roman[w] for w in re.findall(r"[IVX]+", video_title) if w in roman)
-        out["thumb"] = _rank(thumbs, judge.get("thumb") or [], src)
-        out["title"] = _rank(titles, judge.get("title") or [], src) if titles else []
-        logger.info(f"Teks thumbnail: {out['thumb'][:1]} (lolos {len(out['thumb'])}/{len(thumbs)}) · judul: {out['title'][:1]}")
+        gen = _json(_ask(_WRITER.format(style=_STYLE[style], locked=locked, avoid=avoid_txt,
+                                        video_title=video_title or "-", text=text)))
+        pkgs = [p for p in (_clean_pkg(x, fixed_title, fixed_hook) for x in (gen.get("paket") or []) if isinstance(x, dict)) if p]
+        old = _clean_pkg({"thumb": clip.get("thumb_text"), "title": clip.get("ai_title"), "hook": clip.get("hook_text")},
+                         fixed_title, fixed_hook)
+        if old and old not in pkgs:
+            pkgs.append(old)  # paket lama ikut dinilai — hanya dipakai bila memang menang
+        if not pkgs:
+            return []
+        listing = "\n".join(f"{i}. THUMBNAIL: {p['thumb']} | JUDUL: {p['title']} | HOOK: {p['hook']}" for i, p in enumerate(pkgs))
+        judge = _json(_ask(_JUDGE.format(text=text, video_title=video_title or "-", pakets=listing)))
+        src = f"{text} {video_title} " + " ".join(_ROMAN[w] for w in re.findall(r"\b[IVX]+\b", video_title or "") if w in _ROMAN)
+        ranked = _rank(pkgs, judge.get("nilai") or [], src)
+        logger.info(f"Paket judul/thumbnail/hook: {ranked[0] if ranked else None} (lolos {len(ranked)}/{len(pkgs)})")
+        return ranked
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Penulis clickbait gagal (pakai teks Editor-AI): {str(exc)[:160]}")
-    return out
+        logger.warning(f"Penulis paket gagal (pakai teks Editor-AI): {str(exc)[:160]}")
+        return []
 
 
-def apply(clips: List[Dict], video_title: str = "") -> int:
-    """Tulis ulang teks thumbnail (selalu) & judul (bila gaya clickbait), 4 klip sekaligus. Tiap klip dapat teks
-    BERBEDA: bila kandidat terbaik mirip teks klip lain, dipakai kandidat peringkat berikutnya. Return jumlah berubah."""
+def apply(clips: List[Dict], video_title: str = "", prerender: bool = False) -> int:
+    """Tulis paket untuk tiap klip (4 sekaligus) & terapkan: thumb_text, ai_title, dan hook_text (hanya sebelum render —
+    sesudah render hook sudah tercetak, jadi dikunci). Judul dikunci bila klip punya `_fixed_title` (sudah tayang).
+    Teks thumbnail tiap klip dijaga berbeda. Return jumlah klip yang mendapat paket baru."""
     from concurrent.futures import ThreadPoolExecutor
-    clickbait = str(getattr(config, "TITLE_STYLE", "normal")).lower() == "clickbait"
+
+    def one(c: Dict) -> List[Dict]:
+        return write(c, video_title, fixed_title=c.get("_fixed_title"),
+                     fixed_hook=None if prerender else (str(c.get("hook_text") or "").strip() or None))
+
     with ThreadPoolExecutor(max_workers=4) as ex:
-        results = list(ex.map(lambda c: write(c, video_title), clips))
-    used_t: List[str] = []
-    used_h: List[str] = []
+        results = list(ex.map(one, clips))
+    used: List[str] = []
     changed = 0
-    for c, res in zip(clips, results):
-        thumb = next((t for t in res["thumb"] if not _similar(t, used_t)), None)
-        if thumb:
-            c["thumb_text_editor"] = c.get("thumb_text")
-            c["thumb_text"] = thumb
+    for c, ranked in zip(clips, results):
+        pkg = next((p for p in ranked if not _similar(p["thumb"], used)), None)
+        if pkg:
+            c["copy_editor"] = {k: c.get(k) for k in ("thumb_text", "ai_title", "hook_text")}
+            c["thumb_text"], c["ai_title"] = pkg["thumb"], pkg["title"]
+            if prerender:
+                c["hook_text"] = pkg["hook"]
+            c["copy_package"] = True
             changed += 1
-        used_t.append(str(c.get("thumb_text") or ""))
-        title = next((t for t in res["title"] if not _similar(t, used_h)), None)
-        if clickbait and title:
-            c["ai_title_editor"] = c.get("ai_title")
-            c["ai_title"] = title
-        used_h.append(str(c.get("ai_title") or ""))
+        used.append(str(c.get("thumb_text") or ""))
     return changed
 
 
