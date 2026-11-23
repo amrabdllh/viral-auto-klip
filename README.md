@@ -48,6 +48,11 @@ Stempel Fakta, Postingan X, Angka Besar, Pencarian, Duel VS, Pencapaian, Checkli
 - **Rentang waktu proses**: "Proses mulai dari / Sampai" (mis. `1:00:00`–`1:30:00`). Video dipotong tanpa encode
   ulang, lalu hanya bagian itu yang ditranskrip, dianalisis, dan dirender.
 - Uji: `python tests/test_autopilot.py`
+- **Bahasa subtitle** (`core/subtitle_translate.py`): pilih bahasa lain dari bahasa video (15 bahasa). Semua layar caption satu
+  klip diterjemahkan AI sekaligus, sehingga konteksnya utuh. Waktu tiap layar tetap; jumlah kata sama → timing kata tetap,
+  beda → kata dibagi di dalam layarnya. Bila AI gagal atau jawabannya tidak lengkap, subtitle tetap memakai bahasa asli.
+- **Sertakan sumber video**: teks kecil "Sumber: <channel> (YouTube)" di kiri atas (atau teks sendiri). Muncul setelah hook
+  dan hilang saat CTA akhir. Uji: `python tests/test_subtitle_translate.py`
 
 ## Hook B-roll + suara (v7)
 

@@ -244,7 +244,29 @@ def render_options(params: Dict) -> Dict:
         # v6.4: "auto" = facecam streamer terdeteksi → split wajah/gameplay; podcast/grup tetap reframe wajah
         layout=params.get("layout") or ("face" if params.get("video_mode") in ("podcast", "group") else "auto"),
         lower_third=params.get("_lower_third") or None,
+        caption_language=(params.get("caption_language") or "") if _needs_translation(params) else "",
+        source_credit=params.get("_source_credit") or "",
+        content_type=params.get("_content_type") or "",
     )
+
+
+def _needs_translation(params: Dict) -> bool:
+    from .subtitle_translate import needed
+    return needed(params.get("caption_language") or "", params.get("language") or "")
+
+
+def credit_text(params: Dict, channel: str = "") -> str:
+    """(v7) Teks kredit sumber: isian pengguna, atau 'Sumber: <channel> (YouTube/TikTok)' dari link."""
+    if not params.get("source_credit"):
+        return ""
+    custom = " ".join(str(params.get("source_credit_text") or "").split())
+    if custom:
+        return custom
+    url = str(params.get("url") or "")
+    if not channel or not url:
+        return ""
+    site = "YouTube" if "youtu" in url else "TikTok" if "tiktok" in url else "Instagram" if "instagram" in url else ""
+    return f"Sumber: {channel}" + (f" ({site})" if site else "")
 
 
 def build_lower_third(params: Dict, transcript: List[Dict], default_name: str = "", subtitle: str = "") -> Dict:
@@ -432,9 +454,15 @@ def clip_quick(ctx: JobContext) -> Dict:
     info = get_video_info(video)
     info["title"] = _source_title(p, video)
     info["content_type"] = content_type(p, info["title"], p.get("url", ""))
+    p["_content_type"] = info["content_type"]
     if info["content_type"] == "gaming_stream":
         ctx.log("Tipe konten: live/gaming → momen reaksi & kejadian game diutamakan, kandidat dari puncak suara ikut dinilai")
-        if _auto(p.get("min_duration")):
+        # (v7) klip gaming butuh pengantar + aksi + reaksi utuh: 25–90 dtk (klipers: 30 dtk–3 mnt). Dulu jumlah klip
+        # yang diisi memicu standar 15–45 dtk → klip 12–20 dtk yang memotong aksinya. Isian durasi pengguna tetap menang.
+        if auto_dur:
+            config.MIN_CLIP_DURATION = max(config.MIN_CLIP_DURATION, int(getattr(config, "GAMING_MIN_DURATION", 25)))
+            config.MAX_CLIP_DURATION = max(config.MAX_CLIP_DURATION, int(getattr(config, "GAMING_MAX_DURATION", 90)))
+        elif _auto(p.get("min_duration")):
             config.MIN_CLIP_DURATION = max(config.MIN_CLIP_DURATION, 22)  # reaksi butuh pengantar
     if auto_n:  # batas atas sesuai panjang video: ±1 klip per 4,5 menit (video 4 jam → hingga 30 klip)
         minutes = float(info.get("duration") or 0) / 60
@@ -452,6 +480,10 @@ def clip_quick(ctx: JobContext) -> Dict:
     # Nama channel bukan nama pembicara: di podcast ia menempel pada tamu/host yang sedang tampil.
     # Kartu nama hanya muncul bila pengguna mengisi "Nama pembicara".
     p["_lower_third"] = build_lower_third(p, transcript)
+    if p.get("source_credit"):  # (v7) kredit sumber video
+        p["_source_credit"] = credit_text(p, source_channel(p["url"]) if p.get("url") else "")
+        if p["_source_credit"]:
+            ctx.log(f"Kredit sumber: {p['_source_credit']}")
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
     focus = parse_focus(p.get("keyword") or p.get("specific_moments"))
     info["focus_moments"] = focus
