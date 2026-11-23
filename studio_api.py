@@ -7,6 +7,7 @@ import io
 import os
 import re
 import shutil
+import subprocess
 import time
 import zipfile
 from pathlib import Path
@@ -81,6 +82,201 @@ def catalog():
             "color_grades": ["none", "natural", "vibrant", "cinematic"],
             "job_kinds": sorted(jobs.HANDLERS),
             "viral_standard": viral_standard.summary()}
+
+
+_HOOK_SAMPLES = {
+    "breaking": "Motornya *dibegal* di tengah jalan", "stabilo": "yang nambah darah *cuma 1 dolar*",
+    "sticker": "Jason *jadi striptis* guys", "notif": "Kamu wajib tahu ini *sebelum terlambat*",
+    "chat": "Bro, kamu udah coba *cara ini* belum?", "stack": "Cara edit video *10x lebih cepat*",
+    "strike": "Gua bunuh | Tembak ban", "typewriter": "Fakta: *90% orang* tidak tahu ini",
+    "editorial": "*tapi jason* botak *ganteng banget* ya", "reply": "Kak, gimana caranya *konsisten upload*?",
+    "poll": "Gaji besar tapi capek? | Gaji besar | Santai aja", "stamp": "Minum air dingin bikin *perut buncit* | MITOS",
+    "tweet": "Gaji UMR tapi gaya hidup *selebgram*", "bigstat": "10000 | investasi buat keluarga",
+    "search": "cara dapat duit dari hp *tanpa modal*", "versus": "Kopi sachet | Kopi kafe",
+    "achievement": "Solo squad *paling jago*", "checklist": "Modal konten | HP biasa | Satu ide | 10 menit sehari",
+    "quote": "Kesuksesan bukan soal *bakat* tapi *konsistensi*",
+}
+
+
+@router.get("/hook-preview")
+def hook_preview(style: str = Query("stabilo"), text: str = Query("", max_length=200)):
+    """(v7) PNG contoh gaya hook (untuk pratinjau di Pengaturan)."""
+    from core import hook_styles
+
+    if style not in hook_styles.STYLES:
+        raise HTTPException(400, "Gaya hook tidak dikenal")
+    out = Path(config.TEMP_DIR) / f"hook_preview_{style}.png"
+    hook_styles.preview_png(style, text or _HOOK_SAMPLES.get(style, "Contoh *teks hook* di sini"), str(out), width=720, t=2.0)
+    return FileResponse(str(out), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------- (v7) Resep & Auto Pilot
+
+class RecipeRequest(BaseModel):
+    name: str
+    params: Dict[str, Any] = {}
+    id: str = ""
+
+
+@router.get("/recipes")
+def recipes_list():
+    from core import autopilot
+    return {"recipes": autopilot.list_recipes(), "max": autopilot.MAX_RECIPES}
+
+
+@router.post("/recipes")
+def recipes_save(req: RecipeRequest):
+    from core import autopilot
+    try:
+        return autopilot.save_recipe(req.name, req.params, req.id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete("/recipes/{rid}")
+def recipes_delete(rid: str):
+    from core import autopilot
+    if not autopilot.delete_recipe(rid):
+        raise HTTPException(404, "Resep tidak ditemukan")
+    return {"ok": True}
+
+
+class WatcherRequest(BaseModel):
+    url: str = ""
+    recipe_id: str = ""
+    kind: str = "both"
+    min_dur: int = 600
+    max_dur: int = 10800
+    include: str = ""
+    exclude: str = ""
+    mode: str = "review"
+    interval_min: int = 15
+    process_latest: bool = False
+
+
+@router.get("/autopilot")
+def autopilot_list():
+    from core import autopilot
+    items = [dict(w) for w in autopilot.list_watchers()]  # salinan: ringkasan tampilan tidak menimpa data
+    for w in items:
+        w["seen"] = len(w.get("seen") or [])
+        w["history"] = list(reversed(w.get("history") or []))[:15]
+    return {"watchers": items, "recipes": autopilot.list_recipes(), "enabled": bool(getattr(config, "AUTOPILOT_ENABLED", True))}
+
+
+@router.post("/autopilot")
+def autopilot_add(req: WatcherRequest):
+    from core import autopilot
+    try:
+        w = autopilot.add_watcher(req.url, recipe_id=req.recipe_id, kind=req.kind, min_dur=req.min_dur, max_dur=req.max_dur,
+                                  include=req.include, exclude=req.exclude, mode=req.mode, interval_min=req.interval_min,
+                                  process_latest=req.process_latest)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    res = autopilot.check(w["id"])  # langsung cek sekali: menandai arsip / memproses video terbaru
+    return {"watcher": w, "check": res}
+
+
+class WatcherPatch(BaseModel):
+    recipe_id: Optional[str] = None
+    kind: Optional[str] = None
+    min_dur: Optional[int] = None
+    max_dur: Optional[int] = None
+    include: Optional[str] = None
+    exclude: Optional[str] = None
+    mode: Optional[str] = None
+    interval_min: Optional[int] = None
+    enabled: Optional[bool] = None
+
+
+@router.patch("/autopilot/{wid}")
+def autopilot_update(wid: str, req: WatcherPatch):
+    from core import autopilot
+    fields = {k: v for k, v in req.dict().items() if v is not None}
+    w = autopilot.update_watcher(wid, **fields)
+    if not w:
+        raise HTTPException(404, "Channel tidak ditemukan")
+    return w
+
+
+@router.post("/autopilot/{wid}/check")
+def autopilot_check(wid: str):
+    from core import autopilot
+    res = autopilot.check(wid)
+    if res.get("error") == "watcher tidak ada":
+        raise HTTPException(404, "Channel tidak ditemukan")
+    return res
+
+
+@router.delete("/autopilot/{wid}")
+def autopilot_delete(wid: str):
+    from core import autopilot
+    if not autopilot.delete_watcher(wid):
+        raise HTTPException(404, "Channel tidak ditemukan")
+    return {"ok": True}
+
+
+@router.get("/hook-broll-preview")
+def hook_broll_preview(style: str = Query("kolase")):
+    """(v7) Contoh sampul Hook B-roll (siluet pengganti potongan orang)."""
+    from core import hook_broll
+
+    if style not in hook_broll.STYLES:
+        raise HTTPException(400, "Gaya B-roll tidak dikenal")
+    out = Path(config.TEMP_DIR) / f"hook_broll_preview_{style}.png"
+    hook_broll.preview_png(style, str(out), width=432)
+    return FileResponse(str(out), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/caption-preview")
+def caption_preview(style: str = Query("pop"), text: str = Query("", max_length=120)):
+    """(v7) PNG contoh gaya caption — dirender libass sungguhan (sama seperti saat burn ke klip)."""
+    from core import caption_presets
+
+    if style not in config.CAPTION_STYLES:
+        raise HTTPException(400, "Gaya caption tidak dikenal")
+    safe = re.sub(r"[^a-z0-9_-]", "_", style.lower())
+    out = Path(config.TEMP_DIR) / f"caption_preview_{safe}.png"
+    try:
+        caption_presets.preview_png(style, str(out), width=540, text=text.strip() or caption_presets.SAMPLE)
+    except Exception as exc:
+        raise HTTPException(500, f"Pratinjau gagal: {str(exc)[:200]}")
+    return FileResponse(str(out), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/subtitle")
+def subtitle_get(path: str):
+    """(v7) Data editor subtitle live sebuah klip (layar caption, gaya, status)."""
+    from core import subtitle_live
+
+    return subtitle_live.editor_view(str(_safe_path(path)))
+
+
+class ReburnRequest(BaseModel):
+    path: str
+    style: Optional[str] = None
+    edits: Dict[str, str] = {}
+    enabled: Optional[bool] = None
+    reset: bool = False
+
+
+@router.post("/subtitle/reburn")
+def subtitle_reburn(req: ReburnRequest):
+    """(v7) Ubah teks/gaya subtitle lalu burn ulang ke klip (tanpa render ulang klip)."""
+    from core import subtitle_live
+
+    p = _safe_path(req.path)
+    try:
+        edits = {int(k): v for k, v in (req.edits or {}).items()}
+    except ValueError:
+        raise HTTPException(400, "Indeks layar subtitle harus angka")
+    try:
+        out = subtitle_live.reburn(str(p), style=req.style or None, edits=edits, enabled=req.enabled, reset=req.reset)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(500, f"Burn ulang gagal: {(exc.stderr or b'')[-300:].decode('utf-8', 'replace')}")
+    return {**out, **subtitle_live.editor_view(str(p))}
 
 
 class YouTubeCookiesRequest(BaseModel):

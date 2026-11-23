@@ -34,6 +34,7 @@ autopublish.ready_platforms = lambda wanted=None: list(wanted or ["youtube"])
 config.AUTO_PUBLISH_PER_DAY = 5
 config.UPLOAD_SLOT_MODE = "riset"  # bagian awal menguji mode riset (setelan .env pengguna tidak ikut)
 config.AUTO_PUBLISH_MIN_GAP_H = 2.5
+config.TIKTOK_POST_HOURS = config.YOUTUBE_POST_HOURS = ""  # jam tetap akun diuji terpisah di bawah
 
 START = datetime(2026, 11, 22, 0, 30).timestamp()  # Minggu 00:30
 clips = lambda n, tag: [{"file_path": f"{tag}{i}.mp4", "score": 90 - i, "ai_title": f"{tag}{i}", "niche": "gaming"}
@@ -105,6 +106,22 @@ assert all(v == 1 for v in expl.values()) and len(expl) >= 4, expl
 assert not any(dt.weekday() == 4 and 11 <= dt.hour < 13 for dt, _ in rows), "Jumat siang (salat Jumat) harus dilewati"
 assert all(v <= 5 for v in Counter(dt.date() for dt, _ in rows).values())
 config.UPLOAD_SLOT_MODE = "riset"
+
+# --- JAM TETAP AKUN (TIKTOK_POST_HOURS): TikTok tepat di jam itu (+0–15 mnt), YouTube tetap riset, hari sama
+assert autopublish.parse_hours("09:00, 13.30 18 20:00,22:00 25:00") == [9.0, 13.5, 18.0, 20.0, 22.0]
+assert autopublish.format_hours([9.0, 13.5]) == "09:00,13:30"
+config.TIKTOK_POST_HOURS = "09:00,13:00,18:00,20:00,22:00"
+store.clear()
+f = autopublish.schedule_clips(clips(13, "F"), platforms=["youtube", "tiktok"], content_type="gaming_stream", start=MON)
+tt = [datetime.fromtimestamp(s["run_at"]) for s in store if s["platforms"][0] == "tiktok"]
+assert len(tt) == 13, len(tt)
+assert all(dt.hour in (9, 13, 18, 20, 22) and dt.minute <= 15 for dt in tt), sorted(tt)
+assert all(v <= 5 for v in Counter(dt.date() for dt in tt).values())
+for fp in {s["file_path"] for s in store}:
+    assert len({datetime.fromtimestamp(s["run_at"]).date() for s in store if s["file_path"] == fp}) == 1, fp
+yt_hours = {datetime.fromtimestamp(s["run_at"]).hour for s in store if s["platforms"][0] == "youtube"}
+assert yt_hours - {9, 13, 18, 20, 22}, "YouTube tidak boleh ikut jam tetap TikTok"
+config.TIKTOK_POST_HOURS = ""
 
 print("Semua uji upload otomatis multi-hari lulus")
 for line in a["plans"] + b["plans"]:

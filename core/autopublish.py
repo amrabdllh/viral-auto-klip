@@ -75,6 +75,25 @@ def slot_mode() -> str:
     return m if m in ("riset", "jangkar") else "riset"
 
 
+def parse_hours(text: str) -> List[float]:
+    """"09:00, 13:30 18 20.30" → [9.0, 13.5, 18.0, 20.5] (urut, unik). Menit dibulatkan ke 0,25 jam."""
+    out = set()
+    for h, m in re.findall(r"(?<!\d)(\d{1,2})(?:[:.](\d{2}))?(?!\d)", str(text or "")):
+        hh, mm = int(h), int(m or 0)
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            out.add(hh + round(mm / 15) * 0.25)
+    return sorted(x for x in out if x < 24)
+
+
+def format_hours(hours: List[float]) -> str:
+    return ",".join(f"{int(h):02d}:{int(round(h % 1 * 60)):02d}" for h in hours)
+
+
+def fixed_hours(platform: str) -> List[float]:
+    """Jam tetap akun dari Pengaturan (TIKTOK_POST_HOURS / YOUTUBE_POST_HOURS); kosong = pakai riset."""
+    return parse_hours(getattr(config, f"{platform.upper()}_POST_HOURS", "") or "")
+
+
 def _proven_hours(platform: str, day: datetime) -> List[float]:
     """Jam yang sudah TERBUKTI ramai untuk channel ini (core/slot_learning), bila datanya cukup."""
     from .slot_learning import MIN_SAMPLES_HOUR, day_type, insights
@@ -96,7 +115,10 @@ def _day_slots(niche: str, platform: str, day: datetime, want: int, start: float
     # jam yang sudah terisi (termasuk larut malam kemarin & dini hari besok) — dihindari optimizer
     fixed = [(x - d0) / 3600 for x in busy if -6 * 3600 < x - d0 < 30 * 3600]
     min_hour = max(0.0, (start - d0) / 3600 - 1.5) if start > d0 else 0.0
-    proven = [(h, "terbukti di channel ini") for h in _proven_hours(platform, day)
+    own = fixed_hours(platform)
+    if own:
+        return _fixed_day_slots(niche, platform, day, own, want, start, busy, gap_h, rnd)
+    proven =[(h, "terbukti di channel ini") for h in _proven_hours(platform, day)
               if h >= min_hour and all(abs(h - f) >= gap_h for f in fixed)]
     if slot_mode() == "jangkar":
         # jam tetap per jenis hari (+1 slot eksplorasi bergiliran); yang bentrok/lewat dibuang
@@ -121,6 +143,31 @@ def _day_slots(niche: str, platform: str, day: datetime, want: int, start: float
             continue
         out.append((ts, why))
     return out  # urut dari jam paling berpeluang
+
+
+def _fixed_day_slots(niche: str, platform: str, day: datetime, hours: List[float], want: int, start: float,
+                     busy: List[float], gap_h: float, rnd: random.Random) -> List[Tuple[float, str]]:
+    """Jam TETAP pilihan pengguna (dari Analisis akunnya): dipakai apa adanya tiap hari, menit diacak 0–15 agar tidak
+    terlihat bot. Jarak minimal mengikuti jarak antar jam pilihan itu sendiri (pengguna yang menentukan).
+    Urut jam paling ramai dulu (kurva riset), supaya hari yang klipnya sedikit memakai jam terbaik."""
+    from .fyp_research import _score_at, research_day
+    spacing = min([b - a for a, b in zip(hours, hours[1:])] or [gap_h])
+    gap = max(0.5, min(gap_h, spacing) - 0.5)
+    curve = {int(h): s for h, s in research_day(niche, platform, day, use_market=False)["hours"]}
+    order = sorted(hours, key=lambda h: -_score_at(curve, h))
+    hhmm = lambda t: f"{int(t):02d}:{int(round(t % 1 * 60)):02d}"  # noqa: E731
+    day_off = rnd.randint(0, 10)
+    out: List[Tuple[float, str]] = []
+    for h in order:
+        if len(out) >= want:
+            break
+        ts = (day + timedelta(hours=h, minutes=day_off + rnd.randint(0, 5))).timestamp()
+        if ts <= start + 25 * 60:  # sudah lewat / terlalu mepet untuk jadwal bawaan platform
+            continue
+        if any(abs(ts - x) < gap * 3600 for x in busy + [o[0] for o in out]):
+            continue
+        out.append((ts, f"jam akun {hhmm(h)}"))
+    return out
 
 
 def _plan(niche: str, platforms: List[str], n: int, start: float, taken: Dict[str, List[float]], per_day: int,
@@ -152,7 +199,11 @@ def _plan(niche: str, platforms: List[str], n: int, start: float, taken: Dict[st
                     busy[pf].extend(t for t, _ in chosen)
                     picks[pf] = chosen
                     if plans is not None:
-                        plans.append(research_day(niche, pf, day)["summary"] + f" → {k} klip"
+                        own = fixed_hours(pf)
+                        from .fyp_research import _DAYS
+                        head = (f"{_DAYS[day.weekday()]} {day.day} {day.strftime('%b')} · {pf}: jam akun "
+                                f"{format_hours(own).replace(',', ', ')}") if own else research_day(niche, pf, day)["summary"]
+                        plans.append(head + f" → {k} klip"
                                      + (f" (+{len(same[pf])} sudah terjadwal)" if same[pf] else ""))
                 for i in range(k):
                     out.append({pf: picks[pf][i] for pf in platforms})

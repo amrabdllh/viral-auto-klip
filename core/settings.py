@@ -55,7 +55,7 @@ SCHEMA: List[Dict] = [
     {"key": "AUTO_PUBLISH_MIN_GAP_H", "group": "Upload otomatis", "label": "Jarak minimal antar upload (jam)", "type": "float", "min": 0.5, "max": 12},
     {"key": "THUMB_AI", "group": "Upload otomatis", "label": "Thumbnail AI (latar AI + wajah asli + teks tebal)", "type": "bool",
      "help": "Tiap klip dapat thumbnail gaya clipper: latar dibuat AI sesuai isi klip, wajah & cuplikan momen ASLI dari video, "
-             "teks dari Editor-AI. Ikut diunggah sebagai thumbnail YouTube (butuh channel terverifikasi) & cover TikTok."},
+             "teks dari Editor-AI. Ikut diunggah sebagai thumbnail YouTube (butuh verifikasi nomor HP channel) & cover TikTok."},
     {"key": "TITLE_STYLE", "group": "Upload otomatis", "label": "Gaya judul & teks thumbnail", "type": "enum",
      "options": ["normal", "clickbait"],
      "labels": {"normal": "Normal — memancing rasa penasaran, natural",
@@ -67,6 +67,11 @@ SCHEMA: List[Dict] = [
      "help": "Riset: paling mengikuti data harian, jam sedikit bergeser tiap hari. Jangkar: jam sama setiap hari kerja / akhir pekan "
              "(penonton terbiasa & hasil mudah dibandingkan), satu slot digeser ±1 jam bergiliran untuk menguji jam baru. "
              "Keduanya beralih ke jam yang terbukti ramai di channel-mu begitu datanya cukup."},
+    {"key": "TIKTOK_POST_HOURS", "group": "Upload otomatis", "label": "Jam upload tetap TikTok (opsional)", "type": "str",
+     "help": "Mis. 09:00,13:00,18:00,20:00,22:00 — dari Analisis TikTok Studio → Pemirsa → Waktu paling aktif. "
+             "Diisi = jam ini dipakai setiap hari (menit sedikit diacak). Kosong = jam dipilih otomatis oleh riset."},
+    {"key": "YOUTUBE_POST_HOURS", "group": "Upload otomatis", "label": "Jam upload tetap YouTube (opsional)", "type": "str",
+     "help": "Sama seperti di atas untuk YouTube Shorts. Kosong = otomatis."},
     {"key": "UPLOAD_NATIVE_SCHEDULE", "group": "Upload otomatis", "label": "Unggah lebih awal pakai jadwal bawaan YouTube/TikTok", "type": "bool",
      "help": "Jadwal diunggah sekarang dan YouTube/TikTok sendiri yang memposting pada jamnya — tidak terpengaruh sesi cookie mati atau laptop mati. TikTok butuh Mode upload 'post'."},
     {"key": "KLING_API_KEY", "group": "API key", "label": "Kling AI (video)", "type": "secret",
@@ -110,6 +115,53 @@ SCHEMA: List[Dict] = [
     {"key": "JUMP_CUT_MAX_GAP", "group": "Gaya editing", "label": "Jeda yang dipotong", "type": "float", "min": 0.2, "max": 3.0, "help": "Detik. Hening lebih lama dari ini dipotong"},
     {"key": "PROGRESS_BAR_COLOR", "group": "Gaya editing", "label": "Warna progress bar", "type": "color"},
     {"key": "END_SCREEN_TEXT", "group": "Gaya editing", "label": "Teks ajakan di akhir klip", "type": "str"},
+    {"key": "HOOK_MODE", "group": "Gaya editing", "label": "Jenis hook pembuka", "type": "enum",
+     "options": ["text", "broll"],
+     "labels": {"text": "Teks bergaya di atas video (disarankan)", "broll": "B-roll + suara (intro sampul + narasi judul)"},
+     "help": "B-roll + suara: video berhenti sebentar, sampul bergaya berisi potongan orang dari klip muncul, lalu narator membacakan judul. Cold open & teks hook dilewati."},
+    {"key": "HOOK_BROLL_STYLE", "group": "Gaya editing", "label": "Gaya sampul B-roll", "type": "enum",
+     "options": ["auto", "kolase", "majalah", "sobek", "popart", "scrapbook", "investigasi", "podcast"],
+     "labels": {"auto": "Otomatis — sesuai kategori klip, bervariasi", "kolase": "Kolase Stiker", "majalah": "Sampul Majalah",
+                "sobek": "Kertas Sobek", "popart": "Pop Art Komik", "scrapbook": "Scrapbook",
+                "investigasi": "Arsip Investigasi", "podcast": "Sampul Podcast"}},
+    {"key": "HOOK_BROLL_VOICE", "group": "Gaya editing", "label": "Suara narator B-roll", "type": "str",
+     "help": "Kosong = suara TTS di Pengaturan. Contoh Edge: id-ID-GadisNeural / id-ID-ArdiNeural; Gemini: Kore, Puck."},
+    {"key": "HOOK_BROLL_MAX", "group": "Gaya editing", "label": "Durasi maks intro B-roll (detik)", "type": "float", "min": 2.5, "max": 10},
+    {"key": "HOOK_OVERLAY_STYLE", "group": "Gaya editing", "label": "Gaya teks hook di awal klip", "type": "enum",
+     "options": ["auto", "card", "breaking", "stabilo", "sticker", "notif", "chat", "stack", "strike", "typewriter", "editorial",
+                 "reply", "poll", "stamp", "tweet", "bigstat", "search", "versus", "achievement", "checklist", "quote"],
+     "labels": {"auto": "Otomatis — AI pilih per klip (disarankan)", "card": "Kartu klasik (kotak gelap)",
+                "breaking": "Breaking Bar", "stabilo": "Stabilo", "sticker": "Stiker Pop", "notif": "Notifikasi HP",
+                "chat": "Chat Bubble", "stack": "Blok Bertumpuk", "strike": "Coret & Ganti", "typewriter": "Mesin Ketik",
+                "editorial": "Editorial", "reply": "Balas Komentar", "poll": "Polling", "stamp": "Stempel Fakta",
+                "tweet": "Postingan X", "bigstat": "Angka Besar", "search": "Pencarian", "versus": "Duel VS",
+                "achievement": "Pencapaian", "checklist": "Checklist", "quote": "Quote"},
+     "help": "Otomatis: tiap klip dapat gaya yang cocok dengan isinya dan berbeda dari klip lain. Kata terpenting ditonjolkan."},
+    {"key": "HOOK_OVERLAY_DURATION", "group": "Gaya editing", "label": "Lama teks hook tampil (detik)", "type": "float", "min": 1.2, "max": 8},
+    {"key": "HOOK_OVERLAY_SFX", "group": "Gaya editing", "label": "Efek suara teks hook", "type": "bool",
+     "help": "Bunyi singkat sesuai gaya (ting di Chat/Notifikasi, ketik di Pencarian, dentum di Breaking), di bawah suara video."},
+    {"key": "HOOK_STYLE_AI", "group": "Gaya editing", "label": "AI memilih gaya hook", "type": "bool",
+     "help": "Mati: gaya ditebak dari bentuk kalimat & kategori klip (tanpa memanggil AI)."},
+    # --- (v7) penyesuaian preset subtitle bergaya (pill-slide, stabilo, word-stack, dst.)
+    {"key": "SUBTITLE_LIVE", "group": "Subtitle", "label": "Subtitle bisa diedit setelah render", "type": "bool",
+     "help": "Simpan versi klip tanpa subtitle (ruang disk ±2x per klip). Teks & gaya subtitle bisa diubah lalu di-burn ulang dalam hitungan detik, tanpa render ulang klip."},
+    {"key": "CAPTION_FONT", "group": "Subtitle", "label": "Font subtitle", "type": "enum",
+     "options": ["auto", "black", "impact", "heavy", "bold", "semi", "serif", "mono"],
+     "labels": {"auto": "Ikut preset", "black": "Tebal (Montserrat/Arial Black)", "impact": "Impact (rapat)",
+                "heavy": "Heavy (Segoe UI Black)", "bold": "Bold", "semi": "Semi-bold", "serif": "Serif (Georgia)",
+                "mono": "Mono (Consolas)"},
+     "help": "Taruh Montserrat-ExtraBold.ttf / Montserrat-Black.ttf di folder fonts/ untuk tampilan paling mirip klipers."},
+    {"key": "CAPTION_CASE", "group": "Subtitle", "label": "Kapitalisasi", "type": "enum",
+     "options": ["auto", "upper", "title", "lower", "asis"],
+     "labels": {"auto": "Ikut preset", "upper": "ABC", "title": "Abc (awal kata)", "lower": "abc", "asis": "Sesuai ucapan"}},
+    {"key": "CAPTION_WORDS", "group": "Subtitle", "label": "Kata per layar", "type": "enum",
+     "options": ["auto", "1", "2", "3", "4", "5"], "labels": {"auto": "Otomatis (ikut preset)"}},
+    {"key": "CAPTION_HIGHLIGHT", "group": "Subtitle", "label": "Warna sorot kata", "type": "enum",
+     "options": ["auto", "lime", "yellow", "red", "cyan", "pink", "orange", "white"],
+     "labels": {"auto": "Ikut preset", "lime": "Hijau lime", "yellow": "Kuning", "red": "Merah", "cyan": "Biru muda",
+                "pink": "Pink", "orange": "Oranye", "white": "Putih"}},
+    {"key": "CAPTION_SCALE", "group": "Subtitle", "label": "Ukuran subtitle (x)", "type": "float", "min": 0.6, "max": 1.6,
+     "help": "Berlaku untuk 37 preset bergaya. Gaya lama (Viral, Modern, ...) tidak terpengaruh."},
     # --- Render
     {"key": "CAMPAIGN_DEFAULT_PRESET", "group": "Render", "label": "Preset campaign default", "type": "text",
      "help": "Nama file di folder presets/ yang dipakai otomatis oleh Campaign dan Live spike"},
@@ -303,6 +355,12 @@ def _validate(key: str, value) -> str:
         if not item.get("min", number) <= number <= item.get("max", number):
             raise SettingsError(f"{item['label']}: harus {item['min']}–{item['max']}")
         return f"{number:g}"
+    if key.endswith("_POST_HOURS") and text:
+        from .autopublish import format_hours, parse_hours
+        hours = parse_hours(text)
+        if not hours:
+            raise SettingsError(f"{item['label']}: format jam mis. 09:00,13:00,18:00")
+        return format_hours(hours)
     if kind == "color" and not re.fullmatch(r"#?[0-9A-Fa-f]{6}", text):
         raise SettingsError(f"{item['label']}: format warna #RRGGBB")
     if kind == "enum" and text not in (_options(key) or item["options"]):

@@ -1,8 +1,9 @@
-"""Uji pemilihan teks thumbnail/judul (core/clickbait) tanpa jaringan: AI penulis & juri dipalsukan.
+"""Uji paket judul + thumbnail + hook (core/clickbait) tanpa jaringan: AI penulis & juri dipalsukan.
 
-- kandidat tidak jujur ditolak, kandidat jelas (≥7) didahulukan, angka karangan ditolak (GTA 6 dari judul 'VI' boleh)
-- tiap klip mendapat teks BERBEDA (kandidat mirip klip lain → peringkat berikutnya)
-- gaya normal: judul tidak diubah; gaya clickbait: judul diganti
+- paket tidak jujur / tidak sinkron / angka karangan ditolak; paket jelas didahulukan
+- judul yang sudah tayang & hook yang sudah tercetak DIKUNCI (paket memakai persis itu)
+- sebelum render hook ikut diganti; sesudah render hook tidak disentuh
+- teks thumbnail tiap klip berbeda
 
 Jalankan: python tests/test_clickbait.py
 """
@@ -25,46 +26,57 @@ def check(name, cond):
         fails.append(name)
 
 
-GEN = {"thumb": ["NGGAK SLOP, MEN", "LUCIA GENDONG JASON?!", "UFO BENERAN DI GTA 6?!", "LUCIA MENANG 1000 KALI!"],
-       "title": ["Ternyata LUCIA Gendong JASON! 🤯", "Lucia Bikin Kaget Semua Orang"]}
-JUDGE = {"thumb": [{"i": 0, "jelas": 3, "penasaran": 8, "jujur": True},
-                   {"i": 1, "jelas": 9, "penasaran": 8, "jujur": True},
-                   {"i": 2, "jelas": 9, "penasaran": 9, "jujur": False},
-                   {"i": 3, "jelas": 9, "penasaran": 10, "jujur": True}],
-         "title": [{"i": 0, "jelas": 9, "penasaran": 8, "jujur": True}, {"i": 1, "jelas": 6, "penasaran": 5, "jujur": True}]}
-calls = []
+GEN = {"paket": [
+    {"thumb": "MOBIL PERTAMA GUA", "title": "Mencuri mobil cuma pakai slim jim, gampang banget", "hook": "Segampang ini ternyata"},
+    {"thumb": "CURI MOBIL PAKAI SLIM JIM?!", "title": "NYOLONG Mobil Cuma Modal SLIM JIM?! 😱", "hook": "Lihat seberapa cepat pintunya kebuka"},
+    {"thumb": "UFO MUNCUL DI GTA 6?!", "title": "UFO Beneran Muncul?!", "hook": "Ini beneran terjadi"},
+    {"thumb": "CURI 1000 MOBIL SEHARI!", "title": "Curi 1000 mobil sehari!", "hook": "Rekor baru"},
+]}
+NILAI = {"nilai": [
+    {"i": 0, "jelas": 6, "penasaran": 6, "sinkron": 3, "jujur": True},   # thumbnail tidak nyambung dengan judul
+    {"i": 1, "jelas": 9, "penasaran": 9, "sinkron": 9, "jujur": True},
+    {"i": 2, "jelas": 9, "penasaran": 9, "sinkron": 9, "jujur": False},  # tidak ada di klip
+    {"i": 3, "jelas": 9, "penasaran": 10, "sinkron": 9, "jujur": True},  # angka karangan
+]}
+prompts = []
 
 
 def fake_ask(prompt):
-    calls.append(prompt)
-    return json.dumps(GEN if "Balas JSON: {\"thumb\": [\"6 kandidat" in prompt else JUDGE)
+    prompts.append(prompt)
+    return json.dumps(GEN if "Tulis 5 PAKET" in prompt else NILAI)
 
 
 clickbait._ask = fake_ask
-clip = {"transcript": "gua kira arc lucia bakal slop ternyata lucia gendong jason guys seru banget", "ai_title": "lama",
-        "thumb_text": "Nggak slop, men!"}
-res = clickbait.write(clip, "GTA VI GAMEPLAY | Windah")
-check("kandidat terbaik = jelas & jujur", res["thumb"][:1] == ["LUCIA GENDONG JASON?!"])
-check("tidak jujur ditolak", "UFO BENERAN DI GTA 6?!" not in res["thumb"])
-check("angka karangan ditolak", "LUCIA MENANG 1000 KALI!" not in res["thumb"])
-check("tidak jelas tidak didahulukan", res["thumb"].index("NGGAK SLOP, MEN") > 0 if "NGGAK SLOP, MEN" in res["thumb"] else True)
-check("judul terbaik terpilih", res["title"][:1] == ["Ternyata LUCIA Gendong JASON! 🤯"])
+TX = "mobil bang waibi kebuka cuma pakai slim jim mencuri dengan sangat gampang coy gila tarikan mobilnya"
+clip = {"transcript": TX, "ai_title": "lama", "thumb_text": "lama", "hook_text": "Mencuri mobil, ternyata segampang ini"}
 
-# dua klip, kandidat sama → klip kedua dapat peringkat berikutnya (bukan teks kembar)
-config.TITLE_STYLE = "normal"
-a = {"transcript": clip["transcript"], "ai_title": "judul A", "thumb_text": "x"}
-b = {"transcript": clip["transcript"], "ai_title": "judul B", "thumb_text": "y"}
-clickbait.apply([a, b], "GTA VI")
-check("teks klip A", a["thumb_text"] == "LUCIA GENDONG JASON?!")
-check("teks klip B berbeda", b["thumb_text"] != a["thumb_text"])
-check("gaya normal: judul tidak diubah", a["ai_title"] == "judul A")
+ranked = clickbait.write(clip, "GTA VI GAMEPLAY | Windah")
+check("paket terbaik = jelas, jujur & sinkron", ranked[:1] and ranked[0]["thumb"] == "CURI MOBIL PAKAI SLIM JIM?!")
+check("tidak sinkron ditolak", all(p["thumb"] != "MOBIL PERTAMA GUA" for p in ranked))
+check("tidak jujur ditolak", all(p["thumb"] != "UFO MUNCUL DI GTA 6?!" for p in ranked))
+check("angka karangan ditolak", all(p["thumb"] != "CURI 1000 MOBIL SEHARI!" for p in ranked))
+
+prompts.clear()
+ranked = clickbait.write(clip, "GTA VI", fixed_title="'Mencuri dengan sangat gampang coy' — cuma pakai slim jim",
+                         fixed_hook="Mencuri mobil, ternyata segampang ini")
+check("judul terkunci diberitahukan ke penulis", "TIDAK BOLEH DIUBAH" in prompts[0])
+check("judul terkunci dipakai", ranked and all(p["title"].startswith("'Mencuri dengan sangat gampang") for p in ranked))
+check("hook terkunci dipakai", ranked and all(p["hook"] == "Mencuri mobil, ternyata segampang ini" for p in ranked))
+
+# sebelum render: hook ikut paket · sesudah render: hook tidak disentuh
 config.TITLE_STYLE = "clickbait"
-c = {"transcript": clip["transcript"], "ai_title": "judul C", "thumb_text": "z"}
-clickbait.apply([c], "GTA VI")
-check("gaya clickbait: judul diganti", c["ai_title"] == "Ternyata LUCIA Gendong JASON! 🤯")
+a = {"transcript": TX, "ai_title": "A", "thumb_text": "x", "hook_text": "hook lama A"}
+clickbait.apply([a], "GTA VI", prerender=True)
+check("sebelum render: hook diganti paket", a["hook_text"] == "Lihat seberapa cepat pintunya kebuka")
+check("judul & thumbnail dari paket yang sama", a["ai_title"].startswith("NYOLONG") and a["thumb_text"].startswith("CURI MOBIL"))
+b = {"transcript": TX, "ai_title": "B", "thumb_text": "y", "hook_text": "hook lama B"}
+c = {"transcript": TX, "ai_title": "C", "thumb_text": "z", "hook_text": "hook lama C"}
+clickbait.apply([b, c], "GTA VI", prerender=False)
+check("sesudah render: hook tidak berubah", b["hook_text"] == "hook lama B" and c["hook_text"] == "hook lama C")
+check("teks thumbnail tiap klip berbeda", b["thumb_text"] != c["thumb_text"])
 check("GTA 6 dari judul 'VI' lolos pemeriksa angka",
-      clickbait._rank(["GTA 6 BIKIN KAGET!"], [{"i": 0, "jelas": 9, "penasaran": 9, "jujur": True}],
-                      "isi klip GTA VI 6") == ["GTA 6 BIKIN KAGET!"])
+      clickbait._rank([{"thumb": "GTA 6 BIKIN KAGET!", "title": "GTA 6 bikin kaget semua", "hook": "Lihat ini"}],
+                      [{"i": 0, "jelas": 9, "penasaran": 9, "sinkron": 9, "jujur": True}], "isi klip GTA VI 6") != [])
 
-print("\nSemua uji clickbait lulus" if not fails else f"\nGAGAL: {len(fails)} uji")
+print("\nSemua uji paket judul/thumbnail/hook lulus" if not fails else f"\nGAGAL: {len(fails)} uji")
 sys.exit(1 if fails else 0)

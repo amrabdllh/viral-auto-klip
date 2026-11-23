@@ -72,6 +72,7 @@ const NAV = [
   { group: "Klip dari video" },
   { id: "analisis", label: "Analisis AI", ico: "sparkles", desc: "Klip viral otomatis" },
   { id: "live", label: "Klip Live", ico: "live", desc: "Klip saat streamer masih live", isNew: true },
+  { id: "autopilot", label: "Auto Pilot", ico: "zap", desc: "Channel baru → klip otomatis", isNew: true },
   { id: "manual", label: "Atur Manual", ico: "scissors", desc: "Pilih momen sendiri" },
   { id: "splitcam", label: "Split Cam", ico: "splitcam", desc: "Facecam + gameplay" },
   { id: "bola", label: "Highlight Bola", ico: "ball", desc: "Momen gol otomatis", isNew: true },
@@ -245,6 +246,17 @@ function formValues(root) {
     else out[el.name] = el.value;
   });
   return out;
+}
+/* (v7) isi form dari objek (dipakai Resep) — kebalikan formValues */
+function fillForm(root, values) {
+  $$("[name]", root).forEach((el) => {
+    if (!(el.name in values)) return;
+    const v = values[el.name];
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.dataset.tri !== undefined) el.value = v == null ? "" : v ? "1" : "0";
+    else el.value = v == null ? "" : String(v);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 const dropEmpty = (p, keys) => { keys.forEach((k) => { if (p[k] === "" || p[k] == null) delete p[k]; }); return p; };
 
@@ -527,6 +539,7 @@ function mediaCard(c, { selectable = false } = {}) {
     ${selectable ? `<input type="checkbox" class="m-sel" aria-label="Pilih">` : ""}
     <div class="m-body"><div class="m-title" title="${esc(title)}">${esc(title)}</div><div class="m-meta">${esc(metaLine) || "&nbsp;"}</div></div>
     <div class="m-actions">${UI.btn("Unduh", { ico: "download", size: "sm", href: fileUrl(path, true) })}<span class="spacer"></span>
+      ${(c.subtitle_live || meta.subtitle_live) && isVideo(path) ? UI.btn("", { ico: "pen", size: "sm", kind: "ghost", title: "Edit subtitle (teks & gaya) lalu burn ulang", attrs: "data-subedit" }) : ""}
       ${caption ? UI.btn("", { ico: "copy", size: "sm", kind: "ghost", title: "Salin caption & hashtag", attrs: `data-copy="${esc(caption)}"` }) : ""}
       ${isVideo(path) && id ? UI.btn("", { ico: "calendar", size: "sm", kind: "ghost", title: "Jadwalkan upload", attrs: "data-sched" }) : ""}
       ${isVideo(path) ? UI.btn("", { ico: "upload", size: "sm", kind: "ghost", title: "Upload ke YouTube (headless, tanpa popup)", attrs: "data-yt" }) : ""}
@@ -550,6 +563,8 @@ function bindCards(root) {
   root.addEventListener("click", (e) => {
     const cp = e.target.closest("[data-copy]");
     if (cp) return copyText(cp.dataset.copy, "Disalin");
+    const se = e.target.closest("[data-subedit]");
+    if (se) return subtitleEditor(se.closest(".media"));
     const sc = e.target.closest("[data-sched]");
     if (sc) return scheduleModal({ asset_id: sc.closest(".media").dataset.asset });
     const yt = e.target.closest("[data-yt]");
@@ -642,6 +657,55 @@ function platformToggles(selected = ["youtube"]) {
   return `<div class="stack" style="gap:2px">${Object.entries(pf).map(([k, v]) => `<label class="switch"><input type="checkbox" data-pf="${k}" ${selected.includes(k) ? "checked" : ""}><span>${esc(v.label)} ${v.ready ? UI.pill("siap", "ok") : UI.pill("belum diset", "warn")}</span></label>`).join("")}</div>`;
 }
 const pickedPlatforms = (m) => $$("[data-pf]", m).filter((c) => c.checked).map((c) => c.dataset.pf);
+
+/* (v7) editor subtitle live: ubah teks per layar / gaya / matikan, lalu burn ulang ke klip yang sama */
+function subtitleEditor(card) {
+  const path = card.dataset.path;
+  const fmtT = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+  modal({ title: "Edit subtitle", sub: "Ubah teks atau gaya, lalu burn ulang. Klip tidak dirender ulang; ±10–30 detik.", lg: true,
+    body: `<div data-sl>${UI.empty("doc", "Memuat…")}</div>`,
+    foot: UI.btn("Kembalikan asli", { kind: "ghost", attrs: "data-reset" }) + `<span class="spacer"></span>` +
+      UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Burn ulang", { kind: "primary", ico: "check", attrs: "data-burn" }) }, async (m) => {
+    let data;
+    const draw = () => {
+      const styles = (typeof CAPTION_STYLES === "function" ? CAPTION_STYLES() : []);
+      $("[data-sl]", m).innerHTML = `<div class="fields two">
+          ${UI.field("Gaya subtitle", `<select data-style>${UI.options(styles, data.style)}</select>`,
+            { hint: `<img data-cap-prev src="/api/caption-preview?style=${encodeURIComponent(data.style)}" alt="" style="width:100%;max-width:360px;border-radius:8px;display:block;margin-top:6px">` })}
+          <div class="stack">${UI.toggle("sl_on", "Tampilkan subtitle", { checked: data.enabled !== false })}
+            <p class="small muted">${data.edited_at ? "Terakhir diubah " + new Date(data.edited_at * 1000).toLocaleString() : "Belum pernah diubah."}
+            ${data.tempo > 1.0001 ? ` Klip dipercepat ${(+data.tempo).toFixed(2)}×, waktu di bawah memakai timeline sebelum tempo.` : ""}</p></div></div>
+        <div class="stack" style="max-height:46vh;overflow:auto;margin-top:12px">${data.segments.map((s) => `<div class="row nw" style="gap:10px">
+            <span class="small muted num" style="min-width:92px">${fmtT(s.start)}–${fmtT(s.end)}</span>
+            <input type="text" data-seg="${s.i}" value="${esc(s.text)}" data-orig="${esc(s.text)}" style="flex:1" placeholder="(kosong = layar dihapus)"></div>`).join("")}</div>`;
+      $("[data-style]", m).onchange = (e) => { const img = $("img[data-cap-prev]", m); if (img) img.src = `/api/caption-preview?style=${encodeURIComponent(e.target.value)}`; };
+    };
+    try {
+      data = await api("/api/subtitle?path=" + encodeURIComponent(path));
+      if (!data.available) { $("[data-sl]", m).innerHTML = UI.banner("info", "Klip ini tidak punya data subtitle live (dirender sebelum fitur ini ada, atau fiturnya dimatikan di Pengaturan → Subtitle)."); return; }
+      draw();
+    } catch (err) { fail(err); return; }
+    const refreshCard = () => {
+      const v = card.querySelector("video");
+      if (v) { const src = v.getAttribute("src").replace(/([?&])t=\d+/, "").replace(/[?&]$/, ""); v.src = src + (src.includes("?") ? "&" : "?") + "t=" + Date.now(); v.load(); }
+    };
+    const run = (btn, body) => busy(btn, async () => {
+      try {
+        const r = await api("/api/subtitle/reburn", { body: { path, ...body } });
+        toast(`Subtitle di-burn ulang (${r.seconds} dtk)`);
+        refreshCard();
+        closeModal();
+      } catch (err) { fail(err); }
+    });
+    $("[data-burn]", m).onclick = (e) => {
+      if (!data?.available) return;
+      const edits = {};
+      m.querySelectorAll("[data-seg]").forEach((inp) => { if (inp.value !== inp.dataset.orig) edits[inp.dataset.seg] = inp.value; });
+      run(e.currentTarget, { style: $("[data-style]", m).value, edits, enabled: $("[name=sl_on]", m).checked });
+    };
+    $("[data-reset]", m).onclick = (e) => { if (data?.available) run(e.currentTarget, { reset: true }); };
+  });
+}
 
 function scheduleModal({ asset_id, file_path, onSaved } = {}) {
   const soon = Math.ceil(Date.now() / 1000 / 900) * 900 + 900;

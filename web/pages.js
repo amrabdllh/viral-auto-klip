@@ -22,7 +22,16 @@ const pubStatus = () => {
   return on.length ? `Terhubung: ${on.join(", ")}.` : "Belum ada platform terhubung — hubungkan YouTube/TikTok di <a href='#upload'>Jadwal Upload</a> dulu.";
 };
 const CLIP_COUNTS = [{ v: "", l: "Otomatis — kualitas (AI)" }, { v: "farm", l: "Otomatis — farming (lebih banyak)" }, ...[3, 5, 8, 10, 15, 20, 25, 30, 40].map((n) => ({ v: n, l: `${n} klip` }))];
-const captionSelect = (v = "viral") => UI.select("caption_style", "Gaya caption", CAPTION_STYLES(), v);
+/* (v7) pratinjau gaya caption: gambar render libass sungguhan, ikut berganti saat gaya dipilih */
+const capPreviewSrc = (v) => `/api/caption-preview?style=${encodeURIComponent(v)}`;
+const captionSelect = (v = "viral") => UI.select("caption_style", "Gaya caption", CAPTION_STYLES(), v,
+  { hint: `<img data-cap-prev src="${capPreviewSrc(v)}" alt="Contoh gaya caption" loading="lazy" style="width:100%;max-width:360px;border-radius:8px;display:block;margin-top:6px">` });
+document.addEventListener("change", (e) => {
+  const sel = e.target;
+  if (!(sel instanceof HTMLSelectElement) || sel.name !== "caption_style") return;
+  const img = sel.closest(".field")?.querySelector("img[data-cap-prev]");
+  if (img) img.src = capPreviewSrc(sel.value);
+});
 const CAPTION_LABELS = { viral: "Viral (kuning tebal)", modern: "Modern", tiktok_bold: "TikTok Bold", karaoke: "Karaoke", neon: "Neon",
   gradient: "Gradasi", minimal: "Minimal", emoji: "Emoji", hormozi: "Hormozi", mrbeast: "MrBeast", clean: "Bersih", bold: "Tebal" };
 const CAPTION_STYLES = () => (STATE.catalog?.caption_styles || ["viral", "modern", "tiktok_bold", "karaoke", "neon", "gradient", "minimal", "emoji"])
@@ -155,10 +164,13 @@ PAGES.analisis = { render(view, q) {
   view.innerHTML = toolPage({ id: "analisis", needs: ["llm", "ffmpeg"],
     desc: "AI membaca seluruh transkrip, memilih momen paling viral, lalu merender klip vertikal dengan reframe wajah, caption animasi, dan editing dinamis.",
     main: UI.panel({ id: "f", body: UI.section("Sumber video", `<div id="src"></div>`) +
+      `<div class="row" style="gap:8px;align-items:flex-end;margin:4px 0 14px">${UI.field("Resep", `<select id="rcSel"><option value="">— Pilih resep tersimpan —</option></select>`, { hint: "Opsi form tersimpan (maks 10). Juga dipakai Auto Pilot.", cls: "grow" })}
+        ${UI.btn("Simpan resep", { ico: "plus", size: "sm", kind: "ghost", id: "rcSave" })}${UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Hapus resep terpilih", id: "rcDel" })}</div>` +
       UI.section("Klip", `<div class="fields">${UI.select("num_clips", "Jumlah klip", CLIP_COUNTS, "", { hint: "Kualitas: hanya klip yang benar-benar bagus (±1 per 4,5 menit maks). Farming: klip 'lumayan' ikut diambil (±1 per 3 menit, maks 40)." })}${UI.num("min_duration", "Durasi minimum", { value: "", min: 5, max: 120, hint: "detik · kosong = otomatis (AI, mulai 15)" })}
         ${UI.num("max_duration", "Durasi maksimum", { value: "", min: 10, max: 180, hint: "detik · kosong = otomatis (AI, hingga 90)" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
-        ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "auto")}${UI.select("language", "Bahasa video", LANGS, "id")}${UI.select("source_max_height", "Kualitas sumber", SOURCE_QUALITY, "")}</div>`) +
-      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("subtitle_provider", "Subtitle", [{ v: "", l: "Ikut pengaturan" }, { v: "none", l: "Tanpa subtitle" }, { v: "whisper", l: "Whisper lokal" }, { v: "elevenlabs", l: "ElevenLabs Scribe" }], "")}${UI.select("subtitle_position", "Posisi subtitle", SUB_POSITIONS, "bottom", { hint: "Berlaku saat template MotionKlip aktif." })}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "auto")}${UI.text("keyword", "Fokus kata kunci", { placeholder: "mis. investasi, gol", hint: "Kosong = otomatis: klip yang menyebut topik yang lagi naik diutamakan." })}</div>
+        ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "auto")}${UI.select("language", "Bahasa video", LANGS, "id")}${UI.select("source_max_height", "Kualitas sumber", SOURCE_QUALITY, "")}
+        ${UI.text("range_start", "Proses mulai dari", { placeholder: "0:00 atau 1:00:00", hint: "Opsional — hanya bagian video ini yang ditranskrip & dianalisis." })}${UI.text("range_end", "Sampai", { placeholder: "kosong = akhir video" })}</div>`) +
+      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("subtitle_provider", "Subtitle", [{ v: "", l: "Ikut pengaturan" }, { v: "none", l: "Tanpa subtitle" }, { v: "whisper", l: "Whisper lokal" }, { v: "elevenlabs", l: "ElevenLabs Scribe" }], "")}${UI.select("subtitle_position", "Posisi subtitle", SUB_POSITIONS, "bottom", { hint: "Berlaku saat template MotionKlip aktif." })}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "auto")}${UI.text("keyword", "Momen spesifik", { placeholder: "mis. gol, penalti, kartu merah", hint: "Maks 20 kata kunci, pisahkan koma — AI wajib mengambil momen yang membahasnya. Kosong = topik yang lagi naik diutamakan." })}</div>
         <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>
         <div class="fields">${UI.field("Template campaign", `<select name="preset" id="anPreset"><option value="">Tanpa template</option></select>`, { hint: "Pilih preset untuk mengaktifkan MotionKlip (banner + outro); kosongkan untuk klip biasa." })}</div>
         <div class="switches">${UI.toggle("use_preset_hashtags", "Pakai hashtag preset campaign", { checked: false, sub: "Kalau aktif, hashtag preset menggantikan hashtag AI" })}</div>`) +
@@ -181,6 +193,35 @@ PAGES.analisis = { render(view, q) {
       "AI membaca transkrip & memilih momen dengan hook kuat.", "Tiap klip di-reframe mengikuti wajah, diberi caption, jump cut, zoom & thumbnail.",
       "AI menulis judul, caption & hashtag. Hasil bisa langsung dijadwalkan."], UI.banner("info", "Boleh pindah halaman — progres tetap jalan di <a href='#jobs'>Antrean Job</a>.")) });
   const src = sourceInput($("#src"), { prefill: q.url || "" });
+  /* (v7) Resep: simpan / pakai / hapus opsi form */
+  let recipes = [];
+  const loadRecipes = (sel = "") => api("/api/recipes").then((r) => {
+    recipes = r.recipes || [];
+    $("#rcSel").innerHTML = `<option value="">— Pilih resep tersimpan (${recipes.length}/${r.max}) —</option>` +
+      recipes.map((x) => `<option value="${esc(x.id)}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+  }).catch(() => {});
+  loadRecipes(q.recipe || "").then(() => { if (q.recipe) { const r = recipes.find((x) => x.id === q.recipe); if (r) fillForm($("#f"), r.params); } });
+  $("#rcSel").onchange = (e) => { const r = recipes.find((x) => x.id === e.target.value); if (r) { fillForm($("#f"), r.params); toast(`Resep "${r.name}" dipakai`); } };
+  $("#rcSave").onclick = () => {
+    const cur = recipes.find((x) => x.id === $("#rcSel").value);
+    modal({ title: "Simpan resep", sub: "Semua opsi form saat ini (kecuali link/file video) disimpan dengan nama ini. Nama yang sama = ditimpa.",
+      body: UI.text("rc_name", "Nama resep", { value: cur?.name || "", placeholder: "mis. Gaming Windah — Pill Slide" }),
+      foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Simpan", { kind: "primary", attrs: "data-ok" }) }, (m) => {
+      $("[data-ok]", m).onclick = (ev) => busy(ev.currentTarget, async () => {
+        try {
+          const p = formValues($("#f"));
+          delete p.rc_name;
+          const r = await api("/api/recipes", { body: { name: $("[name=rc_name]", m).value, params: p } });
+          toast(`Resep "${r.name}" tersimpan`); closeModal(); loadRecipes(r.id);
+        } catch (err) { fail(err); }
+      });
+    });
+  };
+  $("#rcDel").onclick = () => {
+    const r = recipes.find((x) => x.id === $("#rcSel").value);
+    if (!r) return toast("Pilih resep dulu", true);
+    confirmModal("Hapus resep?", `Resep "${esc(r.name)}" dihapus. Auto Pilot yang memakainya kembali ke opsi bawaan.`, "Hapus", async () => { await api(`/api/recipes/${r.id}`, { method: "DELETE" }).catch(fail); toast("Resep dihapus"); loadRecipes(); });
+  };
   api("/api/campaign/presets").then((r) => {
     const sel = $("#anPreset");
     if (!sel) return;
@@ -193,13 +234,77 @@ PAGES.analisis = { render(view, q) {
   }).catch(() => {});
   $("#go").onclick = (e) => {
     const s = requireSource(src); if (!s) return;
-    const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names", "publish_category", "extra_hashtags"]);
+    const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names", "publish_category", "extra_hashtags", "range_start", "range_end"]);
     if (p.auto_publish_platform) p.auto_publish_platforms = [p.auto_publish_platform];
     delete p.auto_publish_platform;
     if (!p.preset) { delete p.campaign; delete p.preset; }
     else { p.campaign = true; p.viral_standard = false; }  // preset dipilih = campaign; durasi ikut konteks (15–90)
     runJob($("#job"), "clip_quick", { ...p, ...s }, { title: "Analisis AI", btn: e.currentTarget });
   };
+} };
+
+/* ================================================================== AUTO PILOT (v7) */
+const AP_KINDS = [{ v: "both", l: "Video & siaran" }, { v: "video", l: "Video biasa saja" }, { v: "live", l: "Siaran live saja" }];
+const AP_MODES = [{ v: "review", l: "Tinjau dulu (klip masuk Antrean Job)" }, { v: "auto", l: "Langsung upload ke jam FYP" }];
+const AP_INTERVALS = [{ v: 15, l: "Tiap 15 menit" }, { v: 30, l: "Tiap 30 menit" }, { v: 60, l: "Tiap 1 jam" }, { v: 180, l: "Tiap 3 jam" }];
+PAGES.autopilot = { render(view) {
+  view.innerHTML = toolPage({ id: "autopilot", needs: ["llm", "ffmpeg"],
+    desc: "Ikuti channel YouTube. Tiap ada video atau siaran baru yang lolos filter, klip dibuat otomatis dengan resep pilihanmu — tanpa menempel link.",
+    main: UI.panel({ id: "f", title: "Ikuti channel", body: `<div class="fields">${UI.text("url", "Link channel YouTube", { type: "url", placeholder: "https://www.youtube.com/@namachannel", cls: "span-all" })}
+        ${UI.field("Resep", `<select name="recipe_id"><option value="">Opsi bawaan (otomatis)</option></select>`, { hint: "Buat resep di halaman <a href='#analisis'>Analisis AI</a> → Simpan resep." })}
+        ${UI.select("kind", "Jenis", AP_KINDS, "both")}${UI.select("mode", "Hasil", AP_MODES, "review")}${UI.select("interval_min", "Cek channel", AP_INTERVALS, 15, { numeric: true })}
+        ${UI.num("min_min", "Durasi min", { value: 10, min: 0, max: 600, hint: "menit" })}${UI.num("max_min", "Durasi maks", { value: 180, min: 1, max: 1440, hint: "menit" })}
+        ${UI.text("include", "Judul wajib memuat", { placeholder: "mis. GTA, Minecraft", hint: "Pisahkan koma. Kosong = semua." })}${UI.text("exclude", "Judul tidak boleh memuat", { placeholder: "mis. shorts, trailer" })}</div>
+        <div class="switches">${UI.toggle("process_latest", "Proses video terbaru sekarang", { checked: false, sub: "Mati = video yang sudah ada hanya ditandai; yang diproses hanya video baru setelah ini." })}</div>`,
+      foot: footAction("Ikuti channel", "zap", "Server harus tetap menyala agar channel dicek.") }) + `<div id="ap" style="margin-top:16px"></div>`,
+    aside: UI.aside("Cara kerja", ["Channel dicek berkala (default tiap 15 menit) tanpa mengunduh apa pun.",
+      "Video/siaran baru yang lolos filter langsung diproses dengan resep pilihan.", "Siaran yang masih live otomatis memakai Mode Live.",
+      "Mode Tinjau: klip menunggu di Antrean Job. Mode Upload: klip dijadwalkan ke jam FYP terbaik.",
+      "Saat channel baru diikuti, arsip lama tidak diproses (kecuali dicentang)."]) });
+  const fmtAgo = (t) => !t ? "belum" : (Date.now() / 1000 - t < 90 ? "baru saja" : new Date(t * 1000).toLocaleString());
+  const load = async () => {
+    const d = await api("/api/autopilot");
+    const sel = $("[name=recipe_id]", $("#f"));
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">Opsi bawaan (otomatis)</option>` + d.recipes.map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");
+    sel.value = cur;
+    const recName = (id) => d.recipes.find((r) => r.id === id)?.name || "Opsi bawaan";
+    $("#ap").innerHTML = d.watchers.length ? d.watchers.map((w) => UI.panel({
+      title: esc(w.channel_title || w.name), sub: `${esc(w.url)} · resep: ${esc(recName(w.recipe_id))} · ${w.mode === "auto" ? "langsung upload" : "tinjau dulu"} · cek ${fmtAgo(w.last_check)}`,
+      head: `<label class="switch"><input type="checkbox" data-en="${esc(w.id)}" ${w.enabled ? "checked" : ""}><span>Aktif</span></label>` +
+        UI.btn("Cek sekarang", { ico: "refresh", size: "sm", kind: "ghost", attrs: `data-chk="${esc(w.id)}"` }) +
+        UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Berhenti mengikuti", attrs: `data-del="${esc(w.id)}"` }),
+      body: (w.last_error ? UI.banner("error", "Cek terakhir gagal: " + esc(w.last_error)) : "") +
+        (w.history.length ? `<table class="tbl"><tbody>${w.history.map((h) => `<tr><td class="small muted nw">${fmtAgo(h.at)}</td><td>${esc(h.title)}</td>
+          <td class="nw">${h.status === "diproses" ? UI.pill("diproses", "accent") + (h.job ? ` <a href="#jobs" class="small">job</a>` : "") : UI.pill("dilewati") + ` <span class="small muted">${esc(h.reason || "")}</span>`}</td></tr>`).join("")}</tbody></table>`
+          : `<p class="small muted">Belum ada video baru sejak diikuti (${w.seen} video lama ditandai).</p>`) })).join("")
+      : UI.empty("zap", "Belum ada channel diikuti", "Tempel link channel di atas untuk mulai.");
+  };
+  $("#ap").addEventListener("click", async (e) => {
+    const c = e.target.closest("[data-chk]"), dl = e.target.closest("[data-del]");
+    try {
+      if (c) await busy(c, async () => { const r = await api(`/api/autopilot/${c.dataset.chk}/check`, { body: {} }); toast(r.error ? "Gagal: " + r.error : `${r.submitted.length} video diproses, ${r.skipped.length} dilewati`, !!r.error); await load(); });
+      if (dl) confirmModal("Berhenti mengikuti?", "Channel ini tidak dicek lagi. Klip yang sudah dibuat tidak dihapus.", "Berhenti", async () => { await api(`/api/autopilot/${dl.dataset.del}`, { method: "DELETE" }).catch(fail); load(); });
+    } catch (err) { fail(err); }
+  });
+  $("#ap").addEventListener("change", async (e) => {
+    const en = e.target.closest("[data-en]");
+    if (en) { try { await api(`/api/autopilot/${en.dataset.en}`, { method: "PATCH", body: { enabled: en.checked } }); toast(en.checked ? "Auto Pilot aktif" : "Auto Pilot dijeda"); } catch (err) { fail(err); } }
+  });
+  $("#go").onclick = (e) => busy(e.currentTarget, async () => {
+    const p = formValues($("#f"));
+    if (!p.url) return toast("Isi link channel dulu", true);
+    try {
+      const r = await api("/api/autopilot", { body: { url: p.url, recipe_id: p.recipe_id, kind: p.kind, mode: p.mode, interval_min: p.interval_min,
+        min_dur: Math.round((p.min_min || 0) * 60), max_dur: Math.round((p.max_min || 0) * 60), include: p.include, exclude: p.exclude, process_latest: p.process_latest } });
+      const c = r.check || {};
+      toast(c.error ? "Channel diikuti, tapi cek pertama gagal: " + c.error : c.submitted?.length ? `Channel diikuti — ${c.submitted.length} video terbaru diproses` : "Channel diikuti — video baru akan diproses otomatis", !!c.error);
+      $("[name=url]", $("#f")).value = "";
+      await load();
+    } catch (err) { fail(err); }
+  });
+  load().catch(fail);
+  const iv = setInterval(() => { if (!$("#ap")) return clearInterval(iv); if ($("#modal").hidden) load().catch(() => {}); }, 30000);
 } };
 
 /* ================================================================== KLIP LIVE */
@@ -797,7 +902,7 @@ PAGES.upload = { render(view) {
       head: dead ? UI.pill("Sesi mati", "bad") : v.ready ? UI.pill("Terhubung", "ok") : UI.pill("Belum diset", "warn"),
       body: dead ? `<p class="small ink2"><b>Upload ke ${esc(v.label)} akan gagal</b> sampai cookies diperbarui: ${esc(v.session.error || "sesi kedaluwarsa")}${checked(v.session)}.</p>
           <p class="tiny muted">Login di jendela Incognito → export cookies → simpan di Pengaturan → tutup jendela itu tanpa logout (agar sesi tidak dirotasi browser).</p>${UI.btn("Perbarui cookies", { size: "sm", href: "#settings", ico: "sliders", kind: "primary" })}`
-        : v.ready ? `<p class="small muted">${v.logged_in ? "Upload lewat YouTube API resmi (login awet). " : ""}Siap mengunggah${v.session?.ok ? ` · sesi valid${v.session.who ? " (" + esc(v.session.who) + ")" : ""}${checked(v.session)}` : ""}.</p>${v.limit_until ? `<p class="small ink2">${UI.pill("Batas upload harian", "warn")} Video yang sudah terjadwal aman. Sisanya diunggah otomatis lagi mulai ±${esc(fmtDate(v.limit_until))}. Verifikasi channel sekali di <a href="https://www.youtube.com/verify" target="_blank" rel="noopener">youtube.com/verify</a> agar batas ±15 video/hari hilang.</p>` : ""}`
+        : v.ready ? `<p class="small muted">${v.logged_in ? "Upload lewat YouTube API resmi (login awet). " : ""}Siap mengunggah${v.session?.ok ? ` · sesi valid${v.session.who ? " (" + esc(v.session.who) + ")" : ""}${checked(v.session)}` : ""}.</p>${v.limit_until ? `<p class="small ink2">${UI.pill("Batas upload harian", "warn")} Video yang sudah terjadwal aman. Sisanya diunggah otomatis lagi mulai ±${esc(fmtDate(v.limit_until))}. Batas lebih tinggi: aktifkan <b>Fitur lanjutan</b> di YouTube Studio → Setelan → Channel → Kelayakan fitur (verifikasi video/ID, atau otomatis seiring riwayat channel).</p>` : ""}`
         : `<p class="small ink2">${esc(v.hint)}</p>${UI.btn("Buka Pengaturan", { size: "sm", href: "#settings", ico: "sliders" })}` });
   }).join("");
   // v6.8: jam upload otomatis hari ini + yang sudah dipelajari dari views 24 jam
@@ -1280,6 +1385,37 @@ PAGES.settings = { render(view) {
     }).join("")}</div>` })).join("");
     const imgSel = $("[data-key=IMAGE_PROVIDER]", $("#groups"));
     if (imgSel && $("#imgModel")) imgSel.addEventListener("change", () => { $("#imgModel").innerHTML = imgModelOpts(imgSel.value, ""); });
+    /* (v7) pratinjau gaya hook: gambar contoh ikut berganti saat gaya dipilih */
+    const hookSel = $("[data-key=HOOK_OVERLAY_STYLE]", $("#groups"));
+    if (hookSel) {
+      const box = document.createElement("div");
+      box.className = "hint small muted";
+      box.style.marginTop = "8px";
+      hookSel.closest(".field").appendChild(box);
+      const showHook = () => {
+        const v = hookSel.value;
+        box.innerHTML = v === "auto" ? "AI memilih satu dari 19 gaya untuk tiap klip sesuai isinya."
+          : v === "card" ? "Kotak gelap berisi teks hook (tampilan lama)."
+          : `<img src="/api/hook-preview?style=${encodeURIComponent(v)}" alt="Contoh gaya ${esc(v)}" style="width:100%;max-width:420px;border-radius:10px;display:block">`;
+      };
+      hookSel.addEventListener("change", showHook);
+      showHook();
+    }
+    /* (v7) pratinjau sampul Hook B-roll */
+    const brSel = $("[data-key=HOOK_BROLL_STYLE]", $("#groups"));
+    if (brSel) {
+      const box = document.createElement("div");
+      box.className = "hint small muted";
+      box.style.marginTop = "8px";
+      brSel.closest(".field").appendChild(box);
+      const showBr = () => {
+        const v = brSel.value;
+        box.innerHTML = v === "auto" ? "Gaya dipilih sesuai kategori klip dan dibuat bervariasi antar-klip. Berlaku bila Jenis hook pembuka = B-roll + suara."
+          : `<img src="/api/hook-broll-preview?style=${encodeURIComponent(v)}" alt="Contoh sampul ${esc(v)}" style="width:100%;max-width:216px;border-radius:10px;display:block">`;
+      };
+      brSel.addEventListener("change", showBr);
+      showBr();
+    }
     const provSel = $("[data-key=AI_PROVIDER]", $("#groups"));
     const refreshModels = () => { $("#llmModel").innerHTML = modelOpts(provSel.value, ""); $("#llmHint").textContent = modelHint(provSel.value); };
     if (provSel && $("#llmModel")) {

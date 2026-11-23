@@ -264,6 +264,8 @@ AUTO_PUBLISH_MIN_GAP_H = float(os.getenv("AUTO_PUBLISH_MIN_GAP_H", "2.5"))  # ja
 THUMB_AI = os.getenv("THUMB_AI", "true").strip().lower() in ("1", "true", "yes", "on")  # thumbnail latar AI + wajah asli
 TITLE_STYLE = os.getenv("TITLE_STYLE", "normal").strip().lower()  # normal | clickbait (tetap jujur)
 UPLOAD_SLOT_MODE = os.getenv("UPLOAD_SLOT_MODE", "riset").strip().lower()  # riset = jam dipilih tiap hari · jangkar = jam tetap
+TIKTOK_POST_HOURS = os.getenv("TIKTOK_POST_HOURS", "")  # mis. "09:00,13:00,18:00,20:00,22:00" — jam tetap akun TikTok (kosong = riset)
+YOUTUBE_POST_HOURS = os.getenv("YOUTUBE_POST_HOURS", "")  # sama, untuk YouTube Shorts
 UPLOAD_NATIVE_SCHEDULE = os.getenv("UPLOAD_NATIVE_SCHEDULE", "true").strip().lower() in ("1", "true", "yes", "on")  # unggah lebih awal + jadwal bawaan YouTube/TikTok
 PREUPLOAD_DAYS = float(os.getenv("PREUPLOAD_DAYS", "10"))  # sejauh apa jadwal diunggah lebih awal (TikTok maks ±10 hari)
 SOURCE_CACHE_MAX_GB = float(os.getenv("SOURCE_CACHE_MAX_GB", "60"))  # batas cache video sumber (yang lama dihapus otomatis)
@@ -416,6 +418,13 @@ CAPTION_STYLES = {
     }
 }
 
+# (v7) 37 preset subtitle bergaya (core/caption_presets) — "karaoke" lama ikut diganti versi preset
+try:
+    from core.caption_presets import style_entries as _caption_preset_entries
+    CAPTION_STYLES.update(_caption_preset_entries())
+except Exception as _exc:  # pragma: no cover - preset opsional, gaya lama tetap jalan
+    print(f"[config] preset subtitle tidak dimuat: {_exc}")
+
 DEFAULT_CAPTION_STYLE = "modern"
 MAX_WORDS_PER_LINE = 8  # for readability on mobile
 
@@ -473,6 +482,28 @@ MUSIC_VOLUME = 0.12
 AUTO_DUCK = True
 
 ENABLE_BROLL = True  # Auto add intro bumper (Klipers.pro style)
+# (v7) Hook bergaya per klip (core/hook_styles): auto = AI/heuristik memilih dari 19 gaya; card = kartu lama;
+# atau id gaya tetap (breaking, stabilo, sticker, notif, chat, stack, strike, typewriter, editorial, reply, poll,
+# stamp, tweet, bigstat, search, versus, achievement, checklist, quote)
+HOOK_OVERLAY_STYLE = os.getenv("HOOK_OVERLAY_STYLE", "auto").strip().lower() or "auto"
+HOOK_OVERLAY_DURATION = float(os.getenv("HOOK_OVERLAY_DURATION", "3") or 3)  # detik tampil (1.2–8)
+HOOK_OVERLAY_SFX = os.getenv("HOOK_OVERLAY_SFX", "1").lower() in ("1", "true", "yes")  # bunyi singkat sesuai gaya
+# (v7) jenis hook pembuka: text = hook bergaya di atas video | broll = intro B-roll + narasi TTS
+HOOK_MODE = os.getenv("HOOK_MODE", "text").strip().lower() or "text"
+HOOK_BROLL_STYLE = os.getenv("HOOK_BROLL_STYLE", "auto").strip().lower() or "auto"
+HOOK_BROLL_VOICE = os.getenv("HOOK_BROLL_VOICE", "").strip()
+HOOK_BROLL_MAX = float(os.getenv("HOOK_BROLL_MAX", "7") or 7)
+# (v7) Auto Pilot: pantau channel YouTube → klip otomatis (0 = matikan loop latar)
+AUTOPILOT_ENABLED = os.getenv("AUTOPILOT_ENABLED", "1").lower() in ("1", "true", "yes")
+# (v7) subtitle live: simpan master tanpa caption + data caption → caption bisa diedit & di-burn ulang
+SUBTITLE_LIVE = os.getenv("SUBTITLE_LIVE", "1").lower() in ("1", "true", "yes")
+# (v7) penyesuaian preset subtitle bergaya (auto = ikut preset)
+CAPTION_FONT = os.getenv("CAPTION_FONT", "auto").strip().lower() or "auto"
+CAPTION_CASE = os.getenv("CAPTION_CASE", "auto").strip().lower() or "auto"
+CAPTION_WORDS = os.getenv("CAPTION_WORDS", "auto").strip().lower() or "auto"
+CAPTION_HIGHLIGHT = os.getenv("CAPTION_HIGHLIGHT", "auto").strip().lower() or "auto"
+CAPTION_SCALE = float(os.getenv("CAPTION_SCALE", "1") or 1)
+HOOK_STYLE_AI =os.getenv("HOOK_STYLE_AI", "1").lower() in ("1", "true", "yes")  # AI memilih gaya & kata yang ditonjolkan
 BROLL_FOLDER = ""  # future: custom B-roll clips
 
 ENABLE_HOOK_OPTIMIZER = True

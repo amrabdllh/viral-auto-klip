@@ -381,14 +381,14 @@ def _api_error(exc: Exception) -> str:
     if "quotaExceeded" in msg or "dailyLimitExceeded" in msg:
         return "Kuota YouTube API hari ini habis (±6 upload/hari) — reset tengah malam waktu Pasifik (±15:00 WIB)"
     if "uploadLimitExceeded" in msg:
-        return "Batas upload harian YouTube tercapai (channel belum diverifikasi) — coba lagi nanti"
+        return "Batas upload harian YouTube tercapai — dilanjutkan otomatis nanti (batas lebih tinggi: Fitur lanjutan channel)"
     if "invalid_grant" in msg or "Token has been expired or revoked" in msg:
         return "Login YouTube API kedaluwarsa — klik Login YouTube API lagi di Pengaturan"
     return msg[:300]
 
 
 def _api_thumbnail(service, video_id: str, image: str) -> str:
-    """thumbnails.set (50 unit kuota). Thumbnail kustom butuh channel terverifikasi — selain itu dilewati."""
+    """thumbnails.set (50 unit kuota). Thumbnail kustom butuh verifikasi nomor HP channel — selain itu dilewati."""
     from googleapiclient.http import MediaFileUpload
     try:
         service.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(str(image), mimetype="image/jpeg")).execute()

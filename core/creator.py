@@ -101,7 +101,10 @@ def catalog() -> Dict:
     return {"categories": CATEGORIES, "tones": TONES, "focus": FOCUS, "endings": ENDINGS,
             "visual_styles": list(VISUAL_STYLES), "story_styles": STORY_STYLES,
             "motion_presets": {k: {kk: v[kk] for kk in ("label", "desc", "use")} for k, v in MOTION_PRESETS.items()},
-            "transitions": ffx.TRANSITIONS, "caption_styles": list(config.CAPTION_STYLES)}
+            "transitions": ffx.TRANSITIONS,
+            # (v7) gaya lama = string; preset bergaya = {v, l} dengan label Indonesia
+            "caption_styles": [{"v": k, "l": f"✨ {v['label']}"} if v.get("preset") else k
+                               for k, v in config.CAPTION_STYLES.items()]}
 
 
 # ----------------------------------------------------------------------------- naskah

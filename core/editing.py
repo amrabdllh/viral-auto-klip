@@ -349,23 +349,22 @@ def render_polish(input_path: str, output_path: str, *, width: int, height: int,
                   ass_path: Optional[str], grade: str, zoom_chain: str, progress_bar: bool,
                   encode_args: List[str], escape_path, overlays: Optional[List[str]] = None,
                   stickers: Optional[List[Dict]] = None, broll: Optional[List[Dict]] = None,
-                  fx_chain: str = "", behind_text: Optional[Dict] = None, leaks: Sequence[float] = ()) -> None:
-    """Satu kali encode: fps CFR → color grade → zoom → b-roll → caption (tidak ikut zoom)
-    → overlay teks (kartu hook, watermark, CTA akhir, lower third) → stiker emoji → progress bar.
+                  fx_chain: str = "", behind_text: Optional[Dict] = None, leaks: Sequence[float] = (),
+                  hook_seq: Optional[Dict] = None, clean_path: Optional[str] = None) -> None:
+    """Satu kali encode: fps CFR → color grade → zoom → b-roll → overlay teks (kartu hook, watermark,
+    CTA akhir, lower third) → hook bergaya → stiker emoji → progress bar → caption (lapisan teratas).
+
+    (v7) `clean_path`: keluaran kedua dari encode yang sama — versi TANPA caption (video saja) untuk
+    subtitle live: teks/gaya caption bisa diedit lalu di-burn ulang tanpa render ulang klip
+    (core/subtitle_live). Karena caption lapisan teratas, burn ulang di atas master ini identik dengan aslinya.
 
     v4: kartu hook & CTA dulu masing-masing encode ulang sendiri (tambah 2 generasi kualitas);
     sekarang semuanya di encode yang sama.
     """
     finish = FINISH_CHAIN if grade and grade != "none" else ""
     pre = ",".join([f"fps={OUTPUT_FPS}"] + [c for c in (grade_filter(grade, escape_path), zoom_chain, finish, fx_chain) if c])
-    post = []
-    if ass_path:
-        sub = f"subtitles='{escape_path(ass_path)}'"
-        fonts_dir = Path(config.FONT_DIR)
-        if fonts_dir.exists() and any(fonts_dir.glob("*.[ot]tf")):
-            sub += f":fontsdir='{escape_path(str(fonts_dir))}'"
-        post.append(sub)
-    post.extend(o for o in (overlays or []) if o)
+    post = [o for o in (overlays or []) if o]
+    sub = subtitle_filter(ass_path, escape_path) if ass_path else ""
     inputs: List[str] = []
     n_in = 0
 
@@ -429,6 +428,14 @@ def render_polish(input_path: str, output_path: str, *, width: int, height: int,
         cur = f"pb{i}"
     parts.append(f"[{cur}]{','.join(post) or 'null'},format=yuv420p[s0]")
     last = "s0"
+    if hook_seq and hook_seq.get("pattern"):
+        # (v7) hook bergaya: urutan PNG transparan (core/hook_styles) di atas caption, hanya selama durasinya
+        hk = add_input(["-framerate", str(OUTPUT_FPS), "-start_number", "0", "-i", str(hook_seq["pattern"])])
+        hd = float(hook_seq.get("dur") or 3.0)
+        parts.append(f"[{hk}:v]format=rgba,setpts=PTS-STARTPTS[hk]")
+        parts.append(f"[{last}][hk]overlay=x={int(hook_seq.get('x', 0))}:y={int(hook_seq.get('y', 0))}:"
+                     f"enable='lte(t,{hd:.2f})':eof_action=pass,format=yuv420p[sh]")
+        last = "sh"
     for i, st in enumerate((stickers or [])[:8]):
         idx = add_image(st["png"], float(st["t"]), float(st["dur"]) + 0.2)
         parts.append(f"[{idx}:v]{shifted(idx)}format=rgba,{sticker_anim_filter(st['t'], st['size'])}[k{i}]")
@@ -440,13 +447,29 @@ def render_polish(input_path: str, output_path: str, *, width: int, height: int,
         bar_h = max(6, height // 240)
         color = config.PROGRESS_BAR_COLOR.lstrip("#")
         parts.append(f"color=c=0x{color}:s={width}x{bar_h}:r={OUTPUT_FPS}:d={duration + 1:.2f},format=yuva420p,colorchannelmixer=aa=0.9[bar]")
-        parts.append(f"[{last}][bar]overlay=x='-w+W*t/{duration:.3f}':y=H-h:eval=frame:shortest=1,format=yuv420p[vout]")
+        parts.append(f"[{last}][bar]overlay=x='-w+W*t/{duration:.3f}':y=H-h:eval=frame:shortest=1,format=yuv420p[vbase]")
     else:
-        parts.append(f"[{last}]format=yuv420p[vout]")
+        parts.append(f"[{last}]format=yuv420p[vbase]")
+    if clean_path:
+        parts.append("[vbase]split[vclean][vsub]")
+        parts.append(f"[vsub]{sub or 'null'},format=yuv420p[vout]")
+    else:
+        parts.append(f"[vbase]{sub or 'null'},format=yuv420p[vout]")
     graph = ";".join(parts)
     cmd = ["ffmpeg", "-y", "-i", input_path, *inputs, "-filter_complex", graph, "-map", "[vout]", "-map", "0:a?",
            *encode_args, "-c:a", "copy", "-movflags", "+faststart", output_path]
+    if clean_path:
+        cmd += ["-map", "[vclean]", *encode_args, "-an", "-movflags", "+faststart", clean_path]
     subprocess.run(cmd, check=True, capture_output=True)
+
+
+def subtitle_filter(ass_path: str, escape_path) -> str:
+    """Filter libass untuk file .ass (+ folder fonts/ bila berisi font)."""
+    sub = f"subtitles='{escape_path(ass_path)}'"
+    fonts_dir = Path(config.FONT_DIR)
+    if fonts_dir.exists() and any(fonts_dir.glob("*.[ot]tf")):
+        sub += f":fontsdir='{escape_path(str(fonts_dir))}'"
+    return sub
 
 
 # ============================================================ v6.7: efek visual pro
@@ -829,6 +852,10 @@ _SFX_RECIPES = {
                 "anoisesrc=color=white:duration=0.45:amplitude=0.5,bandpass=f=2200:w=1600,afade=t=out:st=0.05:d=0.4:curve=exp"),
     # beep sensor 1 kHz
     "beep": ("aevalsrc='0.42*sin(2*PI*1000*t)':s=48000:d=2", None),
+    # (v7) ting notifikasi/chat: dua nada lonceng
+    "ding": ("aevalsrc='0.45*sin(2*PI*1568*t)*exp(-6*t)+0.3*sin(2*PI*2093*t)*exp(-8*t)':s=48000:d=0.7", None),
+    # (v7) ketikan: rentetan klik pendek selama ±0.9 dtk
+    "type": ("aevalsrc='(0.45*sin(2*PI*2600*t)+0.3*sin(2*PI*4100*t))*exp(-140*mod(t,0.085))*lt(t,0.9)':s=48000:d=0.95", None),
     # rewind kaset: chirp turun bergetar + desis pita
     "rewind": ("aevalsrc='0.42*sin(2*PI*(1500*t-760*t*t))*(0.6+0.4*sin(2*PI*28*t))':s=48000:d=0.8",
                "anoisesrc=color=pink:duration=0.8:amplitude=0.4,bandpass=f=2600:w=1800,tremolo=f=22:d=0.7"),

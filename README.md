@@ -19,6 +19,83 @@
 | **Batch campaign** — satu job, banyak rentang | halaman Campaign (textarea Batch) |
 | **Judul & deskripsi otomatis** — dari transkrip, untuk upload | `_auto_upload_meta()` |
 
+## Hook bergaya (v7)
+
+Teks hook di detik-detik pertama klip kini memakai salah satu dari 19 gaya ala klipers.pro — Breaking Bar, Stabilo,
+Stiker Pop, Notifikasi HP, Chat Bubble, Blok Bertumpuk, Coret & Ganti, Mesin Ketik, Editorial, Balas Komentar, Polling,
+Stempel Fakta, Postingan X, Angka Besar, Pencarian, Duel VS, Pencapaian, Checklist, Quote (`core/hook_styles.py`).
+
+- **Otomatis** (default): AI memilih gaya sesuai isi klip dan menandai kata terpenting (`*kata*`, bagian dipisah `|`);
+  jawaban yang mengarang angka/kejadian ditolak. Tanpa AI, gaya ditebak dari bentuk kalimat & kategori. Gaya antar-klip dijaga beda.
+- Dirender Pillow sebagai urutan PNG transparan dan ditimpa di encode utama (tanpa encode tambahan), plus SFX pembuka sesuai gaya.
+- Pengaturan → Gaya editing: gaya (Otomatis / Kartu klasik / gaya tetap, dengan pratinjau), lama tampil, efek suara, AI on/off.
+- Uji: `python tests/test_hook_styles.py`
+
+## Resep, Auto Pilot, momen spesifik & rentang waktu (v7)
+
+- **Resep** (`core/autopilot.py`): di Analisis AI, "Simpan resep" menyimpan semua opsi form, tanpa link atau file video.
+  Maksimal 10 resep; nama yang sama akan menimpa resep lama. Pilih resep untuk mengisi form lagi.
+- **Auto Pilot** (menu "Auto Pilot"): ikuti channel YouTube. Channel dicek tiap 15 menit/30 menit/1 jam/3 jam tanpa
+  mengunduh apa pun.
+  - Video atau siaran baru yang lolos filter langsung diproses dengan resep pilihan. Filternya: jenis (video/live),
+    durasi min–maks (default 10–180 menit), kata wajib/dilarang di judul.
+  - Siaran yang masih live otomatis masuk Mode Live; siaran terjadwal ditunggu.
+  - Hasil: "Tinjau dulu" (klip menunggu di Antrean Job) atau "Langsung upload ke jam FYP".
+  - Arsip lama tidak diproses saat channel baru diikuti, kecuali "Proses video terbaru sekarang" dicentang
+    (diambil video terbaru yang lolos filter). Maksimal 2 job per channel per cek.
+- **Momen spesifik**: isi hingga 20 kata kunci (pisahkan koma). AI wajib mengambil momen yang membahasnya, dan klip
+  yang menyebutnya didahulukan.
+- **Rentang waktu proses**: "Proses mulai dari / Sampai" (mis. `1:00:00`–`1:30:00`). Video dipotong tanpa encode
+  ulang, lalu hanya bagian itu yang ditranskrip, dianalisis, dan dirender.
+- Uji: `python tests/test_autopilot.py`
+
+## Hook B-roll + suara (v7)
+
+Pembuka alternatif untuk hook teks, setara mode "B-roll + suara" di klipers.pro (`core/hook_broll.py`):
+
+- Video berhenti sebentar (freeze), lalu sampul bergaya muncul. Isinya potongan orang dari klip
+  (segmentasi MediaPipe, hanya bagian yang menyambung dengan wajah; di layout gaming hanya panel facecam).
+  Gayanya 7: Kolase Stiker, Sampul Majalah, Kertas Sobek, Pop Art Komik, Scrapbook, Arsip Investigasi, Sampul Podcast.
+- Narator TTS membacakan judul klip. Durasi intro mengikuti narasi; narasi yang terlalu panjang dibaca lebih cepat
+  (maks 1,25×), dan total intro dibatasi `HOOK_BROLL_MAX` (default 7 dtk). Ada SFX whoosh dan dentum.
+- Intro disambung di depan klip final, sebisa mungkin tanpa encode ulang. Frame sampul disimpan sebagai `hook_cover.jpg`.
+  Burn ulang subtitle live memasang intro lagi.
+- Pengaturan → Gaya editing: "Jenis hook pembuka" = B-roll + suara, gaya sampul (Otomatis per kategori / tetap,
+  dengan pratinjau), suara narator, dan durasi maks. Saat mode ini aktif, hook teks dan cold open dilewati.
+- Uji: `python tests/test_hook_broll.py`
+
+## Preset subtitle bergaya (v7)
+
+37 animasi subtitle setara daftar preset klipers.pro (`core/caption_presets.py`): Tanpa Animasi, Karaoke, Pop, Bounce,
+Glitch, Getar, Glow, Bayangan, Fade, Gelombang, Kotak, Motion, Neon Pulse, Gradasi Geser, Ledakan Warna, Bold Impact,
+Kedip, Outline Pop, Minimal Clean, Horor Glitch, Candy Pop, Street Bold, Dinamis, Pill Slide, Stabilo, Fokus Blur,
+Stiker, Flip 3D, Chat Bubble, Emoji, Gulir, Lingkar Spidol, Slam, Jelly, Live Reaction, Liquid Glass, Word Stack.
+
+- Tiap kata ditempatkan sendiri di file `.ass` memakai metrik font yang sama dengan libass. Karena itu pil bisa bergeser
+  ke kata aktif, stabilo dan lingkaran spidol bisa menempel di kata kunci, dan gelembung, kaca, atau kotak per baris
+  pas di belakang teks. Semuanya tetap di-burn di encode utama.
+- Pilih di "Gaya caption" (tanda ✨) di setiap form. Di bawah pilihan itu muncul pratinjau hasil render libass
+  sungguhan (`/api/caption-preview`).
+- Pengaturan → Subtitle: font, kapitalisasi (ABC/Abc/abc), kata per layar, warna sorot, dan ukuran.
+  Untuk tampilan paling mirip klipers, taruh `Montserrat-ExtraBold.ttf` / `Montserrat-Black.ttf` di folder `fonts/`.
+- Gaya lama (Viral, Modern, TikTok Bold, ...) tidak berubah.
+- Uji: `python tests/test_caption_presets.py`
+
+## Subtitle live + burn ulang (v7)
+
+Subtitle bisa diedit setelah klip jadi, tanpa render ulang klip (`core/subtitle_live.py`):
+
+- Encode utama menulis dua video sekaligus: klip final, dan `clean.mp4` (klip yang sama tanpa subtitle, video saja).
+  Ikut disimpan `subtitle.json` (layar caption + timing per kata, gaya, posisi) dan `live_audio.m4a` di folder klip.
+- Di kartu klip, tombol ✎ membuka editor. Di sana kamu bisa ganti teks per layar (kosong = layar dihapus), ganti gaya
+  (ada pratinjau), matikan subtitle, atau kembalikan ke versi asli. Setelah "Burn ulang", file final yang sama diganti
+  dalam satu encode, ±10–30 detik.
+- Hal lain ikut terjaga: tempo klip, audio final, posisi caption khusus layout, dan Brand Kit (dipasang ulang).
+  Subtitle sekarang selalu lapisan teratas, jadi burn ulang tanpa perubahan identik dengan aslinya.
+- API: `GET /api/subtitle?path=…`, `POST /api/subtitle/reburn {path, style, edits:{indeks: teks}, enabled, reset}`.
+- Pengaturan → Subtitle → "Subtitle bisa diedit setelah render" (default aktif; ruang disk ±2x per klip).
+- Uji: `python tests/test_subtitle_live.py`
+
 ## Menjalankan
 
 ```powershell

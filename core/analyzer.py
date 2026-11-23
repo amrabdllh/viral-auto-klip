@@ -37,6 +37,7 @@ AUDIO = None
 # v6.8: tipe konten video yang sedang dianalisis ("gaming_stream" | "") — mengubah kriteria momen & Editor-AI
 CONTENT_TYPE = ""
 VIDEO_PATH = ""  # v6.8: dipakai Editor-AI yang melihat (frame kandidat klip)
+FOCUS: List[str] = []  # (v7) "momen spesifik" dari pengguna (maks 20 kata kunci)
 GAMING_RULE = 'Ini siaran LIVE/GAMING: transkrip berisi ucapan streamer DAN dialog game. Momen terbaik di sini: reaksi kuat (kaget, teriak, tertawa, kesal), kejadian lucu/epik/gagal di game, plot twist cerita, interaksi dengan chat/donasi, atau opini lucu streamer. WAJIB sertakan pengantar singkat (apa yang sedang terjadi) sebelum reaksi dan biarkan reaksinya selesai — penonton yang tidak ikut live harus paham. Durasi ideal 25-60 detik; hindari potongan berisi ocehan menu/loot tanpa kejadian.'
 
 
@@ -158,9 +159,10 @@ def analyze_viral_potential(
 
     `video_path` (opsional): bila ada, suara video dianalisis (energi, nada, kata yang ditekan, tawa) dan dipakai
     sebagai sinyal tambahan untuk skor, AI Moment Finder, Editor-AI, dan titik punch-in saat render."""
-    global AUDIO, CONTENT_TYPE, VIDEO_PATH
+    global AUDIO, CONTENT_TYPE, VIDEO_PATH, FOCUS
     AUDIO = None
     CONTENT_TYPE = str(video_info.get("content_type") or "")
+    FOCUS = [str(k) for k in (video_info.get("focus_moments") or []) if str(k).strip()][:20]
     path = video_path or str(video_info.get("path") or "")
     VIDEO_PATH = path
     if path and getattr(config, "AUDIO_SIGNALS", True):
@@ -172,6 +174,7 @@ def analyze_viral_potential(
         AUDIO = None
         CONTENT_TYPE = ""
         VIDEO_PATH = ""
+        FOCUS = []
 
 
 def _analyze_viral_potential(transcript_segments: List[Dict], video_info: Dict, face_data: Optional[List],
@@ -568,7 +571,10 @@ def _ai_moment_candidates(transcript: List[Dict], video_duration: float) -> List
             f"category salah satu: {', '.join(CATEGORIES)}.",
             "reason 1 kalimat; hook = teks pembuka layar maks 10 kata, bahasa sama dengan video.",
             viral_standard.SELECTION_RULES,
-        ] + ([GAMING_RULE] if CONTENT_TYPE == "gaming_stream" else [])
+        ] + ([GAMING_RULE] if CONTENT_TYPE == "gaming_stream" else []) + (
+            [f"Pengguna MENCARI momen spesifik tentang: {', '.join(FOCUS)}. Bila topik itu dibahas di bagian ini, "
+             "WAJIB ambil momennya (utuh, dengan konteks) walau skornya sedang; jangan karang momen yang tidak ada."]
+            if FOCUS else [])
         prompt = (
             f"Transkrip video (format [mulai-selesai detik] teks), bagian {index}/{len(chunks)}:\n"
             + "\n".join(chunk)

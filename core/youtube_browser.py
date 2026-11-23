@@ -264,8 +264,8 @@ def _set_schedule(page, publish_at: float) -> None:
 
 
 def _set_thumbnail(page, image: str) -> str:
-    """Detail → Thumbnail → Upload file. YouTube hanya mengizinkan thumbnail kustom untuk channel TERVERIFIKASI
-    (youtube.com/verify) — kalau belum, dilewati tanpa menggagalkan upload video."""
+    """Detail → Thumbnail → Upload file. Thumbnail kustom butuh fitur channel tingkat menengah (verifikasi nomor HP)
+    — kalau belum ada, dilewati tanpa menggagalkan upload video."""
     try:
         inp = page.locator("ytcp-thumbnails-compact-editor-uploader input[type=file], #file-loader").first
         inp.wait_for(state="attached", timeout=8000)
@@ -282,8 +282,9 @@ def _set_thumbnail(page, image: str) -> str:
         return "skipped"
 
 
-DAILY_LIMIT_MSG = ("Batas upload harian YouTube tercapai (channel belum diverifikasi: ±15 video/24 jam). "
-                   "Upload dilanjutkan otomatis nanti — atau verifikasi channel sekali di youtube.com/verify agar batasnya hilang.")
+DAILY_LIMIT_MSG = ("Batas upload harian YouTube tercapai (±15 video/24 jam untuk channel tanpa Fitur lanjutan). "
+                   "Upload dilanjutkan otomatis nanti — batas lebih tinggi: aktifkan Fitur lanjutan di "
+                   "YouTube Studio → Setelan → Channel → Kelayakan fitur.")
 
 
 def _check_daily_limit(page, wait_ms: int = 8000) -> None:
@@ -537,7 +538,7 @@ def set_thumbnail(video_id: str, image: str, timeout: int = 120) -> Dict[str, An
             page.wait_for_timeout(5000)
             body = page.locator("body").inner_text()
             if re.search(r"verifikasi|verify", body, re.I) and re.search(r"thumbnail|gambar mini", body, re.I)                     and not page.locator("#save:not([disabled])").count():
-                return {"ok": False, "status": "skipped", "reason": "Thumbnail kustom butuh channel terverifikasi (youtube.com/verify)"}
+                return {"ok": False, "status": "skipped", "reason": "Thumbnail kustom butuh verifikasi nomor HP channel (youtube.com/verify)"}
             save = page.locator("ytcp-button#save, #save").first
             page.wait_for_function("""() => { const b = document.querySelector('ytcp-button#save, #save');
                                                return b && !b.hasAttribute('disabled'); }""", timeout=30_000)
