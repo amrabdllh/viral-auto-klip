@@ -83,6 +83,9 @@ Stiker, Flip 3D, Chat Bubble, Emoji, Gulir, Lingkar Spidol, Slam, Jelly, Live Re
   sungguhan (`/api/caption-preview`).
 - Pengaturan → Subtitle: font, kapitalisasi (ABC/Abc/abc), kata per layar, warna sorot, dan ukuran.
   Untuk tampilan paling mirip klipers, taruh `Montserrat-ExtraBold.ttf` / `Montserrat-Black.ttf` di folder `fonts/`.
+- **Parameter persis klipers:** font, warna teks/sorot/garis, tebal garis, kapitalisasi, dan kata per layar
+  diambil dari tabel preset di bundle klipers. Font Google (OFL) ada di `fonts/`; ukuran tampak disamakan antar-font
+  (√ tinggi kapital × lebar huruf).
 - Gaya lama (Viral, Modern, TikTok Bold, ...) tidak berubah.
 - Uji: `python tests/test_caption_presets.py`
 

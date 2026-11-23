@@ -20,7 +20,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-import config
 
 REF_W = 1080  # ukuran preset ditulis untuk kanvas 1080x1920
 
@@ -53,7 +52,9 @@ PRESETS: Dict[str, Dict] = {
                  fade_out=140, bord=4, act_color="FFE27A", words=5),
     "wave": dict(label="Gelombang", desc="Kata naik-turun seperti ombak, kata aktif terangkat.", active="lift",
                  wave=9.0, act_color="FF8BD2"),
-    "box": dict(label="Kotak", desc="Kotak gelap di belakang tiap baris.", bg="line_box", bord=0, act_color="FFE600"),
+    # klipers "Box": kotak hijau (#22c55e) di belakang kata yang diucapkan, teks putih
+    "box": dict(label="Kotak", desc="Kotak berwarna di belakang kata yang diucapkan.", active="pill", pill_r=0.16,
+                act_text="FFFFFF", act_color="22C55E"),
     "motion": dict(label="Motion", desc="Kata naik satu per satu, kata aktif hijau lime.", reveal="word",
                    enter="rise", active="pop", act_color="A3E635"),
     "neon-pulse": dict(label="Neon Pulse", desc="Neon pink berdenyut.", font="semi", color="FFE3F8",
@@ -96,7 +97,7 @@ PRESETS: Dict[str, Dict] = {
                     active="pop", act_color="FFFFFF"),
     "flip-3d": dict(label="Flip 3D", desc="Kata berputar masuk 3D.", reveal="word", enter="flip",
                     act_color="7CF5FF"),
-    "chat-bubble": dict(label="Chat Bubble", desc="Teks di gelembung chat putih.", font="bold", case="asis",
+    "chat-bubble": dict(label="Chat Bubble", desc="Teks putih di gelembung chat biru.", font="bold", case="asis",
                         bg="bubble", color="1C1C1E", bord=0, act_color="0A84FF", enter="pop", words=5),
     "emoji-swap": dict(label="Emoji", desc="Emoji berwarna muncul di kata kunci.", enter="pop", active="pop",
                        emoji="swap"),
@@ -118,6 +119,80 @@ PRESETS: Dict[str, Dict] = {
                        words=3, reveal="word", enter="pop", active=None, alt=("FFFFFF", "FFE600"), lh=1.0),
 }
 
+# (v7) Parameter persis klipers.pro (tabel `u2` di bundle klien, lihat docs/klipers-re/LAPORAN_KLIPERS.md §12.1):
+# id: (font, warna teks, warna sorot, warna garis, tebal garis, kapitalisasi, kata per layar (0 = auto), warna kotak)
+KLIPERS = {
+    "no_animation": ("Montserrat", "FFFFFF", "FFFFFF", "000000", 8, "upper", 0, None),
+    "karaoke": ("Montserrat", "FFFFFF", "FBBF24", "000000", 8, "upper", 0, None),
+    "box": ("Montserrat", "FFFFFF", "22C55E", "000000", 6, "upper", 0, '22C55E'),
+    "pop": ("Montserrat", "FFFFFF", "22C55E", "000000", 8, "upper", 0, None),
+    "bounce": ("Montserrat", "FFFFFF", "EAB308", "000000", 8, "upper", 0, None),
+    "glitch": ("Roboto Mono", "00FFFF", "FF00FF", "FF00FF", 8, "upper", 0, None),
+    "shake": ("Montserrat", "FFFFFF", "EF4444", "000000", 8, "upper", 0, None),
+    "glow": ("Montserrat", "FFFFFF", "F0ABFC", "7C3AED", 8, "upper", 0, None),
+    "shadow": ("Montserrat", "FFFFFF", "FACC15", "000000", 8, "upper", 0, None),
+    "fade": ("Montserrat", "FFFFFF", "FFFFFF", "000000", 8, "upper", 0, None),
+    "wave": ("Montserrat", "FFFFFF", "0EA5E9", "0369A1", 8, "upper", 0, None),
+    "klipers-motion": ("Montserrat 800", "FFFFFF", "22C55E", "000000", 8, "upper", 5, None),
+    "neon-pulse": ("Orbitron", "00FFFF", "FF00FF", "0A0A2E", 8, "upper", 0, None),
+    "gradient-slide": ("Teko", "FFFFFF", "F97316", "000000", 8, "upper", 0, None),
+    "color-burst": ("Bangers", "FFFFFF", "FF3366", "000000", 8, "upper", 0, None),
+    "bold-impact": ("Archivo Black", "FFFFFF", "FBBF24", "000000", 8, "upper", 0, None),
+    "flicker": ("Montserrat", "FFFFFF", "FBBF24", "000000", 8, "upper", 0, None),
+    "outline-pop": ("Bebas Neue", "FFFFFF", "22C55E", "000000", 8, "upper", 0, None),
+    "minimal-apple": ("Quicksand", "FFFFFF", "60A5FA", "000000", 4, "asis", 0, None),
+    "horror-glitch": ("Creepster", "FF6B6B", "FF1744", "1A0000", 8, "asis", 0, None),
+    "candy-pop": ("Fredoka One", "FFFFFF", "F472B6", "000000", 3, "upper", 0, None),
+    "street-bold": ("Anton", "FFD700", "FFFFFF", "000000", 10, "upper", 0, None),
+    "dynamic": ("Montserrat 800", "FFFFFF", "22C55E", "000000", 8, "upper", 0, None),
+    "pill-slide": ("Montserrat 800", "FFFFFF", "A3E635", "000000", 7, "upper", 0, None),
+    "stabilo": ("Montserrat 800", "FFFFFF", "FDE047", "000000", 7, "upper", 0, None),
+    "focus-blur": ("Poppins", "FFFFFF", "FFFFFF", "000000", 4, "asis", 0, None),
+    "sticker": ("Fredoka One", "FFFFFF", "FDE047", "111111", 8, "upper", 0, None),
+    "flip-3d": ("Montserrat 800", "FFFFFF", "22D3EE", "000000", 7, "upper", 0, None),
+    "chat-bubble": ("Poppins", "FFFFFF", "0A84FF", "000000", 0, "asis", 0, None),
+    "emoji-swap": ("Montserrat 800", "FFFFFF", "FACC15", "000000", 7, "upper", 0, None),
+    "counter-roll": ("Poppins", "FFFFFF", "4ADE80", "000000", 6, "asis", 0, None),
+    "marker-circle": ("Montserrat 800", "FFFFFF", "FF3B30", "000000", 7, "upper", 0, None),
+    "slam": ("Anton", "FFFFFF", "FF2D55", "000000", 8, "upper", 0, None),
+    "jelly": ("Fredoka One", "FFFFFF", "FDE68A", "7C3AED", 8, "asis", 0, None),
+    "live-reaction": ("Poppins", "FFFFFF", "FDE047", "000000", 3, "asis", 0, None),
+    "liquid-glass": ("Poppins", "FFFFFF", "FFFFFF", "000000", 0, "asis", 0, None),
+    "word-stack": ("Anton", "FFFFFF", "FACC15", "000000", 7, "upper", 0, None),
+}
+_KLIPERS_ALIAS = {"motion": "klipers-motion"}
+# nama font klipers → kunci _FONT_CANDS (file di fonts/, cadangan font Windows/Linux)
+_KLIPERS_FONT = {"Montserrat 800": "montserrat800", "Montserrat": "montserrat", "Anton": "anton", "Poppins": "poppins",
+                 "Fredoka One": "fredoka", "Bebas Neue": "bebas", "Orbitron": "orbitron", "Teko": "teko",
+                 "Archivo Black": "archivo", "Creepster": "creepster", "Quicksand": "quicksand", "Bangers": "bangers",
+                 "Roboto Mono": "robotomono"}
+REF_CAP = 0.70  # tinggi kapital acuan (Montserrat ExtraBold) — semua font dinormalkan ke sini, seperti klipers
+
+
+def _apply_klipers(pid: str, p: Dict) -> None:
+    """Timpa font/warna/garis/kapitalisasi preset dengan nilai persis klipers; pola animasi kita tetap."""
+    row = KLIPERS.get(_KLIPERS_ALIAS.get(pid, pid))
+    if not row:
+        return
+    fontname, fg, hl, stroke, width, case, words, box = row
+    p["font"] = _KLIPERS_FONT.get(fontname, p["font"])
+    p["color"], p["act_color"], p["bord"], p["case"] = fg, hl, width, case
+    p["outline"] = fg if p.get("hollow") else stroke  # outline-pop: huruf berongga bergaris warna teks
+    if words:
+        p["words"] = words
+    if box:
+        p["box_color"] = box
+    if p.get("kw_color"):
+        p["kw_color"] = hl
+    if p.get("glow"):  # glow = warna garis klipers (ungu); neon = warna sorot (magenta)
+        p["glow"] = hl if pid == "neon-pulse" else stroke
+    if pid == "glitch":
+        p["glitch"] = (hl, fg)
+    if pid == "chat-bubble":  # klipers: teks putih di gelembung biru (warna sorot)
+        p["bubble_color"], p["act_color"] = hl, "FFFFFF"
+    p["size_k"] = 1.0  # klipers: ukuran sama untuk semua preset (dinormalkan per tinggi kapital)
+
+
 HIGHLIGHTS = {"lime": "A3E635", "yellow": "FFE600", "red": "FF3B3B", "cyan": "3BE8FF", "pink": "FF4FA3",
               "orange": "FF9F1A", "white": "FFFFFF"}
 
@@ -126,6 +201,7 @@ def resolve(pid: str) -> Dict:
     """Preset + override dari Pengaturan (font, kapitalisasi, kata per layar, warna sorot, skala)."""
     p = dict(_DEF)
     p.update(PRESETS.get(pid, {}))
+    _apply_klipers(pid, p)
     font = str(getattr(config, "CAPTION_FONT", "auto") or "auto").lower()
     if font in _FONT_CANDS:
         p["font"] = font
@@ -160,8 +236,35 @@ def style_entries() -> Dict[str, Dict]:
 
 # ============================================================================ font & metrik
 
+_WIN = "C:/Windows/Fonts/"
+_DJ = "/usr/share/fonts/truetype/dejavu/"
 _FONT_CANDS: Dict[str, List[Tuple[str, int, str]]] = {
-    "black": [("Montserrat", 900, "Montserrat-Black.ttf"), ("Montserrat", 800, "Montserrat-ExtraBold.ttf"),
+    # (v7) font klipers (Google Fonts OFL, di folder fonts/) — nama keluarga = nameID 1 file-nya
+    "montserrat800": [("Montserrat ExtraBold", 0, "Montserrat-ExtraBold.ttf"), ("Arial Black", 0, _WIN + "ariblk.ttf"),
+                      ("DejaVu Sans", 1, _DJ + "DejaVuSans-Bold.ttf")],
+    "montserrat": [("Montserrat", 1, "Montserrat-Bold.ttf"), ("Arial", 1, _WIN + "arialbd.ttf"),
+                   ("DejaVu Sans", 1, _DJ + "DejaVuSans-Bold.ttf")],
+    "anton": [("Anton", 0, "Anton-Regular.ttf"), ("Impact", 0, _WIN + "impact.ttf"),
+              ("DejaVu Sans Condensed", 1, _DJ + "DejaVuSansCondensed-Bold.ttf")],
+    "poppins": [("Poppins", 1, "Poppins-Bold.ttf"), ("Segoe UI", 1, _WIN + "segoeuib.ttf"), ("DejaVu Sans", 1, _DJ + "DejaVuSans-Bold.ttf")],
+    "fredoka": [("Fredoka One", 0, "FredokaOne-Regular.ttf"), ("Segoe UI Black", 0, _WIN + "seguibl.ttf"),
+                ("DejaVu Sans", 1, _DJ + "DejaVuSans-Bold.ttf")],
+    "bebas": [("Bebas Neue", 0, "BebasNeue-Regular.ttf"), ("Impact", 0, _WIN + "impact.ttf"),
+              ("DejaVu Sans Condensed", 1, _DJ + "DejaVuSansCondensed-Bold.ttf")],
+    "orbitron": [("Orbitron", 1, "Orbitron-Bold.ttf"), ("Bahnschrift", 1, _WIN + "bahnschrift.ttf"), ("DejaVu Sans", 1, _DJ + "DejaVuSans-Bold.ttf")],
+    "teko": [("Teko", 1, "Teko-SemiBold.ttf"), ("Impact", 0, _WIN + "impact.ttf"),
+             ("DejaVu Sans Condensed", 1, _DJ + "DejaVuSansCondensed-Bold.ttf")],
+    "archivo": [("Archivo Black", 0, "ArchivoBlack-Regular.ttf"), ("Arial Black", 0, _WIN + "ariblk.ttf"),
+                ("DejaVu Sans", 1, _DJ + "DejaVuSans-Bold.ttf")],
+    "creepster": [("Creepster", 0, "Creepster-Regular.ttf"), ("Georgia", 1, _WIN + "georgiab.ttf"),
+                  ("DejaVu Serif", 1, _DJ + "DejaVuSerif-Bold.ttf")],
+    "quicksand": [("Quicksand", 1, "Quicksand-Bold.ttf"), ("Segoe UI Semibold", 0, _WIN + "seguisb.ttf"),
+                  ("DejaVu Sans", 1, _DJ + "DejaVuSans-Bold.ttf")],
+    "bangers": [("Bangers", 0, "Bangers-Regular.ttf"), ("Impact", 0, _WIN + "impact.ttf"),
+                ("DejaVu Sans Condensed", 1, _DJ + "DejaVuSansCondensed-Bold.ttf")],
+    "robotomono": [("Roboto Mono", 1, "RobotoMono-Bold.ttf"), ("Consolas", 1, _WIN + "consolab.ttf"),
+                   ("DejaVu Sans Mono", 1, _DJ + "DejaVuSansMono-Bold.ttf")],
+    "black": [("Montserrat ExtraBold", 0, "Montserrat-ExtraBold.ttf"),
               ("Arial Black", 0, "C:/Windows/Fonts/ariblk.ttf"),
               ("DejaVu Sans", 1, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")],
     "impact": [("Anton", 0, "Anton-Regular.ttf"), ("Impact", 0, "C:/Windows/Fonts/impact.ttf"),
@@ -169,10 +272,10 @@ _FONT_CANDS: Dict[str, List[Tuple[str, int, str]]] = {
     "heavy": [("Poppins", 900, "Poppins-Black.ttf"), ("Segoe UI Black", 0, "C:/Windows/Fonts/seguibl.ttf"),
               ("Arial Black", 0, "C:/Windows/Fonts/ariblk.ttf"),
               ("DejaVu Sans", 1, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")],
-    "bold": [("Montserrat", 800, "Montserrat-ExtraBold.ttf"), ("Segoe UI", 1, "C:/Windows/Fonts/segoeuib.ttf"),
+    "bold": [("Montserrat ExtraBold", 0, "Montserrat-ExtraBold.ttf"), ("Segoe UI", 1, "C:/Windows/Fonts/segoeuib.ttf"),
              ("Arial", 1, "C:/Windows/Fonts/arialbd.ttf"),
              ("DejaVu Sans", 1, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")],
-    "semi": [("Montserrat", 600, "Montserrat-SemiBold.ttf"), ("Segoe UI Semibold", 0, "C:/Windows/Fonts/seguisb.ttf"),
+    "semi": [("Poppins SemiBold", 0, "Poppins-SemiBold.ttf"), ("Segoe UI Semibold", 0, "C:/Windows/Fonts/seguisb.ttf"),
              ("Arial", 1, "C:/Windows/Fonts/arialbd.ttf"),
              ("DejaVu Sans", 1, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")],
     "serif": [("Georgia", 1, "C:/Windows/Fonts/georgiab.ttf"),
@@ -189,12 +292,15 @@ class _Font:
         self.upm, self.asc, self.desc = upm, asc, desc
         self.h_ratio = (asc + desc) / upm  # \fs libass = tinggi asc+desc
         self.cap = 0.72
+        self.adv = 0.7
         self.desc_em = desc / upm
         if path:
             try:
                 f = self.pil(800)  # em 200 px (argumen = em x 4)
                 top = f.getbbox("H", anchor="ls")[1]
                 self.cap = -top / 200.0
+                # lebar rata-rata huruf kapital per em → ukuran visual font sempit (Anton, Bebas, Teko) bisa disamakan
+                self.adv = f.getlength("ABCDEFGHIJKLMNOPQRSTUVWXYZ") / 26 / 200.0
             except Exception:
                 pass
 
@@ -241,6 +347,15 @@ def _ttf_metrics(path: str) -> Tuple[int, int, int]:
 
 
 _FONTS: Dict[str, _Font] = {}
+
+
+def visual_scale(fnt: "_Font") -> float:
+    """Faktor em agar luas visual huruf (√ tinggi kapital × lebar rata-rata) sama dengan Montserrat ExtraBold.
+    Hanya menyamakan tinggi kapital membuat font sempit tampak kecil; luas visual lebih mendekati mata."""
+    ref = font("montserrat800")
+    vis = (max(fnt.cap, 0.3) * max(getattr(fnt, "adv", 0.7), 0.3)) ** 0.5
+    rv = (max(ref.cap, 0.3) * max(getattr(ref, "adv", 0.7), 0.3)) ** 0.5
+    return max(0.8, min(1.35, rv / vis))
 
 
 def font(kind: str) -> _Font:
@@ -534,6 +649,7 @@ def write_ass(segments: List[Dict], style: Dict, out_path: str, W: int, H: int) 
     k = W / REF_W
     fnt = font(p["font"])
     em0 = float(style.get("font_size", 76)) / 1.12 * p["size_k"] * k
+    em0 *= visual_scale(fnt)  # (v7) ukuran tampak sama di semua font (klipers: Street/Outline/Slide tidak lagi kecil)
     margin = float(style.get("vertical_position", 420)) * H / 1920.0
     zones = style.get("margin_zones") or []
     chunks = _chunks(segments, int(p["words"]), float(p["hold"]))
@@ -578,8 +694,8 @@ def write_ass(segments: List[Dict], style: Dict, out_path: str, W: int, H: int) 
             w, h = bx1 - bx0 + 2 * px, by1 - by0 + 2 * py
             cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
             if p["bg"] == "bubble":
-                look = f"\\c{_col('FFFFFF')}\\bord0\\shad{3 * k:.1f}\\4c{_col('000000')}\\4a&HA0&"
-                pop = r"\fscx82\fscy82\t(0,120,\fscx102\fscy102)\t(120,170,\fscx100\fscy100)"
+                look = f"\\c{_col(p.get('bubble_color') or 'FFFFFF')}\\bord0\\shad{3 * k:.1f}\\4c{_col('000000')}\\4a&HA0&"
+                pop =r"\fscx82\fscy82\t(0,120,\fscx102\fscy102)\t(120,170,\fscx100\fscy100)"
                 ev.add(0, c0, c1, f"{{\\an5\\pos({cx:.1f},{cy:.1f}){look}{pop}{rot}\\p1}}{_rrect(w, h, 0.42 * em0)}")
                 tw = 0.42 * em0
                 tail = f"m 0 0 l {tw:.1f} 0 l {tw * 0.15:.1f} {tw * 0.8:.1f}"
@@ -675,7 +791,7 @@ def write_ass(segments: List[Dict], style: Dict, out_path: str, W: int, H: int) 
                 else:
                     mov = f"\\pos({wd['x']:.1f},{cy:.1f})"
                     sc = r"\fscx60\fscy60\t(0,100,\fscx100\fscy100)"
-                ev.add(0, a0, a1, f"{{\\an5{mov}{look}{sc}{rot}\\p1}}{_rrect(pw, ph, ph / 2)}")
+                ev.add(0, a0, a1, f"{{\\an5{mov}{look}{sc}{rot}\\p1}}{_rrect(pw, ph, ph * float(p.get('pill_r', 0.5)))}")
             if is_kw and p["keyword"] == "marker":
                 mh = fnt.cap * wd["em"] * 1.12
                 mw = wd["w"] + 0.34 * wd["em"]
@@ -725,6 +841,8 @@ def _look(p: Dict, fnt: _Font, wd: Dict, state: str, base_col: str, act_col: str
             col = p["kw_color"] if not lit else act_col
     if is_kw and p["keyword"] == "big" and state == "pre":
         col = p["kw_color"] or col
+    if bord and not p["hollow"] and str(col).upper() == str(oc).upper():  # teks = garis (glitch) → huruf tertelan
+        oc = "120012"
     shadow = f"\\4c{_col(p['shadow'])}\\4a{_alpha(p['shadow_a'])}" if shad else ""
     if p["font"] in ("semi",) and not bord and shad:
         extra += f"\\blur{1.2 * k:.1f}"
@@ -823,7 +941,9 @@ def preview_png(pid: str, out_path: str, width: int = 540, t: Optional[float] = 
     bg = (f"gradients=s={W}x{H}:c0=0x2b3a55:c1=0x6b4a3a:x0=0:y0=0:x1={W}:y1={H}:d=4,"
           if _has_gradients() else f"color=c=0x3a4458:s={W}x{H}:d=4,")
     crop_y = int(H * 0.48)
-    vf = f"{bg}format=yuv420p,subtitles='{esc}',crop={W}:{int(H * 0.36)}:0:{crop_y}"
+    fonts = Path(config.FONT_DIR)
+    fd = (":fontsdir='" + str(fonts).replace("\\", "/").replace(":", "\\:") + "'") if any(fonts.glob("*.[ot]tf")) else ""
+    vf = f"{bg}format=yuv420p,subtitles='{esc}'{fd},crop={W}:{int(H * 0.36)}:0:{crop_y}"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", vf.split(",", 1)[0],
                     "-vf", vf.split(",", 1)[1], "-ss", f"{t:.2f}", "-frames:v", "1", str(out)], check=True)
     try:
@@ -840,3 +960,7 @@ def _has_gradients() -> bool:
         return "gradients" in r.stdout and "Unknown" not in r.stdout
     except Exception:
         return False
+
+
+# di akhir modul: config mengimpor style_entries dari sini — urutan impor apa pun tetap aman
+import config  # noqa: E402
