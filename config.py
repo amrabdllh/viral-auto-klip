@@ -472,6 +472,9 @@ END_SCREEN_TEXT = os.getenv("END_SCREEN_TEXT", "Follow buat part selanjutnya!")
 # Preset: minimal (potong + caption) | dinamis (jump cut, zoom, progress bar, grade natural) | maksimal (+ SFX, grade vibrant)
 EDIT_STYLE = os.getenv("EDIT_STYLE", "dinamis").strip().lower()
 JUMP_CUT_MAX_GAP = float(os.getenv("JUMP_CUT_MAX_GAP", "0.55"))  # jeda > ini (detik) dipotong
+# (v7) siaran gaming: durasi klip bawaan (bila durasi tidak diisi) — pengantar + aksi + reaksi harus utuh
+GAMING_MIN_DURATION = int(os.getenv("GAMING_MIN_DURATION", "25"))
+GAMING_MAX_DURATION = int(os.getenv("GAMING_MAX_DURATION", "90"))
 PROGRESS_BAR_COLOR = os.getenv("PROGRESS_BAR_COLOR", "#FF3B6B")
 
 # ==================== NEW KLIPERS.PRO FEATURES ====================

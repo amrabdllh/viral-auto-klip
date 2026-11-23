@@ -138,6 +138,9 @@ def process_clips(
     layout: str = "auto",
     lower_third: Optional[Dict] = None,
     stream_layout: Optional[Dict] = None,
+    caption_language: str = "",
+    source_credit: str = "",
+    content_type: str = "",
 ) -> List[Dict]:
     """
     Process each viral clip: extract, reframe, caption, encode.
@@ -216,6 +219,9 @@ def process_clips(
         "stream_layout": stream_layout,
         "lower_third": lower_third or {},
         "style_name": style_name,  # (v7) dicatat untuk subtitle live
+        "caption_language": caption_language,  # (v7) terjemahan subtitle ("" = bahasa asli)
+        "source_credit": source_credit,  # (v7) teks kredit sumber video ("" = tanpa)
+        "content_type": content_type,  # (v7) gaming_stream → jump cut sadar-audio (gameplay tidak dipotong)
     }
     logger.info(f"  Gaya editing: {opts['edit']}")
     if _hook_mode() == "broll":  # (v7) pembuka B-roll + narasi menggantikan hook teks & cold open
@@ -330,7 +336,19 @@ def _process_single_clip(
         if edit["jump_cuts"]:
             words_rel = editing.relative_words(clip_info)
             clip_len = clip_info["end"] - clip_info["start"]
-            intervals = editing.plan_jump_cuts(words_rel, clip_len, max_gap=config.JUMP_CUT_MAX_GAP)
+            gaming = opts.get("content_type") == "gaming_stream" or isinstance(layout, dict)
+            rms = None
+            if gaming:  # (v7) jeda bicara berisi aksi game → hanya jeda yang benar-benar sepi yang dibuang
+                try:
+                    rms = editing.audio_rms(str(working_clip_path))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"Analisis energi audio gagal, jump cut gaming dilewati: {str(exc)[:120]}")
+            if gaming and rms is None:
+                intervals = [(0.0, clip_len)]
+            else:
+                # ambang 0,2 (uji 10 momen GTA: 254/257 dtk gameplay tetap utuh; 0,45 masih membuang 15%)
+                intervals = editing.plan_jump_cuts(words_rel, clip_len, rms=rms, quiet_ratio=0.2,
+                                                   max_gap=max(config.JUMP_CUT_MAX_GAP, 1.0) if gaming else config.JUMP_CUT_MAX_GAP)
             removed = clip_len - editing.kept_duration(intervals)
             if removed >= 0.4 and len(intervals) > 1 and editing.kept_duration(intervals) >= config.MIN_CLIP_DURATION * 0.7:
                 cut_path = clip_dir / "raw_cut.mp4"
@@ -565,6 +583,14 @@ def _process_single_clip(
         ass_for_burn = None
         if opts.get("enable_captions", True):
             segments_for_sub = build_subtitle_segments_for_clip(clip_info)
+            if opts.get("caption_language"):  # (v7) subtitle diterjemahkan; timing layar tetap
+                from . import subtitle_translate
+                tl = subtitle_translate.translate_segments(segments_for_sub, opts["caption_language"],
+                                                           context=str(clip_info.get("ai_title") or ""))
+                if tl is not segments_for_sub:
+                    segments_for_sub = tl
+                    clip_info["caption_language"] = subtitle_translate.normalize(opts["caption_language"])
+                    logger.info(f"  Subtitle diterjemahkan ke {clip_info['caption_language']} ({len(tl)} layar)")
             generate_ass_subtitles(segments_for_sub, clip_style, str(subtitle_path), out_w, out_h)
             ass_for_burn = str(subtitle_path)
         # v4: kartu hook + watermark + CTA akhir digabung ke encode yang sama (dulu 2 encode tambahan)
@@ -638,6 +664,12 @@ def _process_single_clip(
         f, files = extras_filters(str(final_clip_path), clip_duration, add_watermark=opts["add_watermark"], end_cta=end_cta)
         overlays += f
         overlay_files += files
+        if opts.get("source_credit"):  # (v7) kredit sumber video, muncul setelah hook selesai
+            f, files = credit_filters(str(final_clip_path), opts["source_credit"],
+                                      t0=(float(hook_seq["dur"]) + 0.2) if hook_seq else 0.0,
+                                      t1=clip_duration - (2.6 if end_cta and clip_duration > 6 else 0))
+            overlays += f
+            overlay_files += files
         lt_items = _lower_third_items(opts.get("lower_third") or {}, speaker_plan, clip_duration,
                                       t_min=max(cold_shift + 0.4, (hook_seq["dur"] + 0.3) if hook_seq else
                                                 2.9 if config.ENABLE_BROLL and not clip_info.get("no_hook_card") else 0.6))
@@ -2158,6 +2190,20 @@ def extras_filters(output_path: str, duration: float, add_watermark: bool = Fals
             f"alpha='if(lt(t,{t0:.2f}),0,min(1,(t-{t0:.2f})/0.35))':enable='gte(t,{t0:.2f})'"
         )
     return filters, files
+
+
+def credit_filters(output_path: str, text: str, t0: float = 0.0, t1: float = 0.0) -> Tuple[List[str], List[str]]:
+    """(v7) Kredit sumber video kecil di kiri atas (di bawah tab For You), kotak gelap transparan.
+    Disembunyikan saat hook tampil (t < t0) dan saat CTA akhir (t > t1) agar tidak bertumpuk."""
+    text = editing.strip_emoji(" ".join(str(text or "").split()))[:60]
+    if not text:
+        return [], []
+    path = _write_drawtext_file(output_path, "credit", text)
+    on = f"gte(t,{t0:.2f})" + (f"*lte(t,{t1:.2f})" if t1 and t1 > t0 else "")
+    flt = (f"drawtext={_drawtext_font()}textfile='{_escape_ffmpeg_filter_path(path)}':expansion=none:"
+           f"x=36:y=h*0.088:fontsize=h/66:fontcolor=white@0.92:box=1:boxcolor=black@0.42:boxborderw=12:"
+           f"alpha='min(1,(t-{t0:.2f})/0.3)':enable='{on}'")
+    return [flt], [path]
 
 
 def _apply_overlay_filters(input_path: str, output_path: str, filters: List[str], files: List[str], label: str) -> None:

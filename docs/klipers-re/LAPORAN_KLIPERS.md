@@ -228,3 +228,58 @@ Cara kerja yang terlihat:
 - Tahap `hook_broll` menambah ±108 dtk per klip; total ±6 menit untuk klip 48 dtk.
 
 Merge (job 365916): 2 klip 40 + 35 dtk dengan "fade" → output 75 dtk (transisi tidak memotong durasi, jadi bukan xfade overlap).
+
+## 11. Perbandingan langsung: link yang sama di viral-auto-klip (23 Nov 2026)
+
+Job `b56836ac0804`, link `MWQtXTTAgeM`. Opsi Analisis AI default, kecuali jumlah klip = 10 (disamakan dengan run 1 klipers)
+dan upload otomatis mati. Total 52 menit:
+- unduh ±1 menit;
+- transkrip ElevenLabs Scribe ±3,5 menit;
+- analisis DeepSeek ±6,7 menit;
+- paket judul/thumbnail/hook ±12 menit;
+- render 10 klip ±28 menit.
+
+| Klip kita | Durasi akhir (dipilih) | Skor | Gaya hook | Teks hook | Sama dengan klipers? |
+|---|---|---|---|---|---|
+| 0:09:48 | 13 dtk (17) | 68 | sticker | Ayo *NGEDANCE*, guys! Joget? *OKE!* | ya — adegan yang sama dengan r1 0:09:58 "Jason jadi striptis" |
+| 0:14:59 | 12 dtk (17) | 64 | stabilo | Gua mau kasih yang *terbaik* buat *ladies* | — |
+| 0:20:19 | 21 dtk (21) | 53 | breaking | Yang ngejar *bukan polisi biasa* | — |
+| 0:21:44 | 18 dtk (31) | 71 | search | tembak ban dulu... *mesin* juga bisa kena? | ya — r1 0:21:15 "Gua bunuh \| Tembak ban" |
+| 0:31:34 | 14 dtk (23) | 60 | stabilo | SERATUS KILO SQUAT PAKAI *JEANS* | — |
+| 0:51:49 | 12 dtk (21) | 57 | versus | Sendiri lebih enak \| Berdua banyak blunder | ya — r1 0:51:47 "Lebih enak *sendiri* deh" |
+| 1:02:53 | 15 dtk (25) | 61 | breaking | Bisa *nyetir* sambil *nembak* ke kiri | — |
+| 1:03:52 | 14 dtk (35) | 59 | strike | Awalnya dendam \| ternyata Billy baik | ya — r1 1:03:45 "Billy ngasih kita kerjaan 3000 dolar" |
+| 1:07:51 | 12 dtk (24) | 59 | chat | POV: *gue* udah *nawarin duluan* | ya — r2 1:07:52 |
+| 1:16:04 | 29 dtk (42) | 59 | sticker | Gua *takut* sama polisi-polisi ini | ya — r2 1:15:57 |
+
+**Kesimpulan:**
+- **Lokasi momen cukup sejalan.** 4 dari 10 adegan run 1 klipers dan 2 dari 5 adegan run 2 juga dipilih kita. Sebagai pembanding, kedua run klipers sendiri hanya sama di 1 momen.
+- **Momen terbaik klipers terlewat.** Bazoka "nambah darah cuma 1 dolar" (0:48:49, skor 92 di kedua run klipers) tidak kita ambil. Begitu juga "Solo squad paling jago" (0:46:57) dan "Gua yang tembak tuh" (1:01:00).
+- **Perbedaan terbesar ada di durasi.** Klip akhir kita rata-rata 16 dtk (12–29); klipers rata-rata 63 dtk (32–135). Penyebabnya dua:
+  1. **Momen yang dipilih memang pendek** (rata-rata 25,7 dtk). Mengisi jumlah klip mengaktifkan standar 15–45 dtk; mode Otomatis memakai 20–90 dtk.
+  2. **Jump cut membuang 23–59% isi klip** (rata-rata 38%). Pada siaran gaming, jeda bicara streamer justru berisi gameplay (menyetir, menembak, dikejar). Contoh: momen Billy 34,6 → 14,1 dtk. Klipers tidak memotong jeda: klipnya utuh dan kontinu.
+- **Skala skor berbeda** (kita 53–71, klipers 75–92), jadi angkanya tidak bisa dibandingkan langsung.
+- **Kecepatan:** klipers ±11 menit (analisis 33 dtk karena sumber sudah di-cache; render 10 klip berurutan ±10 menit). Kita 52 menit, dan tahap paket judul untuk 10 klip saja ±12 menit.
+
+### 11b. Setelah perbaikan durasi gaming (job `ea13e8a6e203`, opsi sama)
+
+Dua perbaikan:
+1. **Jump cut sadar-audio untuk siaran gaming.** Jeda bicara hanya dibuang bila suaranya benar-benar sepi
+   (energi < 0,2x energi saat bicara). Jeda yang berisi suara game tetap dipertahankan.
+2. **Durasi klip gaming 25–90 dtk** bila durasi tidak diisi, juga saat jumlah klip diisi.
+
+| Klip kita | Durasi akhir | Skor | Gaya hook | Teks hook | Sama dengan klipers? |
+|---|---|---|---|---|---|
+| 0:21:44 | 34 dtk | 74 | sticker | NON LETHAL, GUA *SENENG BANGET* CUY | beririsan dengan r1 0:21:15 "Tembak ban" |
+| 0:55:31 | 40 dtk | 60 | chat | Cuma Lima Ratus Dolar, *Mending Balap!* | — |
+| 1:00:42 | 39 dtk | 66 | breaking | Dibegal, ban ditembak *anti peluru*?! | ya — r1 1:01:00 "Gua yang *tembak* tuh" (skor 88) |
+| 1:03:46 | 45 dtk | 59 | stack | GILA *SERU* *OFF ROAD* BRO | ya — r1 1:03:45 Billy (IoU 0,81) |
+| 1:07:51 | 37 dtk | 59 | notif | Dia *polisi!* Gue kira bukan... | ya — r2 1:07:52 |
+| 1:12:16 | 35 dtk | 59 | sticker | Gua ditabrak *babi* polisi makin *gila* | — |
+| 1:16:04 | 59 dtk | 61 | stabilo | semua *rata* sama *tanah* | ya — r2 1:15:57 |
+
+**Hasil:**
+- **Durasi:** rata-rata **41 dtk** (34–59), sebelumnya 16 dtk. Jump cut hanya membuang ≤1,3 dtk dead air per klip, sebelumnya rata-rata 38%.
+- **Jumlah klip 7, bukan 10.** Editor-AI menolak 8 dari 15 kandidat (rubrik 32–46). Jumlah klip adalah batas atas, bukan target.
+- **Momen yang sama:** 3/10 adegan klipers run 1 dan 2/5 adegan run 2. Dari momen terbaik klipers, "Gua yang tembak tuh" (skor 88) sekarang ikut. Bazoka "cuma 1 dolar" (skor 92) masih tidak masuk kandidat AI Moment Finder.
+- **Durasi masih lebih pendek dari klipers** (rata-rata 63 dtk, sampai 135 dtk). Batas 90 dtk sengaja dipertahankan untuk retensi Shorts/TikTok.

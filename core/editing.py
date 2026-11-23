@@ -137,21 +137,50 @@ def relative_words(clip_info: Dict) -> List[Dict]:
 
 # ============================================================ jump cuts
 
-def plan_jump_cuts(words_rel: List[Dict], duration: float, max_gap: float = 0.55, pad: float = 0.10) -> List[Tuple[float, float]]:
-    """Interval yang DIPERTAHANKAN: buang jeda > max_gap dan kata pengisi berdiri sendiri."""
+def plan_jump_cuts(words_rel: List[Dict], duration: float, max_gap: float = 0.55, pad: float = 0.10,
+                   rms: Optional[np.ndarray] = None, hop: float = 0.05, quiet_ratio: float = 0.45) -> List[Tuple[float, float]]:
+    """Interval yang DIPERTAHANKAN: buang jeda > max_gap dan kata pengisi berdiri sendiri.
+
+    (v7) `rms` (energi audio per `hop` dtk, dari audio_rms) = mode sadar-audio untuk siaran gaming: jeda bicara
+    HANYA dibuang bila suaranya juga sepi (rata-rata energi jeda < quiet_ratio x median energi saat bicara).
+    Jeda yang berisi suara game (tembakan, mesin, musik aksi) dipertahankan — itu justru isi klipnya."""
     spoken = [w for w in words_rel if not is_filler(w["word"])]
     if len(spoken) < 3:
         return [(0.0, duration)]
+    speech_level = None
+    if rms is not None and len(rms):
+        idx = [int(t / hop) for w in spoken for t in np.arange(float(w["start"]), float(w["end"]), hop)]
+        idx = [i for i in idx if 0 <= i < len(rms)]
+        speech_level = float(np.median(rms[idx])) if idx else float(np.median(rms))
+
+    def quiet(a: float, b: float) -> bool:
+        if speech_level is None:
+            return True
+        seg = rms[max(0, int(a / hop)):max(int(a / hop) + 1, int(b / hop))]
+        return not len(seg) or float(np.mean(seg)) < quiet_ratio * max(speech_level, 1e-6)
+
     spans: List[List[float]] = []
     for w in spoken:
         s, e = max(w["start"] - pad, 0.0), min(w["end"] + pad, duration)
-        if spans and s - spans[-1][1] <= max_gap:
+        if spans and (s - spans[-1][1] <= max_gap or not quiet(spans[-1][1], s)):
             spans[-1][1] = max(spans[-1][1], e)
         else:
             spans.append([s, e])
     spans[0][0] = max(spans[0][0] - 0.05, 0.0)
     spans[-1][1] = min(spans[-1][1] + 0.25, duration)  # ekor kecil agar kalimat terakhir tidak terpotong
     return [(round(s, 3), round(e, 3)) for s, e in spans if e - s >= 0.12]
+
+
+def audio_rms(path: str, hop: float = 0.05, sr: int = 8000) -> np.ndarray:
+    """(v7) Energi audio (RMS) per `hop` detik dari file video/audio — mono 8 kHz, cepat."""
+    raw = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"],
+                         capture_output=True, check=True).stdout
+    x = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    n = max(1, int(sr * hop))
+    k = len(x) // n
+    if k == 0:
+        return np.zeros(0, dtype=np.float32)
+    return np.sqrt(np.mean(x[:k * n].reshape(k, n) ** 2, axis=1))
 
 
 def plan_tempo(words_rel: List[Dict], target_wps: Optional[float] = None, max_tempo: Optional[float] = None) -> float:

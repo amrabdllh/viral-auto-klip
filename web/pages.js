@@ -7,6 +7,11 @@ const toolPage = ({ id, desc, needs = [], main, aside = "", extraHead = "" }) =>
    <div class="layout"><div class="stack lg">${main}</div>${aside ? `<aside>${aside}</aside>` : ""}</div><div id="job" hidden></div></div>`;
 const footAction = (label, ico, note = "") => `${note ? `<span class="note">${note}</span>` : '<span class="spacer"></span>'}${UI.btn(label, { ico, kind: "primary", size: "lg", id: "go" })}`;
 
+/* (v7) bahasa subtitle klip: "" = sama dengan ucapan, selain itu diterjemahkan AI */
+const SUB_LANGS = [{ v: "", l: "Sama dengan video" }, { v: "id", l: "Indonesia" }, { v: "en", l: "English" }, { v: "ms", l: "Melayu" },
+  { v: "jv", l: "Jawa" }, { v: "su", l: "Sunda" }, { v: "ar", l: "Arab" }, { v: "ja", l: "Jepang" }, { v: "ko", l: "Korea" },
+  { v: "zh", l: "Mandarin" }, { v: "es", l: "Spanyol" }, { v: "pt", l: "Portugis" }, { v: "hi", l: "Hindi" }, { v: "tl", l: "Filipina" },
+  { v: "th", l: "Thai" }, { v: "vi", l: "Vietnam" }];
 const LANGS = [{ v: "", l: "Deteksi otomatis" }, { v: "id", l: "Indonesia" }, { v: "en", l: "English" }, { v: "ms", l: "Melayu" }, { v: "jw", l: "Jawa" }];
 const ASPECT_CLIP = [{ v: "Vertical", l: "9:16 vertikal (crop wajah)" }, { v: "Fit", l: "9:16 utuh + latar blur" }, { v: "Wide", l: "16:9 lebar" }];
 const FIT = [{ v: "blur", l: "Utuh + latar blur" }, { v: "cover", l: "Crop penuh" }, { v: "pad", l: "Letterbox hitam" }];
@@ -170,9 +175,9 @@ PAGES.analisis = { render(view, q) {
         ${UI.num("max_duration", "Durasi maksimum", { value: "", min: 10, max: 180, hint: "detik · kosong = otomatis (AI, hingga 90)" })}${UI.select("output_type", "Rasio", ASPECT_CLIP, "Vertical")}
         ${UI.select("video_mode", "Tipe video", VIDEO_MODES, "auto")}${UI.select("language", "Bahasa video", LANGS, "id")}${UI.select("source_max_height", "Kualitas sumber", SOURCE_QUALITY, "")}
         ${UI.text("range_start", "Proses mulai dari", { placeholder: "0:00 atau 1:00:00", hint: "Opsional — hanya bagian video ini yang ditranskrip & dianalisis." })}${UI.text("range_end", "Sampai", { placeholder: "kosong = akhir video" })}</div>`) +
-      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("subtitle_provider", "Subtitle", [{ v: "", l: "Ikut pengaturan" }, { v: "none", l: "Tanpa subtitle" }, { v: "whisper", l: "Whisper lokal" }, { v: "elevenlabs", l: "ElevenLabs Scribe" }], "")}${UI.select("subtitle_position", "Posisi subtitle", SUB_POSITIONS, "bottom", { hint: "Berlaku saat template MotionKlip aktif." })}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "auto")}${UI.text("keyword", "Momen spesifik", { placeholder: "mis. gol, penalti, kartu merah", hint: "Maks 20 kata kunci, pisahkan koma — AI wajib mengambil momen yang membahasnya. Kosong = topik yang lagi naik diutamakan." })}</div>
-        <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>
-        <div class="fields">${UI.field("Template campaign", `<select name="preset" id="anPreset"><option value="">Tanpa template</option></select>`, { hint: "Pilih preset untuk mengaktifkan MotionKlip (banner + outro); kosongkan untuk klip biasa." })}</div>
+      UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("subtitle_provider", "Subtitle", [{ v: "", l: "Ikut pengaturan" }, { v: "none", l: "Tanpa subtitle" }, { v: "whisper", l: "Whisper lokal" }, { v: "elevenlabs", l: "ElevenLabs Scribe" }], "")}${UI.select("caption_language", "Bahasa subtitle", SUB_LANGS, "", { hint: "Selain 'Sama dengan video', subtitle diterjemahkan AI (timing tetap)." })}${UI.select("subtitle_position", "Posisi subtitle", SUB_POSITIONS, "bottom", { hint: "Berlaku saat template MotionKlip aktif." })}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "auto")}${UI.text("keyword", "Momen spesifik", { placeholder: "mis. gol, penalti, kartu merah", hint: "Maks 20 kata kunci, pisahkan koma — AI wajib mengambil momen yang membahasnya. Kosong = topik yang lagi naik diutamakan." })}</div>
+        <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}${UI.toggle("source_credit", "Sertakan sumber video", { checked: false, sub: "Teks kecil 'Sumber: nama channel' di kiri atas" })}</div>
+        <div class="fields">${UI.text("source_credit_text", "Teks sumber (opsional)", { placeholder: "Kosong = Sumber: <nama channel> (YouTube)" })}${UI.field("Template campaign", `<select name="preset" id="anPreset"><option value="">Tanpa template</option></select>`, { hint: "Pilih preset untuk mengaktifkan MotionKlip (banner + outro); kosongkan untuk klip biasa." })}</div>
         <div class="switches">${UI.toggle("use_preset_hashtags", "Pakai hashtag preset campaign", { checked: false, sub: "Kalau aktif, hashtag preset menggantikan hashtag AI" })}</div>`) +
       UI.section("Metadata upload", `<div class="fields">${UI.text("title_override", "Judul", { placeholder: "Kosong = dibuat AI" })}${UI.text("description_override", "Deskripsi", { placeholder: "Kosong = dibuat AI" })}${UI.text("hashtags_override", "Hashtag", { placeholder: "#viral #fyp #gaming", hint: "Pisahkan spasi/koma; kosong = dibuat AI" })}</div>`) +
       UI.section("Upload otomatis", `<div class="switches">${UI.toggle("auto_publish", "Upload otomatis ke jam FYP terbaik", { checked: false, sub: "Klip langsung dijadwalkan & diupload sendiri ke platform yang terhubung — tanpa isi jadwal." })}</div>
@@ -234,7 +239,7 @@ PAGES.analisis = { render(view, q) {
   }).catch(() => {});
   $("#go").onclick = (e) => {
     const s = requireSource(src); if (!s) return;
-    const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names", "publish_category", "extra_hashtags", "range_start", "range_end"]);
+    const p = dropEmpty(formValues($("#f")), ["whisper_device", "whisper_model", "edit_style", "color_grade", "keyword", "watermark_text", "ai_provider", "ai_model", "speaker_names", "publish_category", "extra_hashtags", "range_start", "range_end", "caption_language", "source_credit_text"]);
     if (p.auto_publish_platform) p.auto_publish_platforms = [p.auto_publish_platform];
     delete p.auto_publish_platform;
     if (!p.preset) { delete p.campaign; delete p.preset; }
