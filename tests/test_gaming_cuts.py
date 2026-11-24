@@ -69,6 +69,15 @@ if shutil.which("ffmpeg"):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+# Panel gameplay tidak boleh memuat jendela facecam bawaan stream (dulu frame penuh → wajah tampil dua kali)
+from core.clipper import gameplay_box_from_cam  # noqa: E402
+g = gameplay_box_from_cam([0.8086, 0.5207, 0.1914, 0.2299])  # facecam Windah (kanan bawah), hasil deteksi nyata
+check("facecam kanan: gameplay berhenti sebelum facecam (= campaign 0.79)", g == [0.0, 0.0, 0.79, 1.0])
+g = gameplay_box_from_cam([0.0, 0.6, 0.19, 0.23])
+check("facecam kiri: cermin sisi kanan", g[0] >= 0.19 and abs(g[0] + g[2] - 1.0) < 1e-6)
+g = gameplay_box_from_cam([0.4, 0.75, 0.2, 0.25])
+check("facecam bawah-tengah: gameplay di atasnya", g[1] == 0.0 and g[3] <= 0.75)
+
 print()
 print("SEMUA LULUS" if not fails else f"{len(fails)} GAGAL: {fails}")
 sys.exit(1 if fails else 0)

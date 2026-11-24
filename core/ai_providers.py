@@ -223,16 +223,34 @@ def resolve_model(provider: str, requested: str = "") -> str:
     return default_model(provider) if owned_elsewhere else model  # nama model custom tetap dihormati
 
 
-def _fallback_chain(primary: str, primary_model: str) -> List[Tuple[str, str]]:
-    chain = [(primary, primary_model or default_model(primary))]
-    for item in (config.AI_FALLBACK_PROVIDERS or "").split(","):
+def resolve_provider_name(name: str) -> Optional[str]:
+    """Nama provider resmi (tidak peka huruf besar/kecil): "deepseek" → "DeepSeek"; None bila tidak dikenal."""
+    key = str(name or "").strip().lower()
+    return next((p for p in PROVIDER_INFO if p.lower() == key), None) if key else None
+
+
+def parse_fallbacks(text: str) -> List[Tuple[str, str, Optional[str]]]:
+    """'Provider:model, Provider' → [(nama ditulis, model, nama resmi|None)]. Model boleh berisi ':' / '/'."""
+    out = []
+    for item in str(text or "").split(","):
         item = item.strip()
         if not item:
             continue
         name, _, model = item.partition(":")
-        name = name.strip()
-        if name in PROVIDER_INFO and name != primary and is_configured(name):
-            chain.append((name, model.strip() or default_model(name)))
+        out.append((name.strip(), model.strip(), resolve_provider_name(name)))
+    return out
+
+
+def _fallback_chain(primary: str, primary_model: str) -> List[Tuple[str, str]]:
+    chain = [(primary, primary_model or default_model(primary))]
+    for written, model, name in parse_fallbacks(config.AI_FALLBACK_PROVIDERS or ""):
+        if name is None:
+            logger.debug(f"Provider cadangan tidak dikenal diabaikan: {written}")
+            continue
+        pair = (name, model or default_model(name))
+        # provider SAMA dengan model lain tetap cadangan sah (mis. 9router claude → 9router gemini); dulu dibuang
+        if pair not in chain and is_configured(name):
+            chain.append(pair)
     return chain
 
 
