@@ -357,6 +357,16 @@ def _validate(key: str, value) -> str:
         if not item.get("min", number) <= number <= item.get("max", number):
             raise SettingsError(f"{item['label']}: harus {item['min']}–{item['max']}")
         return f"{number:g}"
+    if key == "AI_FALLBACK_PROVIDERS" and text:
+        # Dulu teks bebas: salah ketik ("deepseek", "Open AI") tersimpan lalu diam-diam tidak pernah dipakai.
+        from .ai_providers import parse_fallbacks
+        entries = parse_fallbacks(text)
+        unknown = [w for w, _, name in entries if name is None]
+        if unknown:
+            from . import ai_providers
+            raise SettingsError(f"{item['label']}: provider tidak dikenal: {', '.join(unknown)} "
+                                f"(pilihan: {', '.join(ai_providers.PROVIDER_INFO)})")
+        return ",".join(f"{name}:{model}" if model else name for _, model, name in entries)
     if key.endswith("_POST_HOURS") and text:
         from .autopublish import format_hours, parse_hours
         hours = parse_hours(text)

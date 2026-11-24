@@ -9,7 +9,7 @@ import tempfile
 import shutil
 import threading
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Sequence
 import cv2
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -973,6 +973,23 @@ def centered_cam_box(face, cam_ratio: float = 0.38) -> List[float]:
     return [round(x, 4), round(y, 4), round(cw, 4), round(ch, 4)]
 
 
+def gameplay_box_from_cam(cam: Sequence[float]) -> List[float]:
+    """Area gameplay = frame dikurangi sisi tempat facecam berada (x, y, w, h relatif 0..1).
+    Facecam kanan → [0, 0, 0.79, 1] seperti template campaign Clipper (bukan selebar kotak cam: kotak itu dipusatkan
+    pada wajah, sedangkan jendela facecam di sumber sedikit lebih lebar). Dipakai mode otomatis, campaign, dan live."""
+    x, y, w, h = (float(v) for v in cam)
+    cx, cy = x + w / 2, y + h / 2
+    if cx > 0.55:  # facecam di kanan
+        return [0.0, 0.0, round(max(0.55, min(0.79, x)), 4), 1.0]
+    if cx < 0.45:  # facecam di kiri
+        left = round(min(0.45, max(0.21, x + w)), 4)  # cermin sisi kanan
+        return [left, 0.0, round(1.0 - left, 4), 1.0]
+    if cy > 0.5:   # facecam di bawah tengah
+        return [0.0, 0.0, 1.0, round(max(0.2, y), 4)]
+    top = round(min(0.8, y + h), 4)   # facecam di atas tengah
+    return [0.0, top, 1.0, round(1.0 - top, 4)]
+
+
 def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = None, samples: int = 14,
                          force: bool = False, cam_ratio: float = 0.38) -> Optional[Dict]:
     """Deteksi facecam streamer (wajah kecil yang posisinya tetap di pinggir layar gameplay).
@@ -1043,7 +1060,9 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
     # tetap): tinggi 2× wajah, lebar mengikuti rasio panel, lalu dipersempit
     # bila wajah terlalu dekat tepi frame — tanpa padding/bar hitam.
     box = centered_cam_box((mx, my, fw, fh), cam_ratio)
-    return {"cam_box": box, "game_box": [0.0, 0.0, 1.0, 1.0],
+    # Panel gameplay TANPA jendela facecam bawaan stream. Dulu frame penuh [0,0,1,1] → wajah streamer tampil dua kali
+    # (panel atas + pojok gameplay). Sama dengan template campaign (gameplay_rect [0,0,0.79,1] untuk facecam kanan).
+    return {"cam_box": box, "game_box": gameplay_box_from_cam(box),
             "cam_ratio": cam_ratio, "face": [round(mx, 3), round(my, 3), round(fw, 3), round(fh, 3)], "share": round(share, 2)}
 
 

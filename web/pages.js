@@ -1375,6 +1375,11 @@ PAGES.settings = { render(view) {
       if (s.key === "LLM_MODEL") return UI.field(s.label, `<div class="input-row"><select data-key="LLM_MODEL" id="llmModel">${modelOpts(cfg.values.AI_PROVIDER, v)}</select>
           ${UI.btn("Deteksi", { ico: "refresh", size: "sm", id: "llmDetect", title: "Ambil daftar model yang bisa dipakai key ini" })}</div>`,
         { hint: `<span id="llmHint">${esc(modelHint(cfg.values.AI_PROVIDER))}</span>` });
+      if (s.key === "AI_FALLBACK_PROVIDERS") return `<div class="field span-all"><span class="lbl">${esc(s.label)}</span>
+          <div class="list" id="fbList"></div>
+          <div class="row">${UI.btn("Tambah cadangan", { ico: "plus", size: "sm", id: "fbAdd" })}<span class="small muted" id="fbWarn"></span></div>
+          <input type="hidden" data-key="AI_FALLBACK_PROVIDERS" id="fbVal" value="${esc(v)}">
+          <span class="hint">Dicoba berurutan dari atas bila provider utama gagal / timeout / limit. Provider yang sama dengan model lain juga boleh.</span></div>`;
       if (s.type === "secret") { const sec = cfg.secrets[s.key] || {};
         return UI.field(s.label, `<div class="input-row"><input type="password" data-key="${s.key}" placeholder="${sec.set ? "Tersimpan — kosongkan bila tidak diubah" : "Tempel API key"}" autocomplete="off">${sec.set ? UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Hapus key", attrs: `data-clear="${s.key}"` }) : ""}</div>`,
           { val: `<span class="val">${sec.set ? esc(sec.masked) : "kosong"}</span>`, hint: esc(s.help || "") }); }
@@ -1422,6 +1427,56 @@ PAGES.settings = { render(view) {
       showBr();
     }
     const provSel = $("[data-key=AI_PROVIDER]", $("#groups"));
+    /* Provider cadangan: baris [provider ▾][model ▾][×] — dulu kotak teks "Provider:model" yang salah ketiknya
+       (mis. "deepseek", "Open AI") tersimpan lalu diam-diam tidak pernah dipakai. Nilai tetap disimpan dengan format lama. */
+    if ($("#fbList")) {
+      const provItem = cfg.schema.find((x) => x.key === "AI_PROVIDER") || { options: [] };
+      const provs = provItem.options.filter(Boolean);
+      const ready = new Set((st?.ai.providers || []).filter((p) => p.configured).map((p) => p.provider));
+      const canon = (n) => provs.find((p) => p.toLowerCase() === String(n || "").trim().toLowerCase());
+      const rows = String($("#fbVal").value || "").split(",").map((x) => x.trim()).filter(Boolean).map((x) => {
+        const i = x.indexOf(":"); const name = (i < 0 ? x : x.slice(0, i)).trim(); const model = i < 0 ? "" : x.slice(i + 1).trim();
+        return { p: canon(name) || name, m: model, unknown: !canon(name) };
+      });
+      const sync = () => {
+        $("#fbVal").value = rows.filter((r) => r.p && !r.unknown).map((r) => (r.m ? `${r.p}:${r.m}` : r.p)).join(",");
+        const prim = provSel?.value, primM = $("#llmModel")?.value || "";
+        const warn = [];
+        if (rows.some((r) => r.unknown)) warn.push("ada provider tidak dikenal — pilih ulang (tidak akan disimpan)");
+        if (rows.some((r) => !r.unknown && !ready.has(r.p))) warn.push("provider tanpa key dilewati saat berjalan");
+        if (rows.some((r) => r.p === prim && (r.m || "") === primM)) warn.push("ada yang sama persis dengan provider utama");
+        $("#fbWarn").textContent = warn.length ? "⚠ " + warn.join(" · ") : (rows.length ? "" : "Belum ada cadangan — bila provider utama gagal, AI dilewati.");
+      };
+      const draw = () => {
+        $("#fbList").innerHTML = rows.map((r, i) => `<div class="input-row" data-i="${i}" style="margin-bottom:6px">
+            <span class="small muted" style="width:18px">${i + 1}.</span>
+            <select data-fb="p">${UI.options([...(r.unknown ? [{ v: r.p, l: `${r.p} (tidak dikenal)` }] : []),
+              ...provs.map((o) => ({ v: o, l: (provItem.labels?.[o] || o) + (ready.has(o) ? "" : " (belum ada key)") }))], r.p)}</select>
+            <select data-fb="m">${r.unknown ? UI.options([{ v: r.m, l: r.m || "—" }], r.m) : modelOpts(r.p, r.m)}</select>
+            ${i ? UI.btn("", { ico: "up", size: "sm", kind: "ghost", title: "Naikkan urutan", attrs: 'data-fb="up"' }) : ""}
+            ${UI.btn("", { ico: "x", size: "sm", kind: "ghost", title: "Hapus cadangan", attrs: 'data-fb="del"' })}</div>`).join("");
+        sync();
+      };
+      $("#fbList").addEventListener("change", (e) => {
+        const row = e.target.closest("[data-i]"); if (!row) return; const r = rows[+row.dataset.i];
+        if (e.target.dataset.fb === "p") { r.p = e.target.value; r.m = ""; r.unknown = !canon(r.p); draw(); }
+        else if (e.target.dataset.fb === "m") { r.m = e.target.value; sync(); }
+      });
+      $("#fbList").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-fb]"); if (!b) return; const i = +b.closest("[data-i]").dataset.i;
+        if (b.dataset.fb === "del") rows.splice(i, 1);
+        if (b.dataset.fb === "up" && i > 0) [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]];
+        draw();
+      });
+      $("#fbAdd").onclick = () => {
+        const used = new Set(rows.map((r) => r.p));
+        const p = provs.find((o) => ready.has(o) && o !== provSel?.value && !used.has(o)) || provSel?.value || provs[0];
+        rows.push({ p, m: "", unknown: false }); draw();
+      };
+      provSel?.addEventListener("change", sync);
+      $("#llmModel")?.addEventListener("change", sync);
+      draw();
+    }
     const refreshModels = () => { $("#llmModel").innerHTML = modelOpts(provSel.value, ""); $("#llmHint").textContent = modelHint(provSel.value); };
     if (provSel && $("#llmModel")) {
       provSel.addEventListener("change", refreshModels);

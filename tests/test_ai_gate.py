@@ -66,5 +66,21 @@ check("API cloud tidak dibatasi", peak("CloudAPI") == 8)
 config.AI_LOCAL_PARALLEL = 0
 check("AI_LOCAL_PARALLEL=0 → tanpa batas", peak("LokalGW") == 8)
 
+# Rantai cadangan: provider sama dengan model lain tetap dipakai (dulu dibuang diam-diam), nama tidak peka huruf
+ai.is_configured = lambda name: True
+config.AI_FALLBACK_PROVIDERS = "LokalGW:model-b, cloudapi:x, TidakAda:y, LokalGW:model-a"
+chain = ai._fallback_chain("LokalGW", "model-a")
+check("cadangan provider sama, model beda dipakai", ("LokalGW", "model-b") in chain)
+check("nama provider tidak peka huruf besar/kecil", ("CloudAPI", "x") in chain)
+check("provider tidak dikenal & duplikat utama dilewati", len(chain) == 3 and chain[0] == ("LokalGW", "model-a"))
+
+from core import settings  # noqa: E402
+check("simpan: nama dinormalkan", settings._validate("AI_FALLBACK_PROVIDERS", " cloudapi:x ,lokalgw") == "CloudAPI:x,LokalGW")
+try:
+    settings._validate("AI_FALLBACK_PROVIDERS", "Open AI:gpt-4o")
+    check("simpan: provider tidak dikenal ditolak", False)
+except settings.SettingsError as exc:
+    check("simpan: provider tidak dikenal ditolak", "Open AI" in str(exc))
+
 print("\nSemua uji batas gateway AI lulus" if not fails else f"\nGAGAL: {len(fails)} uji")
 sys.exit(1 if fails else 0)
