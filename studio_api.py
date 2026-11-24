@@ -27,6 +27,17 @@ ALLOWED_ROOTS = [Path(config.OUTPUT_DIR).resolve(), db.DATA_DIR.resolve(), (conf
 UPLOAD_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac",
               ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".srt", ".vtt", ".pdf", ".json"}
 MAX_UPLOAD = 2 * 1024 ** 3
+# Rahasia di dalam data/: cookie sesi upload, API key koneksi, dan database. Tidak pernah disajikan lewat /api/file,
+# /api/frame, /api/zip, dst. — UI tidak butuh, dan halaman lain (DNS rebinding) tidak boleh bisa membacanya.
+_SECRET_DIRS = [(db.DATA_DIR / d).resolve() for d in ("youtube", "tiktok")]
+_SECRET_FILES = {(db.DATA_DIR / f).resolve() for f in ("connections.json",)}
+
+
+def _is_secret(p: Path) -> bool:
+    if p in _SECRET_FILES or any(d == p or d in p.parents for d in _SECRET_DIRS):
+        return True
+    name = p.name.lower()
+    return name.startswith("studio.db") or "cookie" in name or "token" in name or "client_secret" in name
 
 
 def _safe_path(raw: str) -> Path:
@@ -36,6 +47,8 @@ def _safe_path(raw: str) -> Path:
         raise HTTPException(400, "Path tidak valid")
     if not any(p == root or root in p.parents for root in ALLOWED_ROOTS):
         raise HTTPException(403, "Akses file di luar folder output/data ditolak")
+    if _is_secret(p):
+        raise HTTPException(403, "File rahasia (cookie / API key / database) tidak bisa dibuka lewat UI")
     if not p.exists() or not p.is_file():
         raise HTTPException(404, "File tidak ditemukan")
     return p

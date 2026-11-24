@@ -95,10 +95,63 @@ def overlap_ratio(claim: str, source_text: str) -> float:
     return sum(1 for w in words if w in src or any(s.startswith(w[:5]) for s in src if len(s) >= 5)) / len(words)
 
 
+_UNITS = {"nol": 0, "satu": 1, "dua": 2, "tiga": 3, "empat": 4, "lima": 5, "enam": 6, "tujuh": 7, "delapan": 8,
+          "sembilan": 9}
+_SE = {"sepuluh": 10, "sebelas": 11, "seratus": 100, "seribu": 1000, "sejuta": 1_000_000}
+_BIG = {"ribu": 1000, "rb": 1000, "juta": 1_000_000, "jt": 1_000_000, "miliar": 1_000_000_000, "milyar": 1_000_000_000}
+
+
+def spoken_numbers(text: str) -> set:
+    """Angka yang DIUCAPKAN sebagai kata ("dua puluh sembilan" → 29, "lima" → 5, "seribu" → 1000), plus digit
+    yang tertulis. Transkrip ElevenLabs/Whisper sering menulis angka dengan kata, sedangkan judul AI memakai digit."""
+    words = _tokens(text)
+    found = {w for w in words if w.isdigit()}
+    found |= {w.lstrip("0") or "0" for w in found}
+    total = chunk = pending = 0
+    active = False
+
+    def flush():
+        nonlocal total, chunk, pending, active
+        if active:
+            found.add(str(total + chunk + pending))
+        total = chunk = pending = 0
+        active = False
+
+    for w in words:
+        if w in _UNITS:
+            if pending:  # "dua tiga" = dua angka berbeda
+                flush()
+            pending, active = _UNITS[w], True
+            found.add(str(_UNITS[w]))
+        elif w in _SE:
+            v = _SE[w]
+            if v >= 1000:
+                total += v
+            else:
+                chunk += pending + v
+                pending = 0
+            active = True
+        elif w == "belas" and active:
+            chunk, pending = chunk + 10 + pending, 0
+        elif w == "puluh" and active:
+            chunk, pending = chunk + pending * 10, 0
+        elif w == "ratus" and active:
+            chunk, pending = chunk + pending * 100, 0
+        elif w in _BIG and active:
+            found.add(str(chunk + pending or 1))  # "150 juta" di judul = "seratus lima puluh juta" diucapkan
+            total, chunk, pending = total + (chunk + pending or 1) * _BIG[w], 0, 0
+        else:
+            flush()
+    flush()
+    return found
+
+
 def numbers_supported(claim: str, source_text: str) -> bool:
-    """Angka di hook/judul/thumbnail harus benar-benar diucapkan (angka karangan = clickbait menipu)."""
-    src = set(_tokens(source_text))
-    return all(n in src for n in re.findall(r"\d+", str(claim or "")))
+    """Angka di hook/judul/thumbnail harus benar-benar diucapkan (angka karangan = clickbait menipu).
+    "1.000"/"1,000" dibaca 1000; angka yang diucapkan dengan kata ("lima kali") sah untuk "5x"."""
+    src = spoken_numbers(source_text)
+    nums = [re.sub(r"[.,]", "", n) for n in re.findall(r"\d{1,3}(?:[.,]\d{3})+|\d+", str(claim or ""))]
+    return all(n in src or (n.lstrip("0") or "0") in src for n in nums)
 
 
 def _speaker_of(seg: Dict) -> str:

@@ -181,6 +181,12 @@ def preupload_due(limit: int = 1) -> int:
         run_at = float(item["run_at"])
         if item.get("status") != "pending" or not (now + PREUPLOAD_LEAD_MIN * 60 <= run_at <= horizon):
             continue
+        if not Path(item["file_path"]).exists():
+            # file klip sudah dihapus: tidak akan pernah bisa diunggah → gagal sekarang, bukan dicoba ulang tiap 30 mnt
+            db.update_schedule(item["id"], status="failed",
+                               result={**(item.get("result") or {}), "error": f"File tidak ada: {item['file_path']}"})
+            logger.warning(f"Jadwal {item['id']} dibatalkan: file klip sudah tidak ada ({Path(item['file_path']).name})")
+            continue
         pfs = item.get("platforms") or []
         if not pfs or not all(_preupload_ok(p) for p in pfs):
             continue

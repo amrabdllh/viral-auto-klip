@@ -106,24 +106,39 @@ Subtitle bisa diedit setelah klip jadi, tanpa render ulang klip (`core/subtitle_
 
 ## Menjalankan
 
+Cara termudah: `start.bat` (install dependency ke Python sistem, siapkan FFmpeg & `.env`, lalu buka UI).
+Manual (dependency terpasang di Python sistem, bukan di folder `venv\`):
+
 ```powershell
-.venv\Scripts\python.exe -m uvicorn server:app --host 127.0.0.1 --port 8000
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
 ```
 
-Buka **http://127.0.0.1:8000/app**.
+Buka **http://127.0.0.1:8000/app**. Hanya host `localhost` / `127.0.0.1` / `[::1]` yang dilayani (perlindungan DNS rebinding).
 
 Server **sengaja hanya listen di 127.0.0.1** — aplikasi ini tidak punya auth, jadi
 jangan di-bind ke `0.0.0.0`.
 
 ## Test
 
+Semua uji (16 file, tanpa jaringan; render campaign penuh dengan `CAMPAIGN_RENDER_TEST=1`):
+
 ```powershell
-.venv\Scripts\python.exe tests\test_campaign.py
-.venv\Scripts\python.exe tests\test_live_media.py         # 24 test buffer HLS
-.venv\Scripts\python.exe tests\test_chat_spikes.py        # 13 cek spike detector
-.venv\Scripts\python.exe tests\test_caption_trim.py       # caption/judul tidak terpotong di tengah kata
-.venv\Scripts\python.exe tests\test_platform_caption.py   # caption per platform (TikTok vs YouTube)
-.venv\Scripts\python.exe tests\test_schedule_retry.py     # retry upload tidak mengunggah ulang
+Get-ChildItem tests\test_*.py | ForEach-Object { python $_.FullName; if ($LASTEXITCODE) { "GAGAL: $($_.Name)" } }
+```
+
+Contoh satu per satu:
+
+```powershell
+python tests\test_campaign.py
+python tests\test_live_media.py         # 24 test buffer HLS (2 uji capture butuh ffmpeg di PATH)
+python tests\test_chat_spikes.py        # 13 cek spike detector
+python tests\test_caption_trim.py       # caption/judul tidak terpotong di tengah kata
+python tests\test_platform_caption.py   # caption per platform (TikTok vs YouTube)
+python tests\test_schedule_retry.py     # retry upload tidak mengunggah ulang
+python tests\test_preupload.py          # pra-unggah jadwal bawaan platform + jadwal yang filenya hilang
+python tests\test_transcript_cache.py   # transkrip dipakai ulang saat "Ulangi" (tanpa bayar ElevenLabs lagi)
+python tests\test_ai_gate.py            # gateway AI lokal dibatasi AI_LOCAL_PARALLEL panggilan bersamaan
+python tests\test_render_progress.py    # progres "Render n/N" + tombol Batal berlaku saat render
 ```
 
 ## Kebutuhan
@@ -131,7 +146,7 @@ jangan di-bind ke `0.0.0.0`.
 `requirements.txt` (vak) + `playwright` (sudah ditambahkan). Setelah install:
 
 ```powershell
-.venv\Scripts\python.exe -m playwright install chromium
+python -m playwright install chromium
 ```
 
 ffmpeg: pakai `tools/ffmpeg` bila ada, kalau tidak dari PATH.

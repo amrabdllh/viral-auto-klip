@@ -100,5 +100,17 @@ scheduler.tick()
 check("scheduled → done setelah waktunya", store["yt1"]["status"] == "done")
 check("tidak diunggah ulang", not calls)
 
+# file klip sudah dihapus → langsung gagal, tidak dicoba ulang tiap 30 menit
+store.clear()
+kv.clear()
+calls.clear()
+item("hilang", "youtube", NOW + 3 * 3600)
+store["hilang"]["file_path"] = str(ROOT / "output" / "tidak_ada" / "klip_hilang.mp4")
+scheduler._last_preupload = 0.0
+scheduler.preupload_due()
+check("file hilang: tidak diunggah", not calls)
+check("file hilang: status failed + alasan", store["hilang"]["status"] == "failed"
+      and "File tidak ada" in str(store["hilang"].get("result")))
+
 print("\nSemua uji pra-unggah lulus" if not fails else f"\nGAGAL: {len(fails)} uji")
 sys.exit(1 if fails else 0)

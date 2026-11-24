@@ -804,8 +804,9 @@ def mix_audio(voice: Optional[str], dur: float, out_wav: str, voice_at: float = 
     graph = ";".join(parts) + f";{''.join(labels)}amix=inputs={len(labels)}:normalize=0:dropout_transition=0," \
                               f"apad=whole_dur={dur:.3f},atrim=duration={dur:.3f}," \
                               "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]"  # setara mastering klip (-14 LUFS)
+    # -t + timeout = pengaman: versi lama (apad tanpa whole_dur) pernah menulis WAV tanpa akhir sampai 140 GB
     subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", *inputs, "-filter_complex", graph, "-map", "[a]",
-                    "-ar", "48000", "-ac", "2", out_wav], check=True, capture_output=True)
+                    "-ar", "48000", "-ac", "2", "-t", f"{dur:.3f}", out_wav], check=True, capture_output=True, timeout=180)
 
 
 # ============================================================================ render intro

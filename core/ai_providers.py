@@ -19,6 +19,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -322,7 +323,50 @@ def _looks_rate_limited(exc: Exception) -> bool:
     return status == 429 or "rate_limit" in msg or "rate limit" in msg or "429" in msg or "quota" in msg
 
 
+_GATES: Dict[str, threading.BoundedSemaphore] = {}
+_GATES_LOCK = threading.Lock()
+
+
+def is_local_endpoint(provider: str) -> bool:
+    """Gateway/proxy di laptop sendiri (koneksi ke localhost, Ollama)."""
+    if PROVIDER_INFO.get(provider, {}).get("kind") == "ollama":
+        return True
+    host = (urlparse(_base_url(provider) or "").hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
+class _NoGate:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def provider_gate(provider: str):
+    """Batas panggilan bersamaan per provider lokal. Gateway lokal (mis. proxy CLI di 127.0.0.1) menjawab 503 dan
+    melambat drastis bila ditembak 6 paralel oleh analisis/Editor-AI — tiap 503 lalu di-retry + timeout 180 dtk,
+    sehingga tahap 'mencari momen viral' bisa molor 30+ menit. API cloud tidak dibatasi."""
+    limit = int(getattr(config, "AI_LOCAL_PARALLEL", 4) or 0)
+    try:
+        local = limit > 0 and is_local_endpoint(provider)
+    except Exception:  # noqa: BLE001
+        local = False
+    if not local:
+        return _NoGate()
+    with _GATES_LOCK:
+        gate = _GATES.get(provider)
+        if gate is None:
+            gate = _GATES[provider] = threading.BoundedSemaphore(limit)
+    return gate
+
+
 def _dispatch(provider, model, prompt, system, max_tokens, json_mode, json_schema) -> str:
+    with provider_gate(provider):
+        return _dispatch_unlimited(provider, model, prompt, system, max_tokens, json_mode, json_schema)
+
+
+def _dispatch_unlimited(provider, model, prompt, system, max_tokens, json_mode, json_schema) -> str:
     kind = PROVIDER_INFO[provider]["kind"]
     if kind == "anthropic":
         return _call_anthropic(model, prompt, system, max_tokens, json_schema, provider=provider)
@@ -455,8 +499,13 @@ def _call_openai_compat(provider, model, prompt, system, max_tokens, json_mode) 
     base_url = _base_url(provider)
     if provider == "Custom" and not base_url:
         raise AIError("Custom AI butuh CUSTOM_AI_BASE_URL")
+    # Gateway lokal yang menggantung tidak sembuh dengan diulang: 180 dtk × 3 percobaan = ±9 mnt macet per panggilan.
+    # Satu percobaan lalu langsung ke provider cadangan (AI_FALLBACK_PROVIDERS).
+    retries = _client_retries()
+    if not hasattr(_CLIENT_LIMITS, "retries") and is_local_endpoint(provider):  # tes koneksi mengatur sendiri
+        retries = 0
     client = openai.OpenAI(api_key=_api_key(provider), base_url=base_url, timeout=_client_timeout(),
-                           max_retries=_client_retries())
+                           max_retries=retries)
     return _run_attempts(client.chat.completions.create, model, prompt, system, max_tokens, json_mode)
 
 
@@ -850,13 +899,14 @@ def parse_json(content: str) -> Dict:
     """Parse JSON dari respons LLM (tahan ```json fences & teks tambahan)."""
     import re
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", (content or "").strip())
+    # strict=False: model sering menaruh newline/tab mentah di dalam string ("Invalid control character")
     try:
-        value = json.loads(cleaned)
+        value = json.loads(cleaned, strict=False)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)
         if not match:
             raise
-        value = json.loads(match.group(0))
+        value = json.loads(match.group(0), strict=False)
     if isinstance(value, list):
         return {"items": value}
     return value

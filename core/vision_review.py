@@ -79,11 +79,12 @@ def review(clip: Dict, video: str) -> Optional[Dict]:
     try:
         import openai
         client = openai.OpenAI(api_key=ai._api_key(prov), base_url=ai._base_url(prov), timeout=120, max_retries=1)
-        resp = client.chat.completions.create(model=model, max_tokens=1500,  # model ber-penalaran butuh ruang
-                                              messages=[{"role": "user", "content": content}])
+        with ai.provider_gate(prov):  # gateway lokal: batasi panggilan bersamaan (lihat ai_providers.provider_gate)
+            resp = client.chat.completions.create(model=model, max_tokens=1500,  # model ber-penalaran butuh ruang
+                                                  messages=[{"role": "user", "content": content}])
         raw = resp.choices[0].message.content or ""
         m = re.search(r"\{.*\}", raw, re.S)
-        d = json.loads(m.group(0)) if m else {}
+        d = json.loads(m.group(0), strict=False) if m else {}
         v, c = float(d.get("visual", 0) or 0), float(d.get("clarity", 0) or 0)
         if not (0 <= v <= 10 and 0 <= c <= 10) or (v == 0 and c == 0):
             return None
