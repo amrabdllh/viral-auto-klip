@@ -69,6 +69,26 @@ if shutil.which("ffmpeg"):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+# Ekor & awal klip gaming: kejadian/reaksi tanpa kata setelah kalimat terakhir tidak boleh dipotong
+tail_words = [{"start": 3.0 + i * 0.4, "end": 3.3 + i * 0.4, "word": f"kata{i}"} for i in range(6)]  # bicara 3–5,3 dtk
+quiet = np.full(int(12 / hop), 0.001)  # suara sepi di luar ucapan pun tetap dipertahankan di awal/akhir
+iv = editing.plan_jump_cuts(tail_words, 12.0, max_gap=1.0, rms=quiet, hop=hop, quiet_ratio=0.2)
+check("gaming: awal klip sebelum kata pertama tidak dipotong", iv[0][0] == 0.0)
+check("gaming: ekor setelah kata terakhir tidak dipotong (momen selesai)", iv[-1][1] == 12.0)
+iv = editing.plan_jump_cuts(tail_words, 12.0, max_gap=0.55)
+check("podcast: ekor kecil 0,45 dtk setelah kata terakhir", abs(iv[-1][1] - (5.3 + 0.10 + 0.45)) < 0.01)
+
+# Batas akhir klip gaming diperpanjang sampai kalimat berikutnya (maks 3 dtk) agar kejadian setelah kalimat terakhir ikut
+from core import analyzer  # noqa: E402
+tr = [{"start": 0, "end": 9.5, "text": "a"}, {"start": 14.0, "end": 16, "text": "b"}, {"start": 30.0, "end": 31, "text": "c"},
+      {"start": 30.5, "end": 33, "text": "d"}]
+cl = [{"start": 0.0, "end": 9.5}, {"start": 20.0, "end": 30.4}, {"start": 40.0, "end": 58.0}]
+config.MAX_CLIP_DURATION = 20
+analyzer._extend_gaming_tails(cl, tr)
+check("ekor gaming: +3 dtk bila kalimat berikutnya masih jauh", cl[0]["end"] == 12.5)
+check("ekor gaming: tidak diperpanjang bila kalimat berikutnya langsung menyambung", cl[1]["end"] == 30.4)
+check("ekor gaming: tidak melewati durasi maksimum", cl[2]["end"] == 60.0)
+
 # Panel gameplay tidak boleh memuat jendela facecam bawaan stream (dulu frame penuh → wajah tampil dua kali)
 from core.clipper import gameplay_box_from_cam  # noqa: E402
 g = gameplay_box_from_cam([0.8086, 0.5207, 0.1914, 0.2299])  # facecam Windah (kanan bawah), hasil deteksi nyata

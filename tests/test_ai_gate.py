@@ -82,5 +82,76 @@ try:
 except settings.SettingsError as exc:
     check("simpan: provider tidak dikenal ditolak", "Open AI" in str(exc))
 
+# Gateway gaya Anthropic (9router cc/claude-*) melapor finish_reason "max_tokens", bukan "length" → dulu JSON terpotong
+from types import SimpleNamespace  # noqa: E402
+asked = []
+
+
+def fake_create(model, messages, **kw):
+    asked.append(kw.get("max_tokens") or kw.get("max_completion_tokens"))
+    done = len(asked) > 1
+    msg = SimpleNamespace(content='{"ok": true}' if done else '{"title": "Dibilang PUT')
+    return SimpleNamespace(choices=[SimpleNamespace(message=msg, finish_reason="stop" if done else "max_tokens")])
+
+
+out = ai._run_attempts(fake_create, "gpt-x", "p", "", 2200, True)
+check("finish_reason max_tokens → diulang dengan jatah lebih besar", out == '{"ok": true}' and asked[1] > asked[0])
+asked.clear()
+ai._run_attempts(fake_create, "cc/claude-sonnet-5-5", "p", "", 2200, True)
+check("model Claude lewat gateway: jatah awal ≥ 8000 token (token berpikir)", asked[0] >= 8000)
+
+# Kena limit (429, dibungkus 503 oleh gateway) → model utama diistirahatkan, panggilan berikutnya langsung ke cadangan
+config.AI_FALLBACK_PROVIDERS = "LokalGW:gemini"
+config.AI_RATE_LIMIT_COOLDOWN = 120
+config.AI_PROVIDER, config.LLM_MODEL = "LokalGW", "claude"
+ai._COOLDOWN.clear()
+hits = []
+
+
+class LimitErr(Exception):
+    status_code = 503
+
+
+def fake_dispatch(name, mdl, *a, **k):
+    hits.append(mdl)
+    if mdl == "claude":
+        raise LimitErr('Error code: 503 - [claude] [429]: {"type":"error","error":{"type":"rate_limit_error"}}')
+    return '{"ok": true}'
+
+
+ai._dispatch = fake_dispatch
+first = ai.complete("p", provider="LokalGW", model="claude")
+second = ai.complete("p", provider="LokalGW", model="claude")
+check("limit → cadangan dipakai", first == '{"ok": true}' and hits[:2] == ["claude", "gemini"])
+check("panggilan berikutnya tidak menembak model yang limit", hits[2:] == ["gemini"] and second == '{"ok": true}')
+ai._COOLDOWN[("LokalGW", "claude")] = 0  # masa istirahat habis → model utama dicoba lagi
+hits.clear()
+ai.complete("p", provider="LokalGW", model="claude")
+check("setelah istirahat, model utama dicoba lagi", hits[0] == "claude")
+
+# Saldo habis (402) → dilewati 1 jam; panggilan ke provider khusus yang gagal pindah ke provider UTAMA dulu
+ai._COOLDOWN.clear()
+hits.clear()
+
+
+class Billing(Exception):
+    status_code = 402
+
+
+def billing_dispatch(name, mdl, *a, **k):
+    hits.append(f"{name}/{mdl}")
+    if name == "CloudAPI":
+        raise Billing("Error code: 402 - Insufficient Balance")
+    return '{"ok": true}'
+
+
+ai._dispatch = billing_dispatch
+ai.complete("p", provider="CloudAPI", model="pro")
+check("provider khusus gagal → provider utama pilihan pengguna dipakai dulu", hits == ["CloudAPI/pro", "LokalGW/claude"])
+check("saldo habis → diistirahatkan (bukan dicoba tiap panggilan)", ai.is_cooling("CloudAPI", "pro"))
+hits.clear()
+ai.complete("p", provider="CloudAPI", model="pro")
+check("panggilan berikutnya melewati provider yang saldonya habis", hits == ["LokalGW/claude"])
+
 print("\nSemua uji batas gateway AI lulus" if not fails else f"\nGAGAL: {len(fails)} uji")
 sys.exit(1 if fails else 0)

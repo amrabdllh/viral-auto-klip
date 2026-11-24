@@ -27,7 +27,23 @@ def _ydl_opts(extra: Optional[Dict] = None) -> Dict:
     return opts
 
 
+_INFO_CACHE: Dict[str, tuple] = {}
+
+
 def video_info(url: str) -> Dict:
+    """Metadata video (judul, channel, tag, …). Di-cache 15 menit: satu job memanggilnya beberapa kali
+    (judul untuk Editor-AI, channel untuk kredit, keyterm transkripsi) — tiap panggilan = request ke YouTube."""
+    import copy
+    import time as _time
+    hit = _INFO_CACHE.get(url)
+    if hit and _time.time() - hit[0] < 900:
+        return copy.deepcopy(hit[1])
+    out = _video_info(url)
+    _INFO_CACHE[url] = (_time.time(), out)
+    return copy.deepcopy(out)
+
+
+def _video_info(url: str) -> Dict:
     import yt_dlp
     with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
         info = ydl.extract_info(url, download=False)

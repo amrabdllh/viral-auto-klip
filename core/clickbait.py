@@ -43,7 +43,7 @@ JUJUR & SPESIFIK: hanya kejadian/ucapan yang ADA DI KLIP INI. Judul video sumber
 bukti kejadian. Jangan mengarang kejadian, angka, nama, atau hal sensitif.
 {locked}{avoid}
 Judul video sumber (hanya untuk nama): {video_title}
-Isi klip (ucapan kreator):
+{focus}Isi klip (ucapan kreator):
 \"\"\"{text}\"\"\"
 
 Balas JSON: {{"paket": [{{"thumb": "...", "title": "...", "hook": "..."}}]}}"""
@@ -57,14 +57,16 @@ Nilai SETIAP paket (0-10, jujur true/false):
 - jujur: semua yang diklaim BENAR-BENAR ada di ISI KLIP? Periksa PELAKU tiap tindakan: menisbatkan tindakan ke tokoh
   bernama yang tidak disebut klip melakukannya = false. Hanya ada di judul video / dikarang = false.
 - (penasaran) thumbnail yang hanya nama game/tokoh tanpa KEJADIAN spesifik (mis. "GTA 6 LUCIA TEMBAK") = maks 5
+- tepat 0-10: paket membahas MOMEN UTAMA klip (lihat di bawah), bukan ucapan/kejadian sampingan yang cuma lewat?
+  Penonton yang mengeklik harus melihat persis yang dijanjikan judul. Membahas hal sampingan = maks 4.
 
-Isi klip: \"\"\"{text}\"\"\"
+{focus}Isi klip: \"\"\"{text}\"\"\"
 Judul video sumber (hanya konteks nama): {video_title}
 
 PAKET:
 {pakets}
 
-Balas JSON: {{"nilai": [{{"i": 0, "jelas": 0, "penasaran": 0, "sinkron": 0, "jujur": true}}]}}"""
+Balas JSON: {{"nilai": [{{"i": 0, "jelas": 0, "penasaran": 0, "sinkron": 0, "tepat": 0, "jujur": true}}]}}"""
 
 # model terkuat yang tersedia untuk tugas kecil tapi menentukan ini (2 panggilan per klip)
 _STRONG = (("DeepSeek", "deepseek-v4-pro"), ("Anthropic", "claude-sonnet-5-5"), ("OpenAI", "gpt-4.1"))
@@ -75,7 +77,9 @@ def _ask(prompt: str) -> str:
     from . import ai_providers as ai
     for prov, model in _STRONG:
         try:
-            if ai.is_configured(prov) and model in (ai.provider_models(prov) or []):
+            # yang saldonya habis / kena limit dilewati: dulu DeepSeek 402 dicoba tiap panggilan lalu jatuh ke cadangan
+            # lambat (gemini-…-high ±75 dtk) alih-alih ke provider utama pilihan pengguna
+            if ai.is_configured(prov) and model in (ai.provider_models(prov) or []) and not ai.is_cooling(prov, model):
                 return ai.complete(prompt, max_tokens=12000, json_mode=True, provider=prov, model=model)
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"{prov}/{model} gagal untuk clickbait: {str(exc)[:120]}")
@@ -108,13 +112,35 @@ def _rank(pkgs: List[Dict], scores: List[Dict], src: str) -> List[Dict]:
         except (TypeError, ValueError, IndexError):
             continue
         clear, curious, sync = (float(sc.get(k) or 0) for k in ("jelas", "penasaran", "sinkron"))
-        if not sc.get("jujur", False) or sync < 7 or not all(numbers_supported(p[k], src) for k in ("thumb", "title", "hook")):
+        on_point = float(sc.get("tepat") if sc.get("tepat") is not None else 10)  # juri lama tanpa "tepat" = lolos
+        # tepat < 6 = judul membahas hal sampingan, bukan momen utama klip → penonton merasa tertipu
+        if not sc.get("jujur", False) or sync < 7 or on_point < 6 \
+                or not all(numbers_supported(p[k], src) for k in ("thumb", "title", "hook")):
             continue
-        s = clear * 0.4 + curious * 0.35 + sync * 0.25
+        s = clear * 0.3 + curious * 0.3 + sync * 0.15 + on_point * 0.25
         (good if clear >= 7 else weak).append((s, p))
     good.sort(key=lambda x: -x[0])
     weak.sort(key=lambda x: -x[0])
     return [p for _, p in good] + [p for s, p in weak if s >= 6.0]
+
+
+def main_moment(clip: Dict) -> str:
+    """Momen utama klip menurut editor yang sudah 'menonton': ringkasan Editor-AI, apa yang terlihat di layar (penilaian
+    visual), dan alasan ranking. Dulu penulis judul hanya membaca ucapan → di live gaming judul sering memungut kalimat
+    sampingan ("judulnya apa, momennya apa")."""
+    rv = clip.get("review") or {}
+    parts = []
+    if rv.get("summary"):
+        parts.append(f"inti: {rv['summary']}")
+    what = (rv.get("visual") or {}).get("what")
+    if what:
+        parts.append(f"terlihat di layar: {what}")
+    if rv.get("rank_why"):
+        parts.append(f"kenapa menarik: {rv['rank_why']}")
+    if not parts:
+        return ""
+    return ("MOMEN UTAMA klip (dari editor yang sudah menonton) — paket WAJIB tentang ini, bukan ucapan sampingan:\n"
+            + "\n".join(f"- {p}" for p in parts) + "\n")
 
 
 def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, fixed_hook: Optional[str] = None,
@@ -130,9 +156,10 @@ def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, 
     if fixed_hook:
         locked += f"HOOK SUDAH TERCETAK DI VIDEO & TIDAK BOLEH DIUBAH (semua paket memakai persis ini): «{fixed_hook}»\n"
     avoid_txt = ("Thumbnail klip lain dari video yang sama (JANGAN mirip): " + " · ".join(avoid) + "\n") if avoid else ""
+    focus = main_moment(clip)
     try:
         gen = _json(_ask(_WRITER.format(style=_STYLE[style], locked=locked, avoid=avoid_txt,
-                                        video_title=video_title or "-", text=text)))
+                                        video_title=video_title or "-", text=text, focus=focus)))
         pkgs = [p for p in (_clean_pkg(x, fixed_title, fixed_hook) for x in (gen.get("paket") or []) if isinstance(x, dict)) if p]
         old = _clean_pkg({"thumb": clip.get("thumb_text"), "title": clip.get("ai_title"), "hook": clip.get("hook_text")},
                          fixed_title, fixed_hook)
@@ -141,7 +168,7 @@ def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, 
         if not pkgs:
             return []
         listing = "\n".join(f"{i}. THUMBNAIL: {p['thumb']} | JUDUL: {p['title']} | HOOK: {p['hook']}" for i, p in enumerate(pkgs))
-        judge = _json(_ask(_JUDGE.format(text=text, video_title=video_title or "-", pakets=listing)))
+        judge = _json(_ask(_JUDGE.format(text=text, video_title=video_title or "-", pakets=listing, focus=focus)))
         src = f"{text} {video_title} " + " ".join(_ROMAN[w] for w in re.findall(r"\b[IVX]+\b", video_title or "") if w in _ROMAN)
         ranked = _rank(pkgs, judge.get("nilai") or [], src)
         logger.info(f"Paket judul/thumbnail/hook: {ranked[0] if ranked else None} (lolos {len(ranked)}/{len(pkgs)})")

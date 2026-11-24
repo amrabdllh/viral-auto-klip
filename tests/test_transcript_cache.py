@@ -24,11 +24,13 @@ video = tmp / "src.mp4"
 video.write_bytes(b"video-palsu-1")
 
 calls = []
+sent = []
 result = {"segs": [{"start": 0.0, "end": 1.0, "text": "halo", "words": [{"word": "halo", "start": 0.0, "end": 0.5}]}]}
 
 
-def fake_transcribe(path, model_name=None, word_timestamps=False, device=None, compute_type=None):
+def fake_transcribe(path, model_name=None, word_timestamps=False, device=None, compute_type=None, keyterms=None):
     calls.append(device)
+    sent.append(keyterms)
     return list(result["segs"]), {"device": device, "language": "id"}
 
 
@@ -57,6 +59,8 @@ def check(name, cond):
 
 params = {"whisper_device": "elevenlabs"}
 config.WHISPER_DEVICE = "elevenlabs"
+config.TRANSCRIBE_KEYTERMS = ""
+config.ELEVENLABS_KEYTERMS = True
 try:
     t1, _ = tools.transcribe(Ctx(), str(video), params)
     check("transkripsi pertama memanggil mesin", calls == ["elevenlabs"] and t1)
@@ -86,6 +90,26 @@ try:
     tools.transcribe(Ctx(), str(empty), params)
     tools.transcribe(Ctx(), str(empty), params)
     check("hasil kosong tidak di-cache", len(calls) == 5)
+
+    # keyterm: dikirim ke Scribe, dan daftar berbeda = transkrip berbeda (kunci cache baru)
+    result["segs"] = [{"start": 0.0, "end": 1.0, "text": "halo", "words": []}]
+    sent.clear()
+    tools.transcribe(Ctx(), str(video), {"whisper_device": "elevenlabs", "speaker_names": "Windah", "keyword": "Vice City"})
+    check("keyterm dikirim ke Scribe", sent and sent[-1] == ["Windah", "Vice City"])
+    n = len(calls)
+    tools.transcribe(Ctx(), str(video), {"whisper_device": "elevenlabs", "speaker_names": "Windah", "keyword": "Vice City"})
+    check("keyterm sama → cache", len(calls) == n)
+    tools.transcribe(Ctx(), str(video), {"whisper_device": "elevenlabs", "speaker_names": "Windah", "keyword": "Jason"})
+    check("keyterm beda → transkripsi ulang", len(calls) == n + 1)
+    lokal = tmp / "lokal.mp4"
+    lokal.write_bytes(b"video-lokal")
+    tools.transcribe(Ctx(), str(lokal), {"whisper_device": "cpu", "speaker_names": "Windah"})
+    check("Whisper lokal tidak memakai keyterm", sent[-1] in (None, []))
+    from core.transcriber import clean_keyterms
+    check("keyterm dibersihkan (karakter terlarang, >5 kata, duplikat, angka)",
+          clean_keyterms(["Lucia [NPC]", "lucia npc", "satu dua tiga empat lima enam", "123", "a"]) == ["Lucia NPC"])
+    check("judul: nama kapital & frasa", tools._title_terms("JASON KANGEN LUCIA.... Grand Theft Auto VI GAMEPLAY #2")
+          == ["Jason", "Lucia", "Grand Theft Auto VI"])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
