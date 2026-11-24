@@ -636,14 +636,66 @@ def retry_job(job_id: str):
 
 
 @router.delete("/jobs/{job_id}")
-def delete_job(job_id: str, files: bool = False):
+def delete_job(job_id: str, files: bool = False, source: bool = False):
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job tidak ditemukan")
     if job["status"] == "running":
         raise HTTPException(409, "Job sedang berjalan — batalkan dulu")
+    freed, kept = _delete_sources([job]) if source else (0, [])
     _delete_job(job_id, files)
-    return {"ok": True}
+    return {"ok": True, "source_freed": freed, "source_kept": kept}
+
+
+_VIDEO_ID_RE = re.compile(r"(?:v=|youtu\.be/|/live/|/shorts/|/embed/|/video/)([\w-]{6,})")
+
+
+def _cache_dir() -> Path:
+    from core.utils import SOURCE_CACHE_DIR
+    return Path(SOURCE_CACHE_DIR).resolve()
+
+
+def _job_sources(job: Dict) -> set:
+    """Video sumber di data/source_cache yang dipakai job ini: dari hasil job, aset 'source', atau (job gagal/dibatalkan
+    sebelum selesai) dari ID video di link — termasuk sisa unduhan setengah jadi. Hanya file langsung di folder cache;
+    transkrip (source_cache/transcripts) tidak pernah ikut: menghapusnya berarti membayar transkripsi lagi."""
+    cache = _cache_dir()
+    found = set()
+    paths = [(job.get("result") or {}).get("source")]
+    with db.conn() as c:
+        paths += [r[0] for r in c.execute("SELECT path FROM assets WHERE job_id = ? AND kind = 'source'", (job["id"],))]
+    for raw in paths:
+        if isinstance(raw, str) and raw:
+            f = Path(raw).resolve()
+            if f.parent == cache and f.is_file():
+                found.add(f)
+    url = str((job.get("params") or {}).get("url") or "")
+    m = _VIDEO_ID_RE.search(url)
+    if m and cache.is_dir():
+        found.update(f.resolve() for f in cache.glob(f"{m.group(1)}_*") if f.is_file())
+    return found
+
+
+def _delete_sources(targets: List[Dict]) -> tuple:
+    """Hapus video sumber milik job-job ini. Video yang juga dipakai job yang masih berjalan/antre dilewati."""
+    busy = set()
+    for j in db.list_jobs(limit=500):
+        if j["status"] in ("running", "queued") and j["id"] not in {t["id"] for t in targets}:
+            full = db.get_job(j["id"])
+            if full:
+                busy |= _job_sources(full)
+    freed, kept = 0, []
+    for f in set().union(*(_job_sources(t) for t in targets)) if targets else set():
+        if f in busy:
+            kept.append(f"{f.name}: masih dipakai job yang berjalan/antre")
+            continue
+        try:
+            size = f.stat().st_size
+            f.unlink()
+            freed += size
+        except OSError as exc:
+            kept.append(f"{f.name}: {exc.strerror or exc}")
+    return freed, kept
 
 
 def _delete_job(job_id: str, files: bool) -> None:
@@ -658,6 +710,7 @@ class BulkJobRequest(BaseModel):
     ids: List[str] = []
     action: str = ""          # delete | retry | cancel
     files: bool = False       # delete: hapus juga folder hasil di disk
+    source: bool = False      # delete: hapus juga video sumber di data/source_cache (transkrip tetap)
 
 
 @router.post("/jobs/bulk")
@@ -671,6 +724,10 @@ def bulk_jobs(req: BulkJobRequest):
         raise HTTPException(400, "Pilih minimal satu job")
     done: List[str] = []
     skipped: List[Dict[str, str]] = []
+    freed, kept = 0, []
+    if req.action == "delete" and req.source:
+        targets = [j for j in (db.get_job(i) for i in ids) if j and j["status"] != "running"]
+        freed, kept = _delete_sources(targets)
     for job_id in ids:
         job = db.get_job(job_id)
         if not job:
@@ -695,7 +752,7 @@ def bulk_jobs(req: BulkJobRequest):
                 continue
             jobs.cancel(job_id)
         done.append(job_id)
-    return {"action": req.action, "done": done, "skipped": skipped}
+    return {"action": req.action, "done": done, "skipped": skipped, "source_freed": freed, "source_kept": kept}
 
 
 # ----------------------------------------------------------------------------- library / aset

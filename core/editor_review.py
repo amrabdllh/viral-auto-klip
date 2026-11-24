@@ -12,7 +12,8 @@ hook/judul/caption yang WAJIB menyertakan kutipan persis dari klip. Kutipan & ka
 (bukan percaya LLM); klaim yang tidak terdukung dibuang atau diperbaiki.
 """
 import re
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -299,6 +300,8 @@ def _ask(clip: Dict, transcript: List[Dict], source_title: str, feedback: str = 
         raw = an()._call_selected_llm(_prompt(clip, transcript, source_title, feedback), max_tokens=2200,
                                       json_schema=_SCHEMA, system=_SYSTEM, model=config.AI_REVIEW_MODEL)
         return _normalize(ai.parse_json(raw))
+    except ai.AICancelled:
+        return None
     except ai.AIRateLimited:
         an()._mark_rate_limited()
     except Exception as exc:
@@ -580,6 +583,43 @@ def _apply_trim(clip: Dict, d: Dict, transcript: List[Dict], taken: List[Tuple[f
     return True
 
 
+def _fmt_dur(sec: float) -> str:
+    return f"{sec:.0f} dtk" if sec < 90 else f"{sec / 60:.0f} mnt"
+
+
+def _run_logged(fn, items: List, workers: int, label: str, every: float = 30.0) -> List:
+    """Seperti ThreadPoolExecutor.map (urutan hasil tetap), tapi melaporkan progres: dulu 45 klip dinilai tanpa satu
+    baris log pun selama 30–40 menit sehingga job tampak macet di 42%."""
+    results: List = [None] * len(items)
+    if not items:
+        return results
+    t0 = last = time.time()
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(fn, it): i for i, it in enumerate(items)}
+        stopping = False
+        for fut in as_completed(futures):
+            if not stopping and ai.aborted():
+                stopping = True  # job dibatalkan: klip yang belum mulai tidak dikerjakan
+                for f in futures:
+                    f.cancel()
+                logger.info(f"{label}: dibatalkan — menunggu {workers} panggilan AI yang sedang jalan")
+            if fut.cancelled():
+                continue
+            results[futures[fut]] = fut.result()
+            done += 1
+            if stopping:
+                continue
+            now = time.time()
+            if done < len(items) and now - last < every:
+                continue
+            last = now
+            spent = now - t0
+            eta = f", ±{_fmt_dur(spent / done * (len(items) - done))} lagi" if done < len(items) else ""
+            logger.info(f"{label}: {done}/{len(items)} klip ({_fmt_dur(spent)}{eta})")
+    return results
+
+
 def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_title: str = "") -> List[Dict]:
     """Tinjau kandidat (urut skor menurun), buang yang lemah, rapikan batas, tulis ulang paket upload.
     Mengembalikan maksimal `limit` klip, diurutkan ulang berdasarkan skor gabungan."""
@@ -588,9 +628,10 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
     pool = clips[:min(len(clips), limit + max(4, limit // 2))]
     workers = max(1, int(getattr(config, "AI_RERANK_WORKERS", 4)))
     rubric = "reaksi, kejadian, hook, standalone, kejelasan" if an().CONTENT_TYPE == "gaming_stream"         else "standalone, hook, payoff, emosi, kejelasan"
-    logger.info(f"🎞️ Editor-AI meninjau {len(pool)} kandidat klip (rubrik: {rubric})…")
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        results = list(ex.map(lambda c: _review_one(c, transcript, source_title), pool))
+    passes = max(1, config.AI_REVIEW_PASSES)
+    logger.info(f"🎞️ Editor-AI meninjau {len(pool)} kandidat klip (rubrik: {rubric}; {passes} penilaian/klip, "
+                f"{workers} paralel)…")
+    results = _run_logged(lambda c: _review_one(c, transcript, source_title), pool, workers, "Editor-AI menilai")
     # v6.8: live/gaming → Editor-AI juga MELIHAT 4 frame tiap kandidat (nilai ada di layar, bukan hanya di ucapan)
     visuals: List[Optional[Dict]] = [None] * len(pool)
     video = an().VIDEO_PATH
@@ -598,9 +639,9 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
         from . import vision_review
         if vision_review.available():
             todo = [i for i, d in enumerate(results) if d is not None]
-            with ThreadPoolExecutor(max_workers=workers) as ex:
-                for i, v in zip(todo, ex.map(lambda i: vision_review.review(pool[i], video), todo)):
-                    visuals[i] = v
+            for i, v in zip(todo, _run_logged(lambda i: vision_review.review(pool[i], video), todo, workers,
+                                              "Editor-AI melihat frame")):
+                visuals[i] = v
             logger.info(f"👁️ Editor-AI melihat {sum(1 for v in visuals if v)} kandidat ({vision_review.pick_model()[1]})")
 
     kept: List[Dict] = []

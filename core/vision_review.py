@@ -58,6 +58,8 @@ def _frames(video: str, start: float, end: float, n: int = 4) -> List[str]:
 def review(clip: Dict, video: str) -> Optional[Dict]:
     """{"visual": 0-10, "clarity": 0-10, "what": "...", "hook": "..."} atau None."""
     from . import ai_providers as ai
+    if ai.aborted():
+        return None
     picked = pick_model()
     if not picked:
         return None

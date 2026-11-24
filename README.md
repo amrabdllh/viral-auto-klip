@@ -138,6 +138,9 @@ python tests\test_schedule_retry.py     # retry upload tidak mengunggah ulang
 python tests\test_preupload.py          # pra-unggah jadwal bawaan platform + jadwal yang filenya hilang
 python tests\test_transcript_cache.py   # transkrip dipakai ulang saat "Ulangi" (tanpa bayar ElevenLabs lagi)
 python tests\test_ai_gate.py            # gateway AI lokal dibatasi AI_LOCAL_PARALLEL panggilan bersamaan
+python tests\test_ai_speed.py           # AI utama lambat → cadangan yang jauh lebih cepat; log progres Editor-AI
+python tests\test_job_cancel.py         # tombol Batal menghentikan job di tengah Analisis AI dalam hitungan detik
+python tests\test_job_delete_source.py  # hapus job + video sumber (transkrip tetap, video job aktif dilewati)
 python tests\test_render_progress.py    # progres "Render n/N" + tombol Batal berlaku saat render
 python tests\test_editor_ranking.py     # rubrik live gaming + ranking pembanding S/A/B/C seperti editor manusia
 ```

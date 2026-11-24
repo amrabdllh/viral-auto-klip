@@ -105,7 +105,8 @@ def cancel(job_id: str) -> Dict:
         db.update_job(job_id, status="cancelled", message="Dibatalkan sebelum mulai")
     elif job["status"] == "running":
         _CANCEL.add(job_id)
-        db.update_job(job_id, message="Membatalkan… (berhenti di tahap berikutnya)")
+        db.update_job(job_id, message="Membatalkan… menunggu langkah yang sedang jalan selesai")
+        db.append_log(job_id, "Dibatalkan pengguna — panggilan AI baru dihentikan, menunggu yang sedang jalan")
     return db.get_job(job_id)
 
 
@@ -129,6 +130,9 @@ def _run(job_id: str, background: bool = False) -> None:
     db.update_job(job_id, status="running", stage="Mulai", message="Job dimulai")
     ctx = JobContext(job_id, job["params"])
     started = time.time()
+    from . import ai_providers
+    if not background:
+        ai_providers.ABORT = ctx.cancel_requested  # panggilan AI job ini berhenti begitu dibatalkan
     try:
         result = fn(ctx) or {}
         result.setdefault("output_folder", str(ctx.dir))
@@ -146,6 +150,8 @@ def _run(job_id: str, background: bool = False) -> None:
         _CANCEL.discard(job_id)
         if not background:
             CURRENT["id"] = None
+            if ai_providers.ABORT == ctx.cancel_requested:
+                ai_providers.ABORT = None
 
 
 def _worker() -> None:
