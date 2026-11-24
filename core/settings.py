@@ -30,6 +30,9 @@ SCHEMA: List[Dict] = [
     {"key": "LLM_MODEL", "group": "AI", "label": "Model", "type": "str"},
     {"key": "AI_FALLBACK_PROVIDERS", "group": "AI", "label": "Provider cadangan", "type": "str",
      "help": "Dipakai bila provider utama gagal. Format Provider:model dipisah koma, mis. OpenAI:gpt-4o, Gemini"},
+    {"key": "AI_SLOW_SWITCH_SEC", "group": "AI", "label": "Pindah ke cadangan bila AI utama lambat (dtk)", "type": "int",
+     "min": 0, "max": 600, "help": "AI utama rata-rata lebih lambat dari ini per panggilan → pakai cadangan yang jauh "
+                                   "lebih cepat; utama dicoba lagi tiap 3 menit. 0 = hanya pindah bila gagal/limit"},
     {"key": "AI_MOMENT_FINDER", "group": "AI", "label": "AI memilih momen", "type": "bool", "help": "AI membaca seluruh transkrip lalu memilih momen terbaik"},
     {"key": "AI_CLIP_PACKAGING", "group": "AI", "label": "AI menulis judul, hook & caption", "type": "bool"},
     {"key": "AI_MAX_CANDIDATES", "group": "AI", "label": "Kandidat momen yang dinilai AI", "type": "int", "min": 0, "max": 200},

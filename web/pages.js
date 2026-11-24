@@ -177,10 +177,13 @@ PAGES.jobs = { render(view) {
     if (!match) return;
     sel.clear(); rows.filter(match).forEach((j) => sel.add(j.id)); load().catch(fail);
   };
-  const runBulk = async (action, files = false) => {
-    const r = await api("/api/jobs/bulk", { body: { ids: [...sel], action, files } });
+  const gb = (b) => b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1024 ** 2))} MB`;
+  const srcNote = (r) => (r.source_freed ? ` · video sumber ${gb(r.source_freed)} dihapus` : "")
+    + (r.source_kept && r.source_kept.length ? ` · ${r.source_kept.length} video sumber tidak dihapus (${r.source_kept.join("; ")})` : "");
+  const runBulk = async (action, files = false, source = false) => {
+    const r = await api("/api/jobs/bulk", { body: { ids: [...sel], action, files, source } });
     const verb = { delete: "dihapus", retry: "dijalankan ulang", cancel: "dibatalkan" }[action];
-    toast(`${r.done.length} job ${verb}` + (r.skipped.length ? ` · ${r.skipped.length} dilewati (${[...new Set(r.skipped.map((s) => s.reason))].join(", ")})` : ""), !r.done.length);
+    toast(`${r.done.length} job ${verb}` + (r.skipped.length ? ` · ${r.skipped.length} dilewati (${[...new Set(r.skipped.map((s) => s.reason))].join(", ")})` : "") + srcNote(r), !r.done.length);
     if (action !== "cancel") sel.clear();
     await load();
   };
@@ -188,9 +191,10 @@ PAGES.jobs = { render(view) {
     const b = e.target.closest("[data-bulk]"); if (!b || !sel.size) return;
     const n = sel.size, action = b.dataset.bulk;
     if (action === "delete") return modal({ title: `Hapus ${n} job?`, body: `<p class="small muted">Job yang sedang berjalan dilewati — batalkan dulu.</p>
-        <label class="switch"><input type="checkbox" data-f><span>Hapus juga folder hasilnya di disk<span class="sub">Klip, thumbnail, dan file lain dari job ini dihapus permanen</span></span></label>`,
+        <label class="switch"><input type="checkbox" data-f><span>Hapus juga folder hasilnya di disk<span class="sub">Klip, thumbnail, dan file lain dari job ini dihapus permanen</span></span></label>
+        <label class="switch"><input type="checkbox" data-s><span>Hapus juga video sumbernya<span class="sub">Video unduhan di data/source_cache. Transkrip tetap disimpan, jadi kalau link yang sama diproses lagi cukup unduh ulang tanpa bayar transkripsi. Video yang masih dipakai job lain yang berjalan/antre tidak dihapus.</span></span></label>`,
       foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn(`Hapus ${n} job`, { kind: "primary", attrs: "data-ok" }) }, (m) => {
-      $("[data-ok]", m).onclick = (ev) => busy(ev.currentTarget, async () => { const f = $("[data-f]", m).checked; closeModal(); await runBulk("delete", f).catch(fail); });
+      $("[data-ok]", m).onclick = (ev) => busy(ev.currentTarget, async () => { const f = $("[data-f]", m).checked, sv = $("[data-s]", m).checked; closeModal(); await runBulk("delete", f, sv).catch(fail); });
     });
     if (action === "retry") return modal({ title: `Jalankan ulang ${n} job?`, body: `<p class="small muted">Tiap job dibuat ulang dengan pengaturan yang sama dan masuk antrean. Job yang masih berjalan/antre dilewati.</p>`,
       foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn(`Ulangi ${n} job`, { kind: "primary", attrs: "data-ok" }) }, (m) => {
@@ -205,9 +209,14 @@ PAGES.jobs = { render(view) {
       if (b.dataset.a === "open") modal({ title: "Detail job", lg: true, body: `<div data-jd></div>` }, (m) => attachJob($("[data-jd]", m), id, { inModal: true }));
       else if (b.dataset.a === "cancel") { await api(`/api/jobs/${id}/cancel`, { body: {} }); load(); }
       else if (b.dataset.a === "retry") { await api(`/api/jobs/${id}/retry`, { body: {} }); toast("Dijalankan ulang"); load(); }
-      else if (b.dataset.a === "del") modal({ title: "Hapus job?", body: `<label class="switch"><input type="checkbox" data-f><span>Hapus juga folder hasilnya di disk</span></label>`,
+      else if (b.dataset.a === "del") modal({ title: "Hapus job?", body: `<label class="switch"><input type="checkbox" data-f><span>Hapus juga folder hasilnya di disk</span></label>
+        <label class="switch"><input type="checkbox" data-s><span>Hapus juga video sumbernya<span class="sub">Video unduhan di data/source_cache. Transkrip tetap disimpan, jadi kalau link yang sama diproses lagi cukup unduh ulang tanpa bayar transkripsi. Video yang masih dipakai job lain yang berjalan/antre tidak dihapus.</span></span></label>`,
         foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Hapus", { kind: "primary", attrs: "data-ok" }) }, (m) => {
-        $("[data-ok]", m).onclick = async () => { await api(`/api/jobs/${id}?files=${$("[data-f]", m).checked}`, { method: "DELETE" }).catch(fail); unpick(id); closeModal(); load(); };
+        $("[data-ok]", m).onclick = async () => {
+          const r = await api(`/api/jobs/${id}?files=${$("[data-f]", m).checked}&source=${$("[data-s]", m).checked}`, { method: "DELETE" }).catch(fail);
+          if (r && (r.source_freed || (r.source_kept || []).length)) toast("Job dihapus" + srcNote(r), !r.source_freed);
+          unpick(id); closeModal(); load();
+        };
       });
     } catch (err) { fail(err); }
   };

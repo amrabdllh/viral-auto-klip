@@ -298,6 +298,9 @@ AI_RERANK_WORKERS = int(os.getenv("AI_RERANK_WORKERS", "6"))  # panggilan rerank
 AI_LOCAL_PARALLEL = int(os.getenv("AI_LOCAL_PARALLEL", "4"))
 # Provider/model yang kena limit (429) dilewati sekian detik; panggilan langsung ke AI_FALLBACK_PROVIDERS. 0 = mati.
 AI_RATE_LIMIT_COOLDOWN = int(os.getenv("AI_RATE_LIMIT_COOLDOWN", "120"))
+# AI utama yang rata-rata lebih lambat dari ini (dtk/panggilan) → panggilan berikutnya ke cadangan yang terukur jauh
+# lebih cepat (≤ separuhnya). AI utama tetap dicoba sesekali; begitu cepat lagi otomatis dipakai kembali. 0 = mati.
+AI_SLOW_SWITCH_SEC = int(os.getenv("AI_SLOW_SWITCH_SEC", "45"))
 AI_MOMENT_FINDER = os.getenv("AI_MOMENT_FINDER", "1").lower() in ("1", "true", "yes")
 AI_MOMENT_CHUNK_CHARS = int(os.getenv("AI_MOMENT_CHUNK_CHARS", "24000"))  # ukuran potongan transkrip per panggilan
 AI_MOMENT_MAX_CHUNKS = int(os.getenv("AI_MOMENT_MAX_CHUNKS", "30"))       # batas panggilan per video; bila lebih,

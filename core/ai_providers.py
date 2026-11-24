@@ -93,6 +93,31 @@ class AIRateLimited(AIError):
     pass
 
 
+class AICancelled(AIError):
+    """Job pemanggil dibatalkan pengguna — panggilan AI baru tidak dikirim lagi."""
+
+
+# Diisi core/jobs untuk job di antrean utama: fungsi → True bila pengguna menekan Batal. Dulu tahap "Analisis AI"
+# (pencari momen + Editor-AI 45 klip × 2 + ranking, 15–40 menit) tidak bisa dibatalkan: pembatalan baru dicek saat
+# pindah tahap. Sekarang setiap panggilan AI baru langsung ditolak, jadi analisis selesai dalam hitungan detik.
+ABORT = None
+
+
+def aborted() -> bool:
+    fn = ABORT
+    if fn is None:
+        return False
+    try:
+        return bool(fn())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def check_abort() -> None:
+    if aborted():
+        raise AICancelled("Job dibatalkan pengguna")
+
+
 # ----------------------------------------------------------------------------- config helpers
 
 def all_providers() -> List[str]:
@@ -279,6 +304,7 @@ def complete(
     model: Optional[str] = None,
 ) -> str:
     """Panggil LLM aktif (dengan fallback berantai). Kembalikan teks respons."""
+    check_abort()
     provider = provider or config.AI_PROVIDER
     model = model or resolve_model(provider)
     errors = []
@@ -293,7 +319,11 @@ def complete(
     # Yang baru kena limit diistirahatkan dulu: dulu SETIAP panggilan tetap menembak model utama yang limit (gagal lagi,
     # ±2 dtk + kuota terbuang) baru pindah ke cadangan. Bila semua sedang istirahat, tetap dicoba berurutan.
     ready = [p for p in chain if _COOLDOWN.get(p, 0) <= now] or chain
+    head = ready[0]
+    ready = _prefer_fast(ready, max_tokens)
+    slow_pick = ready[0] if ready[0] != head else None  # sudah dilog oleh _prefer_fast
     for name, mdl in ready:
+        check_abort()  # jangan lanjut ke cadangan bila job sudah dibatalkan
         if not is_configured(name):
             errors.append(f"{name}: belum dikonfigurasi")
             continue
@@ -301,10 +331,10 @@ def complete(
             text = _dispatch(name, mdl, prompt, system, max_tokens, json_mode, json_schema)
             if not text or not text.strip():
                 raise AIError("respons kosong")
-            if (name, mdl) != chain[0]:
+            if (name, mdl) != chain[0] and (name, mdl) != slow_pick:
                 # dulu hanya dicatat bila NAMA provider beda → cadangan "9router → model lain" tidak pernah terlihat
                 _log_throttled(("fb", name, mdl), f"AI cadangan dipakai: {name}/{mdl} "
-                                                  f"(utama {chain[0][0]}/{chain[0][1]} gagal atau kena limit)")
+                                                  f"(utama {chain[0][0]}/{chain[0][1]} gagal, kena limit, atau lambat)")
             return text
         except Exception as exc:
             msg = str(exc)
@@ -429,7 +459,88 @@ def provider_gate(provider: str):
 
 def _dispatch(provider, model, prompt, system, max_tokens, json_mode, json_schema) -> str:
     with provider_gate(provider):
-        return _dispatch_unlimited(provider, model, prompt, system, max_tokens, json_mode, json_schema)
+        t0 = time.time()  # diukur SETELAH antre gerbang: antrean bukan kelambatan model
+        try:
+            text = _dispatch_unlimited(provider, model, prompt, system, max_tokens, json_mode, json_schema)
+        except Exception as exc:
+            if _looks_timeout(exc):
+                _note_latency(provider, model, max_tokens, time.time() - t0)
+            raise
+        _note_latency(provider, model, max_tokens, time.time() - t0)
+        return text
+
+
+# ----------------------------------------------------------------------------- kecepatan model (v8.1)
+#
+# Cadangan dulu hanya dipakai bila utama GAGAL. Model yang hidup tapi lambat (uji 24 Nov: 9router gemini-flash-medium
+# 71 dtk/panggilan, claude-sonnet 10 dtk) membuat Editor-AI 45 klip × 2 penilaian berjalan 40+ menit tanpa error apa
+# pun. Sekarang durasi tiap panggilan dicatat; utama yang lambat dilewati selama cadangan terukur jauh lebih cepat.
+
+_LATENCY: Dict[Tuple[str, str, bool], Tuple[float, int, float]] = {}  # (prov, model, besar) → (rata2, n, waktu)
+_PROBE: Dict[Tuple[str, str, bool], float] = {}
+_LAT_LOCK = threading.Lock()
+_PROBE_PRIMARY_EVERY = 180.0
+_EXPLORE_EVERY = 60.0
+
+
+def _big(max_tokens) -> bool:
+    # panggilan besar (pencari momen, ranking) wajar lebih lama — dibandingkan dengan sesamanya saja
+    try:
+        return int(max_tokens or 0) > 3000
+    except (TypeError, ValueError):
+        return False
+
+
+def _looks_timeout(exc: Exception) -> bool:
+    return "timed out" in str(exc).lower() or "timeout" in type(exc).__name__.lower()
+
+
+def _note_latency(provider: str, model: str, max_tokens, seconds: float) -> None:
+    key = (provider, model, _big(max_tokens))
+    with _LAT_LOCK:
+        avg, n, _ = _LATENCY.get(key, (seconds, 0, 0.0))
+        avg = seconds if n == 0 else 0.7 * avg + 0.3 * seconds
+        _LATENCY[key] = (avg, n + 1, time.time())
+
+
+def latency(provider: str, model: str, big: bool = False) -> Optional[float]:
+    """Rata-rata detik per panggilan yang terukur (None = belum pernah diukur)."""
+    avg, n, _ = _LATENCY.get((provider, model, big), (0.0, 0, 0.0))
+    return avg if n else None
+
+
+def _prefer_fast(ready: List[Tuple[str, str]], max_tokens) -> List[Tuple[str, str]]:
+    limit = float(getattr(config, "AI_SLOW_SWITCH_SEC", 45) or 0)
+    if limit <= 0 or len(ready) < 2:
+        return ready
+    big = _big(max_tokens)
+    head = (*ready[0], big)
+    avg, n, last = _LATENCY.get(head, (0.0, 0, 0.0))
+    if n < 3 or avg < limit:
+        return ready
+    now = time.time()
+    with _LAT_LOCK:
+        if now - last > _PROBE_PRIMARY_EVERY and now - _PROBE.get(head, 0) > _PROBE_PRIMARY_EVERY:
+            _PROBE[head] = now  # satu panggilan sesekali tetap ke utama → ketahuan bila sudah cepat lagi
+            return ready
+        pick = None
+        for alt in ready[1:]:
+            a_avg, a_n, _ = _LATENCY.get((*alt, big), (0.0, 0, 0.0))
+            if a_n and a_avg <= avg * 0.5:
+                pick = alt
+                break
+            if not a_n and now - _PROBE.get((*alt, big), 0) > _EXPLORE_EVERY:
+                _PROBE[(*alt, big)] = now  # cadangan belum pernah diukur → coba satu panggilan
+                pick = alt
+                break
+    if pick is None:
+        return ready
+    fast = latency(*pick, big)
+    _log_throttled(("slow", ready[0], pick), f"AI utama {ready[0][0]}/{ready[0][1]} lambat (rata-rata {avg:.0f} dtk/"
+                                             f"panggilan) — pakai cadangan {pick[0]}/{pick[1]}"
+                                             + (f" ({fast:.0f} dtk)" if fast else " (dicoba)")
+                                             + "; utama dicoba lagi tiap 3 menit", every=300)
+    return [pick] + [p for p in ready if p != pick]
 
 
 def _dispatch_unlimited(provider, model, prompt, system, max_tokens, json_mode, json_schema) -> str:
