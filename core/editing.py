@@ -166,8 +166,15 @@ def plan_jump_cuts(words_rel: List[Dict], duration: float, max_gap: float = 0.55
             spans[-1][1] = max(spans[-1][1], e)
         else:
             spans.append([s, e])
-    spans[0][0] = max(spans[0][0] - 0.05, 0.0)
-    spans[-1][1] = min(spans[-1][1] + 0.25, duration)  # ekor kecil agar kalimat terakhir tidak terpotong
+    if speech_level is not None:
+        # gaming (sadar-audio): awal & akhir klip dipilih AI/editor dengan sengaja — kejadian di game & reaksi tanpa kata
+        # (ledakan, mobil nabrak, ketawa) sering terjadi SETELAH kalimat terakhir. Dulu ekor dipotong 0,25 dtk setelah
+        # kata terakhir → "momennya belum selesai, video sudah end".
+        spans[0][0] = 0.0
+        spans[-1][1] = duration
+    else:
+        spans[0][0] = max(spans[0][0] - 0.05, 0.0)
+        spans[-1][1] = min(spans[-1][1] + 0.45, duration)  # ekor kecil: napas/tawa setelah kalimat terakhir ikut
     return [(round(s, 3), round(e, 3)) for s, e in spans if e - s >= 0.12]
 
 

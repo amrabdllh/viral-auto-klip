@@ -186,22 +186,36 @@ def _best_format_height(info: Dict) -> int:
 
 
 def _progress_hook(cb: Callable[[float, float, Optional[float]], None]):
-    """Throttle progres yt-dlp (maks ~1 update/detik) untuk pesan job."""
+    """Throttle progres yt-dlp (maks ~1 update/detik) untuk pesan job.
+
+    Format "bv*+ba" diunduh sebagai DUA file (video lalu audio), masing-masing 0–100%. Dulu progres tembus 100% lalu
+    "mundur" ke 48% saat audio mulai. Kini digabung tanpa pernah mundur: video 0–95%, audio 95–100%."""
     state = {"t": 0.0, "pct": -1.0}
+
+    def span(data: Dict) -> Tuple[float, float]:
+        info = data.get("info_dict") or {}
+        if info.get("acodec") == "none":   # bagian video saja (audio menyusul)
+            return 0.0, 95.0
+        if info.get("vcodec") == "none":   # bagian audio saja
+            return 95.0, 100.0
+        return 0.0, 100.0                  # satu file berisi video + audio
 
     def hook(data: Dict) -> None:
         status = data.get("status")
+        lo, hi = span(data)
         if status == "downloading":
             total = data.get("total_bytes") or data.get("total_bytes_estimate") or 0
             done = data.get("downloaded_bytes") or 0
-            pct = (done * 100.0 / total) if total else 0.0
+            part = (done * 100.0 / total) if total else 0.0
+            pct = max(state["pct"], lo + (hi - lo) * min(part, 100.0) / 100.0)
             now = time.monotonic()
             if pct - state["pct"] < 1.0 and now - state["t"] < 1.0:
                 return
             state["t"], state["pct"] = now, pct
             cb(pct, float(data.get("speed") or 0.0), data.get("eta"))
         elif status == "finished":
-            cb(100.0, float(data.get("speed") or 0.0), 0)
+            state["pct"] = max(state["pct"], hi)
+            cb(state["pct"], float(data.get("speed") or 0.0), 0)
     return hook
 
 

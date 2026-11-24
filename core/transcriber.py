@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 def _register_nvidia_dlls() -> None:
@@ -78,13 +78,35 @@ def _sanitize_words(transcript: List[Dict]) -> List[Dict]:
     return transcript
 
 
+def clean_keyterms(items, limit: int = 100) -> List[str]:
+    """Keyterm ElevenLabs yang sah: ≤50 karakter, ≤5 kata, tanpa karakter < > { } [ ] dan backslash, unik (tidak peka
+    huruf besar/kecil). Dibatasi `limit` (>100 keyterm = durasi tagihan minimum 20 dtk per request)."""
+    out, seen = [], set()
+    for raw in items or []:
+        term = re.sub(r"[<>{}\[\]\\]", " ", str(raw or ""))
+        term = re.sub(r"\s+", " ", term).strip(" .,:;!?-#\"'")
+        if len(term) < 2 or len(term) > 50 or len(term.split()) > 5 or term.isdigit():
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(term)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def transcribe_video(video_path: str, model_name: str = None, word_timestamps: bool = False,
-                     device: str = None, compute_type: str = None) -> Tuple[List[Dict], Dict]:
-    """Transkripsi dengan fallback: cloud (ElevenLabs/Groq) gagal → Whisper lokal (GPU → CPU)."""
+                     device: str = None, compute_type: str = None,
+                     keyterms: Optional[List[str]] = None) -> Tuple[List[Dict], Dict]:
+    """Transkripsi dengan fallback: cloud (ElevenLabs/Groq) gagal → Whisper lokal (GPU → CPU).
+    keyterms: nama/istilah yang harus dieja benar (dipakai ElevenLabs Scribe)."""
     preferred = (device or config.WHISPER_DEVICE or "auto").lower()
     if preferred in ("elevenlabs", "scribe", "elevenlabs-scribe", "groq", "cloud", "groq-whisper"):
         try:
-            transcript, info = _transcribe_video_impl(video_path, model_name, word_timestamps, preferred, compute_type)
+            transcript, info = _transcribe_video_impl(video_path, model_name, word_timestamps, preferred, compute_type,
+                                                      keyterms=keyterms)
             return _sanitize_words(transcript), info
         except Exception as exc:
             logger.warning(f"Transkripsi {preferred} gagal ({str(exc)[:200]}) — pindah ke Whisper lokal")
@@ -99,6 +121,7 @@ def _transcribe_video_impl(
     word_timestamps: bool = False,
     device: str = None,
     compute_type: str = None,
+    keyterms: Optional[List[str]] = None,
 ) -> Tuple[List[Dict], Dict]:
     """
     Transcribe with faster-whisper using explicit, recoverable device choices.
@@ -116,7 +139,7 @@ def _transcribe_video_impl(
     if preferred_device in ("groq", "cloud", "groq-whisper"):
         return _transcribe_with_groq(video_path, word_timestamps=word_timestamps)
     if preferred_device in ("elevenlabs", "scribe", "elevenlabs-scribe"):
-        return _transcribe_with_elevenlabs(video_path)
+        return _transcribe_with_elevenlabs(video_path, keyterms=keyterms)
 
     plan = _build_transcription_plan(model_name, preferred_device, preferred_compute)
     last_error = None
@@ -262,7 +285,7 @@ def _extract_cloud_audio(video_path: str, bitrate: str, label: str, limit_mb: fl
     return audio_path
 
 
-def _transcribe_with_elevenlabs(video_path: str) -> Tuple[List[Dict], Dict]:
+def _transcribe_with_elevenlabs(video_path: str, keyterms: Optional[List[str]] = None) -> Tuple[List[Dict], Dict]:
     """Transkripsi cloud via ElevenLabs Scribe (timestamp per kata, akurasi tinggi)."""
     if not config.ELEVENLABS_API_KEY:
         raise RuntimeError("ElevenLabs Scribe dipilih, tapi ELEVENLABS_API_KEY kosong.")
@@ -280,6 +303,11 @@ def _transcribe_with_elevenlabs(video_path: str) -> Tuple[List[Dict], Dict]:
         }
         if config.WHISPER_LANGUAGE:
             data["language_code"] = config.WHISPER_LANGUAGE
+        terms = clean_keyterms(keyterms)
+        if terms:
+            # nama/istilah dieja benar ("Windah", bukan "Winda") — +20% biaya dasar Scribe
+            data["keyterms"] = terms  # requests: list → field multipart berulang
+            logger.info(f"ElevenLabs keyterms ({len(terms)}): {', '.join(terms[:12])}{' …' if len(terms) > 12 else ''}")
         with open(audio_path, "rb") as audio_file:
             response = requests.post(
                 "https://api.elevenlabs.io/v1/speech-to-text",

@@ -466,3 +466,8 @@ tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transpa
 .sched-line + .sched-line { border-top: 1px dashed var(--line, rgba(255,255,255,.08)); }
 td.r .sched-line { justify-content: flex-end; }
 .cal .ev.scheduled { background: var(--teal-soft); color: var(--teal); }
+/* Antrean Job: pilih banyak job → hapus / ulangi / batalkan sekaligus */
+.job-bulk { flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.job-bulk select { width: auto; min-width: 150px; }
+#jt input[type=checkbox], #jall { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+tbody tr.selected td { background: color-mix(in srgb, var(--accent) 9%, transparent); }

@@ -14,6 +14,7 @@ Fitur:
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -256,6 +257,18 @@ def _fallback_chain(primary: str, primary_model: str) -> List[Tuple[str, str]]:
 
 # ----------------------------------------------------------------------------- public API
 
+_COOLDOWN: Dict[Tuple[str, str], float] = {}   # (provider, model) → waktu boleh dipakai lagi setelah kena limit
+_LOG_LAST: Dict[Tuple, float] = {}
+
+
+def _log_throttled(key: Tuple, message: str, every: float = 60.0) -> None:
+    """Log INFO paling sering sekali per `every` dtk per kunci (Editor-AI memanggil puluhan kali per menit)."""
+    now = time.time()
+    if now - _LOG_LAST.get(key, 0) >= every:
+        _LOG_LAST[key] = now
+        logger.info(message)
+
+
 def complete(
     prompt: str,
     system: str = "",
@@ -270,7 +283,17 @@ def complete(
     model = model or resolve_model(provider)
     errors = []
     rate_limited = False
-    for name, mdl in _fallback_chain(provider, model):
+    chain = _fallback_chain(provider, model)
+    primary = (config.AI_PROVIDER, resolve_model(config.AI_PROVIDER))
+    if (provider, model) != primary and primary not in chain and config.AI_PROVIDER in PROVIDER_INFO:
+        # panggilan ke provider khusus (mis. "model terkuat" untuk judul) gagal → pakai provider UTAMA pilihan pengguna
+        # dulu, baru cadangan umum. Dulu langsung lompat ke AI_FALLBACK_PROVIDERS.
+        chain.insert(1, primary)
+    now = time.time()
+    # Yang baru kena limit diistirahatkan dulu: dulu SETIAP panggilan tetap menembak model utama yang limit (gagal lagi,
+    # ±2 dtk + kuota terbuang) baru pindah ke cadangan. Bila semua sedang istirahat, tetap dicoba berurutan.
+    ready = [p for p in chain if _COOLDOWN.get(p, 0) <= now] or chain
+    for name, mdl in ready:
         if not is_configured(name):
             errors.append(f"{name}: belum dikonfigurasi")
             continue
@@ -278,13 +301,25 @@ def complete(
             text = _dispatch(name, mdl, prompt, system, max_tokens, json_mode, json_schema)
             if not text or not text.strip():
                 raise AIError("respons kosong")
-            if name != provider:
-                logger.info(f"AI fallback dipakai: {name}/{mdl}")
+            if (name, mdl) != chain[0]:
+                # dulu hanya dicatat bila NAMA provider beda → cadangan "9router → model lain" tidak pernah terlihat
+                _log_throttled(("fb", name, mdl), f"AI cadangan dipakai: {name}/{mdl} "
+                                                  f"(utama {chain[0][0]}/{chain[0][1]} gagal atau kena limit)")
             return text
         except Exception as exc:
             msg = str(exc)
-            if _looks_rate_limited(exc):
+            if _looks_billing(exc):
+                # saldo/kredit habis tidak pulih dalam 2 menit → lewati 1 jam (dulu dicoba ulang di SETIAP panggilan)
+                _COOLDOWN[(name, mdl)] = time.time() + float(getattr(config, "AI_BILLING_COOLDOWN", 3600) or 0)
+                _log_throttled(("bill", name), f"AI {name} saldo/kredit habis — dilewati 1 jam, pakai cadangan. "
+                                               f"Isi saldo atau hapus {name} dari pengaturan.", every=600)
+            elif _looks_rate_limited(exc):
                 rate_limited = True
+                wait = float(getattr(config, "AI_RATE_LIMIT_COOLDOWN", 120) or 0)
+                if wait > 0 and len(chain) > 1:
+                    _COOLDOWN[(name, mdl)] = time.time() + wait
+                    _log_throttled(("rl", name, mdl), f"AI {name}/{mdl} kena limit — diistirahatkan {wait:.0f} dtk, "
+                                                      f"panggilan berikutnya langsung ke cadangan")
             errors.append(f"{name}/{mdl}: {msg[:200]}")
             logger.warning(f"AI {name}/{mdl} gagal: {msg[:200]}")
     if rate_limited and len(errors) == 1:
@@ -333,6 +368,19 @@ def test_connection(provider: str, model: str = "", timeout: float = 45.0) -> Tu
         return False, f"{provider}/{model}: {msg[:300]}"
     finally:
         del _CLIENT_LIMITS.timeout, _CLIENT_LIMITS.retries
+
+
+def _looks_billing(exc: Exception) -> bool:
+    """Saldo/kredit habis (402 / insufficient balance) — beda dengan limit sementara (429)."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    msg = str(exc).lower()
+    return status == 402 or "insufficient balance" in msg or "insufficient_quota" in msg or "insufficient credit" in msg \
+        or "payment required" in msg or "out of credits" in msg
+
+
+def is_cooling(provider: str, model: str) -> bool:
+    """True bila provider/model sedang diistirahatkan (kena limit atau saldo habis)."""
+    return _COOLDOWN.get((provider, model), 0) > time.time()
 
 
 def _looks_rate_limited(exc: Exception) -> bool:
@@ -484,14 +532,23 @@ def _messages(prompt: str, system: str) -> List[Dict]:
     return msgs
 
 
+_TRUNCATED = {"length", "max_tokens", "max_output_tokens", "model_length"}
+
+
 def _run_attempts(create_fn, model, prompt, system, max_tokens, json_mode) -> str:
     last_exc = None
+    if re.search(r"claude|thinking|reason", str(model or ""), re.I):
+        # Claude lewat gateway OpenAI-compatible juga berpikir dulu; token berpikir masuk hitungan max_tokens
+        # (uji 9router cc/claude-sonnet-5-5: 2127 dari 2200 token terpakai untuk jawaban ±1.100 karakter).
+        max_tokens = max(int(max_tokens), 8000)
     for extra in _openai_style_attempts(max_tokens, json_mode):
         try:
             response = create_fn(model=model, messages=_messages(prompt, system), **extra)
             choice = response.choices[0]
             text = choice.message.content or ""
-            if getattr(choice, "finish_reason", "") == "length" and (not text.strip() or json_mode):
+            # "length" = OpenAI; "max_tokens"/"max_output_tokens" = gateway yang meneruskan gaya Anthropic/Gemini (mis.
+            # 9router cc/claude-*): dulu tidak dikenali → JSON terpotong ("Unterminated string") tanpa diulang
+            if str(getattr(choice, "finish_reason", "") or "").lower() in _TRUNCATED and (not text.strip() or json_mode):
                 # Model reasoning (deepseek-flash/reasoner, o-series): token "berpikir" menghabiskan
                 # max_tokens sehingga jawaban kosong / JSON terpotong → ulangi sekali dengan jatah besar.
                 key = "max_completion_tokens" if "max_completion_tokens" in extra else "max_tokens"

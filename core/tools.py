@@ -89,7 +89,8 @@ def transcribe(ctx: JobContext, video: str, params: Dict, pct: int = 20) -> tupl
     engine = {"elevenlabs": f"ElevenLabs Scribe ({config.ELEVENLABS_STT_MODEL})", "groq": "Groq Whisper (cloud)"}.get(
         dev, f"Whisper {params.get('whisper_model') or config.WHISPER_MODEL} ({'CPU' if dev == 'cpu' else 'GPU'})")
     model = params.get("whisper_model") or config.WHISPER_MODEL
-    cache = _transcript_cache_path(video, dev, model)
+    keyterms = transcription_keyterms(params) if dev in ("elevenlabs", "scribe", "elevenlabs-scribe") else []
+    cache = _transcript_cache_path(video, dev, model, keyterms)
     if cache is not None and cache.exists():
         try:
             data = json.loads(cache.read_text(encoding="utf-8"))
@@ -99,7 +100,10 @@ def transcribe(ctx: JobContext, video: str, params: Dict, pct: int = 20) -> tupl
         except (OSError, ValueError):
             pass
     ctx.progress(pct, "Transkripsi", f"{engine} mentranskrip ucapan…")
-    transcript, info = transcribe_video(video, model_name=model, word_timestamps=True, device=dev, compute_type=compute)
+    if keyterms:
+        ctx.log(f"Keyterm transkripsi ({len(keyterms)}): {', '.join(keyterms[:10])}{' …' if len(keyterms) > 10 else ''}")
+    transcript, info = transcribe_video(video, model_name=model, word_timestamps=True, device=dev, compute_type=compute,
+                                        keyterms=keyterms)
     if cache is not None and transcript:
         # job yang gagal/terputus setelah tahap ini ("Ulangi") tidak membayar ElevenLabs/Groq lagi
         try:
@@ -131,8 +135,11 @@ class _analyzer_progress:
 
     def __enter__(self):
         self.sink = logger.add(self._write, level="INFO", format="{message}",
-                               filter=lambda r: r["name"] in ("core.analyzer", "core.audio_signals", "core.editor_review")
-                               and r["level"].no >= 20)
+                               filter=lambda r: r["level"].no >= 20 and (
+                                   r["name"] in ("core.analyzer", "core.audio_signals", "core.editor_review")
+                                   # pindah ke cadangan / kena limit terlihat di log job
+                                   or (r["name"] == "core.ai_providers" and r["level"].no == 20
+                                       and ("cadangan" in r["message"] or "kena limit" in r["message"]))))
         return self
 
     def __exit__(self, *exc):
@@ -141,7 +148,71 @@ class _analyzer_progress:
         return False
 
 
-def _transcript_cache_path(video: str, dev: str, model: str) -> Optional[Path]:
+_TITLE_STOP = set("""KITA KE DI DAN YANG INI ITU AKU GUA GUE AJA DARI BUAT SAMA NIH LAGI ADA MAU BISA JADI THE AND OF TO IN
+A LIVE PART EPS EPISODE GAMEPLAY AKHIRNYA PERGI PENGEN KANGEN KETEMU BANGET PERTAMA TERAKHIR MALAH KOK GIMANA KENAPA
+SEMUA BARU TERNYATA LANGSUNG SAMPAI UNTUK DENGAN KAMI KAMU MEREKA SUDAH BELUM TIDAK NGGAK GAK ENGGAK TAPI KALAU JANGAN
+MAIN BIKIN DAPAT DAPET JALAN PULANG RUMAH MOBIL HARI MALAM GILA SERU PARAH WKWK NEW BEST FULL REACTION REAKSI""".split())
+
+
+def _title_terms(title: str) -> List[str]:
+    """Nama/istilah dari judul video untuk keyterm: frasa Huruf-Judul ("Grand Theft Auto VI"), kata kapital yang bukan
+    kata umum ("JASON" → "Jason", "LUCIA" → "Lucia"), dan pasangan kapital pendek ("VICE CITY" → "Vice City").
+    Frasa dipisah di tanda baca, jadi "VICE CITY.... Grand Theft Auto" tidak tergabung. Kata kapital dijadikan
+    Huruf-Judul supaya transkrip tidak ikut tertulis kapital semua."""
+    out: List[str] = []
+    for chunk in re.split(r"[.,!?|:;()\[\]#&+/\"“”–—-]+", str(title or "")):
+        toks = re.findall(r"[A-Za-z0-9']+", chunk)
+        run: List[str] = []
+        for tok in toks + [""]:
+            if (tok[:1].isupper() and any(ch.islower() for ch in tok[1:])) or \
+                    (run and tok.isupper() and len(tok) <= 3):  # "Grand Theft Auto VI", "Persija FC"
+                run.append(tok)
+                continue
+            if run:
+                out.append(" ".join(run[:5]))
+            run = []
+        paired = set()
+        for i in range(len(toks) - 1):  # dua kata kapital berurutan: "VICE CITY", "MOBILE LEGENDS"
+            a, b = toks[i], toks[i + 1]
+            if a.isupper() and b.isupper() and not a.isdigit() and not b.isdigit() and len(a) >= 3 and len(b) >= 3 \
+                    and a not in _TITLE_STOP and b not in _TITLE_STOP and len(a) <= 8 and len(b) <= 8:
+                out.append(f"{a.title()} {b.title()}")
+                paired.update((a, b))
+        for t in (t for t in toks if t.isupper() and not t.isdigit()):
+            if t in _TITLE_STOP or len(t) < 3 or t in paired:
+                continue
+            # singkatan/angka romawi tetap kapital (GTA, VI); kata biasa jadi Huruf-Judul (JASON → Jason)
+            out.append(t if len(t) <= 3 or re.fullmatch(r"[IVXLC]+", t) else t.title())
+    return out
+
+
+def transcription_keyterms(params: Dict) -> List[str]:
+    """Nama & istilah yang harus dieja benar oleh ElevenLabs Scribe (keyterm prompting, +20% biaya dasar).
+    Sumber: daftar tetap di Pengaturan, isian job (keyterms, nama pembicara, momen spesifik), lalu otomatis dari video
+    sumber: nama channel, tag YouTube, dan frasa nama di judul. Dulu tanpa keyterm: "Windah" tertulis "Winda" → judul salah."""
+    from .transcriber import clean_keyterms
+    if not getattr(config, "ELEVENLABS_KEYTERMS", True):
+        return []
+    split = lambda v: [x for x in re.split(r"[,;\n]+", str(v or "")) if x.strip()]  # noqa: E731
+    terms: List[str] = split(getattr(config, "TRANSCRIBE_KEYTERMS", "")) + split(params.get("keyterms")) + \
+        split(params.get("speaker_names")) + split(params.get("keyword") or params.get("specific_moments"))
+    url = params.get("url") or ""
+    if url:
+        try:
+            info = sources.video_info(url)
+            channel = str(info.get("channel") or "").strip()
+            if channel:
+                terms.append(channel)
+                if len(channel.split()) > 1 and len(channel.split()[0]) >= 4:
+                    terms.append(channel.split()[0])  # "Windah" sering disebut tanpa nama belakang
+            terms += _title_terms(info.get("title") or "")
+            terms += [t for t in (info.get("tags") or [])][:40]
+        except Exception as exc:  # noqa: BLE001 - keyterm opsional
+            logger.debug(f"Keyterm dari info video dilewati: {str(exc)[:120]}")
+    return clean_keyterms(terms)
+
+
+def _transcript_cache_path(video: str, dev: str, model: str, keyterms: Optional[List[str]] = None) -> Optional[Path]:
     """Kunci = file sumber (path, ukuran, sidik isi 1 MB awal + 1 MB akhir) + mesin + model + bahasa.
     BUKAN mtime: unduhan yang memakai cache sumber menyentuh file itu (penanda LRU), jadi mtime berubah tiap job."""
     import hashlib
@@ -156,7 +227,8 @@ def _transcript_cache_path(video: str, dev: str, model: str) -> Optional[Path]:
     except OSError:
         return None
     key = "|".join([str(Path(video).resolve()), str(size), h.hexdigest(), str(dev), str(model),
-                    str(getattr(config, "WHISPER_LANGUAGE", "") or ""), str(getattr(config, "ELEVENLABS_STT_MODEL", ""))])
+                    str(getattr(config, "WHISPER_LANGUAGE", "") or ""), str(getattr(config, "ELEVENLABS_STT_MODEL", ""))]
+                   + ([",".join(sorted(k.lower() for k in keyterms))] if keyterms else []))
     return db.DATA_DIR / "source_cache" / "transcripts" / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.json"
 
 

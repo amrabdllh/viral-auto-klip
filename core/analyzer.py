@@ -261,6 +261,8 @@ def _analyze_viral_potential(transcript_segments: List[Dict], video_info: Dict, 
     if auto_count:  # mode Otomatis: jumlah akhir ditentukan kualitas
         clips = _auto_quality_gate(clips, farm=auto_count == "farm")
     clips = clips[:config.MAX_CLIPS_PER_VIDEO]
+    if CONTENT_TYPE == "gaming_stream":
+        _extend_gaming_tails(clips, transcript_segments)
 
     # Live/gaming sudah terdeteksi dari sumbernya; tebakan kata kunci di obrolan berjam-jam selalu menemukan
     # "uang/modal/rugi" → dulu semua klip live GTA berlabel "finance" (ikut masuk prompt AI packaging).
@@ -278,13 +280,44 @@ def _analyze_viral_potential(transcript_segments: List[Dict], video_info: Dict, 
     return clips
 
 
+GAMING_TAIL_MAX = 3.0
+
+
+def _extend_gaming_tails(clips: List[Dict], transcript: List[Dict]) -> int:
+    """Live gaming: batas akhir klip dipilih di akhir BARIS transkrip (kalimat terakhir), padahal kejadian di game &
+    reaksi tanpa kata (ledakan, mobil nabrak, ketawa, hening kaget) sering terjadi sesudahnya → "momennya belum
+    selesai, video sudah end". Ekor diperpanjang sampai kalimat berikutnya dimulai (maks GAMING_TAIL_MAX dtk), tidak
+    melewati durasi maksimum klip atau awal klip lain. Bila kalimat berikutnya langsung menyambung, batas dibiarkan."""
+    starts = sorted(float(s["start"]) for s in transcript)
+    others = sorted(float(c["start"]) for c in clips)
+    extended = 0
+    for c in clips:
+        start, end = float(c["start"]), float(c["end"])
+        nxt = next((t for t in starts if t >= end - 0.05), end + GAMING_TAIL_MAX)
+        nxt_clip = next((t for t in others if t > start + 0.5), float("inf"))
+        new_end = min(nxt, end + GAMING_TAIL_MAX, start + float(config.MAX_CLIP_DURATION), nxt_clip)
+        if new_end - end >= 0.6:
+            c["end"] = round(new_end, 2)
+            c["duration"] = round(new_end - start, 2)
+            c["tail_extended"] = round(new_end - end, 2)
+            extended += 1
+    if extended:
+        logger.info(f"Ekor klip gaming diperpanjang (kejadian/reaksi setelah kalimat terakhir ikut): {extended} klip")
+    return extended
+
+
 def _auto_quality_gate(clips: List[Dict], farm: bool = False) -> List[Dict]:
     """Mode Otomatis: jumlah klip ditentukan KUALITAS — semua yang lolos rubrik Editor-AI diambil (dibatasi
     panjang video lewat MAX_CLIPS_PER_VIDEO), minimal AUTO_MIN_CLIPS teratas agar tidak pernah kosong."""
     good = []
+    ranked = any((c.get("review") or {}).get("tier") for c in clips)
     for c in clips:
         rv = c.get("review") or {}
-        if rv.get("status") == "reviewed":
+        if ranked:
+            # ranking pembanding (editor_review.rank_clips): S/A/B = layak upload, C = lemah (hanya mode farming)
+            if rv.get("tier") in ("S", "A", "B") or (farm and rv.get("tier") == "C"):
+                good.append(c)
+        elif rv.get("status") == "reviewed":
             gate = (config.AUTO_FARM_MIN_RUBRIC if farm else config.AUTO_MIN_RUBRIC) - (5 if CONTENT_TYPE == "gaming_stream" and not farm else 0)
             if float(rv.get("rubric") or 0) >= gate:
                 good.append(c)
@@ -293,9 +326,10 @@ def _auto_quality_gate(clips: List[Dict], farm: bool = False) -> List[Dict]:
     floor = min(len(clips), int(config.AUTO_MIN_CLIPS))
     if len(good) < floor:
         good = good + [c for c in clips if c not in good][:floor - len(good)]
+    rule = ("tier S/A/B" + ("/C" if farm else "")) if ranked else \
+        f"rubrik ≥ {(config.AUTO_FARM_MIN_RUBRIC if farm else config.AUTO_MIN_RUBRIC):.0f}"
     logger.info(f"🎯 Mode otomatis{' (farming)' if farm else ''}: {len(good)} klip lolos saringan kualitas "
-                f"(rubrik ≥ {(config.AUTO_FARM_MIN_RUBRIC if farm else config.AUTO_MIN_RUBRIC):.0f}) "
-                f"dari {len(clips)} kandidat, batas {config.MAX_CLIPS_PER_VIDEO}")
+                f"({rule}) dari {len(clips)} kandidat, batas {config.MAX_CLIPS_PER_VIDEO}")
     return good
 
 

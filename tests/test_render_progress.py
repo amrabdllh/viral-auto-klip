@@ -75,5 +75,19 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# Progres unduhan yt-dlp "bv*+ba" (video lalu audio, masing-masing 0–100%) tidak boleh mundur
+from core.utils import _progress_hook  # noqa: E402
+seen = []
+hook = _progress_hook(lambda p, s, e: seen.append(round(p, 1)))
+V, A = {"acodec": "none", "vcodec": "avc1"}, {"vcodec": "none", "acodec": "mp4a"}
+for d in range(0, 101, 20):
+    hook({"status": "downloading", "total_bytes": 100, "downloaded_bytes": d, "info_dict": V})
+hook({"status": "finished", "info_dict": V})
+for d in range(0, 101, 50):
+    hook({"status": "downloading", "total_bytes": 100, "downloaded_bytes": d, "info_dict": A})
+hook({"status": "finished", "info_dict": A})
+check("progres unduhan video+audio tidak pernah mundur", seen == sorted(seen))
+check("video berhenti di 95%, selesai di 100%", 95.0 in seen and seen[-1] == 100.0)
+
 print("\nSemua uji progres render lulus" if not fails else f"\nGAGAL: {len(fails)} uji")
 sys.exit(1 if fails else 0)

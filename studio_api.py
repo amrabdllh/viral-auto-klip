@@ -642,12 +642,60 @@ def delete_job(job_id: str, files: bool = False):
         raise HTTPException(404, "Job tidak ditemukan")
     if job["status"] == "running":
         raise HTTPException(409, "Job sedang berjalan — batalkan dulu")
+    _delete_job(job_id, files)
+    return {"ok": True}
+
+
+def _delete_job(job_id: str, files: bool) -> None:
     if files:
         folder = (Path(config.OUTPUT_DIR) / f"job_{job_id}").resolve()
         if folder.exists() and Path(config.OUTPUT_DIR).resolve() in folder.parents:
             shutil.rmtree(folder, ignore_errors=True)
     db.delete_job(job_id)
-    return {"ok": True}
+
+
+class BulkJobRequest(BaseModel):
+    ids: List[str] = []
+    action: str = ""          # delete | retry | cancel
+    files: bool = False       # delete: hapus juga folder hasil di disk
+
+
+@router.post("/jobs/bulk")
+def bulk_jobs(req: BulkJobRequest):
+    """Aksi untuk banyak job sekaligus (Antrean Job → pilih / pilih semua). Job yang tidak cocok dilewati, bukan gagal
+    semua: hapus melewati job yang sedang berjalan, ulangi melewati yang masih berjalan/antre, batalkan hanya yang aktif."""
+    if req.action not in ("delete", "retry", "cancel"):
+        raise HTTPException(400, "Aksi harus delete, retry, atau cancel")
+    ids = list(dict.fromkeys(i for i in req.ids if i))[:500]
+    if not ids:
+        raise HTTPException(400, "Pilih minimal satu job")
+    done: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    for job_id in ids:
+        job = db.get_job(job_id)
+        if not job:
+            skipped.append({"id": job_id, "reason": "tidak ditemukan"})
+            continue
+        active = job["status"] in ("running", "queued")
+        if req.action == "delete":
+            if job["status"] == "running":
+                skipped.append({"id": job_id, "reason": "sedang berjalan — batalkan dulu"})
+                continue
+            if job["status"] == "queued":
+                jobs.cancel(job_id)  # antrean dikeluarkan dulu agar worker tidak mengambilnya
+            _delete_job(job_id, req.files)
+        elif req.action == "retry":
+            if active:
+                skipped.append({"id": job_id, "reason": "masih berjalan / antre"})
+                continue
+            jobs.retry(job_id)
+        else:
+            if not active:
+                skipped.append({"id": job_id, "reason": "sudah tidak berjalan"})
+                continue
+            jobs.cancel(job_id)
+        done.append(job_id)
+    return {"action": req.action, "done": done, "skipped": skipped}
 
 
 # ----------------------------------------------------------------------------- library / aset

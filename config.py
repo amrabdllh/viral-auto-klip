@@ -134,6 +134,9 @@ MISTRAL_API_KEY = _secret("MISTRAL_API_KEY")
 MISTRAL_BASE_URL = os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
 ELEVENLABS_API_KEY = _secret("ELEVENLABS_API_KEY")
 ELEVENLABS_STT_MODEL = os.getenv("ELEVENLABS_STT_MODEL", "scribe_v2")
+# Keyterm prompting Scribe: nama channel/tag/judul + daftar tetap dikirim agar nama dieja benar (+20% biaya dasar).
+ELEVENLABS_KEYTERMS = os.getenv("ELEVENLABS_KEYTERMS", "1").lower() in ("1", "true", "yes")
+TRANSCRIBE_KEYTERMS = os.getenv("TRANSCRIBE_KEYTERMS", "")
 ELEVENLABS_AUDIO_BITRATE = os.getenv("ELEVENLABS_AUDIO_BITRATE", "64k")
 
 # Custom AI (OpenAI-compatible): bawa base URL + API key sendiri
@@ -254,6 +257,8 @@ AUTO_MIN_DURATION = int(os.getenv("AUTO_MIN_DURATION", "20"))  # <20 dtk sering 
 AUTO_MAX_DURATION = int(os.getenv("AUTO_MAX_DURATION", "90"))
 AUTO_MIN_RUBRIC = float(os.getenv("AUTO_MIN_RUBRIC", "56"))
 AUTO_FARM_MIN_RUBRIC = float(os.getenv("AUTO_FARM_MIN_RUBRIC", "46"))  # mode farming: klip "lumayan" ikut diambil
+# Ranking pembanding: semua kandidat dinilai sekaligus (S/A/B/C) seperti editor manusia; skor & saringan dari urutannya.
+AI_COMPARE_RANKING = os.getenv("AI_COMPARE_RANKING", "1").lower() in ("1", "true", "yes")
 AUTO_FARM_MINUTES_PER_CLIP = float(os.getenv("AUTO_FARM_MINUTES_PER_CLIP", "3"))
 AUTO_FARM_MAX_CLIPS = int(os.getenv("AUTO_FARM_MAX_CLIPS", "40"))  # saringan kualitas Editor-AI saat jumlah klip otomatis
 # v6.8: upload otomatis ke jam FYP terbaik
@@ -291,6 +296,8 @@ AI_RERANK_WORKERS = int(os.getenv("AI_RERANK_WORKERS", "6"))  # panggilan rerank
 # Gateway AI di laptop sendiri (koneksi ke localhost / Ollama) dibatasi sekian panggilan bersamaan — lebih dari itu
 # gateway menjawab 503 & melambat. 0 = tanpa batas. API cloud tidak terpengaruh.
 AI_LOCAL_PARALLEL = int(os.getenv("AI_LOCAL_PARALLEL", "4"))
+# Provider/model yang kena limit (429) dilewati sekian detik; panggilan langsung ke AI_FALLBACK_PROVIDERS. 0 = mati.
+AI_RATE_LIMIT_COOLDOWN = int(os.getenv("AI_RATE_LIMIT_COOLDOWN", "120"))
 AI_MOMENT_FINDER = os.getenv("AI_MOMENT_FINDER", "1").lower() in ("1", "true", "yes")
 AI_MOMENT_CHUNK_CHARS = int(os.getenv("AI_MOMENT_CHUNK_CHARS", "24000"))  # ukuran potongan transkrip per panggilan
 AI_MOMENT_MAX_CHUNKS = int(os.getenv("AI_MOMENT_MAX_CHUNKS", "30"))       # batas panggilan per video; bila lebih,

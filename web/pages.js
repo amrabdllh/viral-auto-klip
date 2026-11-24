@@ -134,18 +134,70 @@ PAGES.library = { render(view) {
 const KIND_LABEL = { live_clip: "Klip Live", live_window: "Jendela Live", clip_quick: "Analisis AI", clip_manual: "Atur Manual", split_cam: "Split Cam", highlight_bola: "Highlight Bola", konten_tempel: "Konten Tempel",
   merge: "Merge", loop: "Loop", wa_story: "WA Story", editor: "Editor", transcript: "Transcript", tts: "TTS", music: "Musik", sfx: "SFX", creator_render: "Video AI", fetch_source: "Unduh sumber" };
 PAGES.jobs = { render(view) {
+  const ACTIVE = ["running", "queued"];
+  const PICKS = [{ v: "", l: "Pilih cepat…" }, { v: "all", l: "Semua" }, { v: "fail", l: "Gagal & terputus" }, { v: "done", l: "Selesai" },
+    { v: "cancelled", l: "Dibatalkan" }, { v: "active", l: "Berjalan & antre" }, { v: "none", l: "Kosongkan pilihan" }];
   view.innerHTML = `<div class="page">${pageHead("Antrean Job", "Job berjalan satu per satu di background dan tetap tersimpan walau server di-restart.", UI.btn("Muat ulang", { ico: "refresh", size: "sm", id: "rf" }))}
-    ${UI.panel({ bodyCls: "flush", body: `<div class="table-wrap"><table><thead><tr><th>Job</th><th class="hide-sm">Jenis</th><th>Status</th><th class="r">Progres</th><th class="hide-sm">Dibuat</th><th></th></tr></thead><tbody id="jt"></tbody></table></div>` })}</div>`;
+    ${UI.panel({ bodyCls: "flush", body: `<div class="row job-bulk" id="jsel"><span class="small muted" id="jcount">0 dipilih</span>
+        <select id="jpick" aria-label="Pilih cepat berdasarkan status">${UI.options(PICKS, "")}</select><span class="spacer"></span>
+        ${UI.btn("Ulangi", { ico: "refresh", size: "sm", attrs: 'data-bulk="retry"' })}${UI.btn("Batalkan", { ico: "x", size: "sm", attrs: 'data-bulk="cancel"' })}${UI.btn("Hapus", { ico: "trash", size: "sm", attrs: 'data-bulk="delete"' })}</div>
+      <div class="table-wrap"><table><thead><tr><th style="width:34px"><input type="checkbox" id="jall" title="Pilih semua" aria-label="Pilih semua job"></th><th>Job</th><th class="hide-sm">Jenis</th><th>Status</th><th class="r">Progres</th><th class="hide-sm">Dibuat</th><th></th></tr></thead><tbody id="jt"></tbody></table></div>` })}</div>`;
+  const sel = new Set();  // id terpilih — bertahan saat tabel disegarkan tiap 4 dtk
+  let rows = [];
+  const unpick = (id) => sel.delete(id);
+  const count = () => {
+    for (const id of [...sel]) if (!rows.some((j) => j.id === id)) unpick(id);
+    $("#jcount").textContent = `${sel.size} dipilih`;
+    const all = $("#jall"); all.checked = rows.length > 0 && sel.size === rows.length; all.indeterminate = sel.size > 0 && sel.size < rows.length;
+    $$("[data-bulk]").forEach((b) => { b.disabled = !sel.size; });
+  };
   async function load() {
-    const rows = await api("/api/jobs?limit=100");
+    rows = await api("/api/jobs?limit=100");
     const tb = $("#jt"); if (!tb) return;
-    tb.innerHTML = rows.map((j) => `<tr data-id="${j.id}"><td style="max-width:420px"><b class="clip1" style="display:block">${esc(j.title)}</b><span class="tiny muted clip1" style="display:block">${esc(j.message)}</span></td>
+    tb.innerHTML = rows.map((j) => `<tr data-id="${j.id}" class="${sel.has(j.id) ? "selected" : ""}"><td><input type="checkbox" data-sel ${sel.has(j.id) ? "checked" : ""} aria-label="Pilih job ${esc(j.title)}"></td>
+      <td style="max-width:420px"><b class="clip1" style="display:block">${esc(j.title)}</b><span class="tiny muted clip1" style="display:block">${esc(j.message)}</span></td>
       <td class="hide-sm small">${esc(KIND_LABEL[j.kind] || j.kind)}</td><td>${statusPill(j.status)}</td><td class="num">${j.progress}%</td><td class="hide-sm small nowrap">${fmtDate(j.created)}</td>
       <td class="r"><div class="btn-row" style="justify-content:flex-end;flex-wrap:nowrap">${UI.btn("Buka", { size: "sm", attrs: 'data-a="open"' })}
-        ${["running", "queued"].includes(j.status) ? UI.btn("", { ico: "x", size: "sm", kind: "ghost", title: "Batalkan", attrs: 'data-a="cancel"' }) : UI.btn("", { ico: "refresh", size: "sm", kind: "ghost", title: "Jalankan ulang", attrs: 'data-a="retry"' })}
+        ${ACTIVE.includes(j.status) ? UI.btn("", { ico: "x", size: "sm", kind: "ghost", title: "Batalkan", attrs: 'data-a="cancel"' }) : UI.btn("", { ico: "refresh", size: "sm", kind: "ghost", title: "Jalankan ulang", attrs: 'data-a="retry"' })}
         ${j.status !== "running" ? UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Hapus", attrs: 'data-a="del"' }) : ""}</div></td></tr>`).join("") ||
-      `<tr><td colspan="6">${UI.empty("queue", "Belum ada job", "Job dari semua tool akan muncul di sini.")}</td></tr>`;
+      `<tr><td colspan="7">${UI.empty("queue", "Belum ada job", "Job dari semua tool akan muncul di sini.")}</td></tr>`;
+    count();
   }
+  $("#jt").addEventListener("change", (e) => {
+    if (!e.target.matches("[data-sel]")) return;
+    const tr = e.target.closest("[data-id]"); const id = tr.dataset.id;
+    if (e.target.checked) sel.add(id); else unpick(id);
+    tr.classList.toggle("selected", e.target.checked); count();
+  });
+  $("#jall").onchange = (e) => { sel.clear(); if (e.target.checked) rows.forEach((j) => sel.add(j.id)); load().catch(fail); };
+  $("#jpick").onchange = (e) => {
+    const v = e.target.value; e.target.value = "";
+    const match = { all: () => true, fail: (j) => ["error", "interrupted"].includes(j.status), done: (j) => j.status === "done",
+      cancelled: (j) => j.status === "cancelled", active: (j) => ACTIVE.includes(j.status), none: () => false }[v];
+    if (!match) return;
+    sel.clear(); rows.filter(match).forEach((j) => sel.add(j.id)); load().catch(fail);
+  };
+  const runBulk = async (action, files = false) => {
+    const r = await api("/api/jobs/bulk", { body: { ids: [...sel], action, files } });
+    const verb = { delete: "dihapus", retry: "dijalankan ulang", cancel: "dibatalkan" }[action];
+    toast(`${r.done.length} job ${verb}` + (r.skipped.length ? ` · ${r.skipped.length} dilewati (${[...new Set(r.skipped.map((s) => s.reason))].join(", ")})` : ""), !r.done.length);
+    if (action !== "cancel") sel.clear();
+    await load();
+  };
+  $("#jsel").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-bulk]"); if (!b || !sel.size) return;
+    const n = sel.size, action = b.dataset.bulk;
+    if (action === "delete") return modal({ title: `Hapus ${n} job?`, body: `<p class="small muted">Job yang sedang berjalan dilewati — batalkan dulu.</p>
+        <label class="switch"><input type="checkbox" data-f><span>Hapus juga folder hasilnya di disk<span class="sub">Klip, thumbnail, dan file lain dari job ini dihapus permanen</span></span></label>`,
+      foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn(`Hapus ${n} job`, { kind: "primary", attrs: "data-ok" }) }, (m) => {
+      $("[data-ok]", m).onclick = (ev) => busy(ev.currentTarget, async () => { const f = $("[data-f]", m).checked; closeModal(); await runBulk("delete", f).catch(fail); });
+    });
+    if (action === "retry") return modal({ title: `Jalankan ulang ${n} job?`, body: `<p class="small muted">Tiap job dibuat ulang dengan pengaturan yang sama dan masuk antrean. Job yang masih berjalan/antre dilewati.</p>`,
+      foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn(`Ulangi ${n} job`, { kind: "primary", attrs: "data-ok" }) }, (m) => {
+      $("[data-ok]", m).onclick = (ev) => busy(ev.currentTarget, async () => { closeModal(); await runBulk("retry").catch(fail); });
+    });
+    busy(b, () => runBulk("cancel").catch(fail));
+  });
   $("#jt").onclick = async (e) => {
     const b = e.target.closest("[data-a]"); if (!b) return;
     const id = b.closest("[data-id]").dataset.id;
@@ -155,7 +207,7 @@ PAGES.jobs = { render(view) {
       else if (b.dataset.a === "retry") { await api(`/api/jobs/${id}/retry`, { body: {} }); toast("Dijalankan ulang"); load(); }
       else if (b.dataset.a === "del") modal({ title: "Hapus job?", body: `<label class="switch"><input type="checkbox" data-f><span>Hapus juga folder hasilnya di disk</span></label>`,
         foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Hapus", { kind: "primary", attrs: "data-ok" }) }, (m) => {
-        $("[data-ok]", m).onclick = async () => { await api(`/api/jobs/${id}?files=${$("[data-f]", m).checked}`, { method: "DELETE" }).catch(fail); closeModal(); load(); };
+        $("[data-ok]", m).onclick = async () => { await api(`/api/jobs/${id}?files=${$("[data-f]", m).checked}`, { method: "DELETE" }).catch(fail); unpick(id); closeModal(); load(); };
       });
     } catch (err) { fail(err); }
   };
@@ -1445,6 +1497,8 @@ PAGES.settings = { render(view) {
         if (rows.some((r) => r.unknown)) warn.push("ada provider tidak dikenal — pilih ulang (tidak akan disimpan)");
         if (rows.some((r) => !r.unknown && !ready.has(r.p))) warn.push("provider tanpa key dilewati saat berjalan");
         if (rows.some((r) => r.p === prim && (r.m || "") === primM)) warn.push("ada yang sama persis dengan provider utama");
+        // uji 9router: gemini-3.8-flash-high 24–125 dtk/panggilan (kadang timeout 180 dtk), -medium ±20 dtk, -low ±8 dtk
+        if (rows.some((r) => /(^|[-/])(x?high|thinking|max)($|[-/])/i.test(r.m || ""))) warn.push("model ber-pikir tinggi (-high/thinking) lambat 1–2 mnt per panggilan & bisa timeout — untuk cadangan pilih -low/-medium");
         $("#fbWarn").textContent = warn.length ? "⚠ " + warn.join(" · ") : (rows.length ? "" : "Belum ada cadangan — bila provider utama gagal, AI dilewati.");
       };
       const draw = () => {

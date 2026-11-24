@@ -194,20 +194,9 @@ def _prompt(clip: Dict, transcript: List[Dict], source_title: str, feedback: str
         "Transkrip dengan konteks sebelum/sesudah (baris di antara >>> MULAI dan <<< AKHIR adalah isi klip):\n"
         + _context_block(transcript, clip["start"], clip["end"])
         + _audio_note(clip)
-        + (("\n\nTIPE KONTEN: live streaming gaming (klip vertikal: wajah streamer di atas, gameplay di bawah). "
-            "Penonton MELIHAT gameplay-nya, jadi konteks visual ikut menjelaskan — jangan menghukum kalimat pendek, "
-            "bahasa gaul, atau reaksi spontan. Nilai dari: apakah ada kejadian/reaksi yang menghibur (lucu, kaget, epik, "
-            "gagal, plot twist), dan apakah reaksinya tuntas. Transkrip bisa bercampur dialog karakter game.")
-           if an().CONTENT_TYPE == "gaming_stream" else "")
-        + "\n\nNilai klip itu seperti penonton yang BELUM PERNAH melihat video penuhnya:\n"
-        "- standalone 0-10: bisa dipahami tanpa konteks sebelumnya? (kata ganti 'dia/itu/begitu' jelas rujukannya? "
-        "tidak mulai dengan jawaban atas pertanyaan yang tidak ikut terpotong?)\n"
-        "- hook 0-10: apakah 3 detik pertama membuat orang berhenti scroll?\n"
-        "- payoff 0-10: ada inti/kesimpulan/punchline yang memuaskan, tidak menggantung atau berakhir di tengah ide?\n"
-        "- emotion 0-10: intensitas emosi/opini/cerita yang membuat orang ingin komentar atau share.\n"
-        "- clarity 0-10: bahasa jelas, tidak berantakan/saling potong.\n"
-        "Jangan murah hati: klip biasa-biasa saja harus mendapat 4-6.\n"
-        "verdict: 'keep' | 'trim' | 'reject'. 'trim' = ide bagus tapi batasnya salah: isi new_start dan new_end "
+        + (_RUBRIC_GAMING if an().CONTENT_TYPE == "gaming_stream" else _RUBRIC_TALK)
+        + _SCALE
+        + "verdict: 'keep' | 'trim' | 'reject'. 'trim' = ide bagus tapi batasnya salah: isi new_start dan new_end "
         "(detik, HARUS persis awal/akhir salah satu baris transkrip di atas) agar klip mulai di kalimat pembuka yang "
         "kuat dan berakhir di payoff. 'reject' bila tidak bisa diselamatkan.\n"
         "summary: 1 kalimat tentang apa yang BENAR-BENAR dikatakan klip.\n"
@@ -242,6 +231,43 @@ def _prompt(clip: Dict, transcript: List[Dict], source_title: str, feedback: str
         + (_CLICKBAIT if str(getattr(config, "TITLE_STYLE", "normal")).lower() == "clickbait" else "")
         + (f"\n\nPERBAIKI: {feedback}" if feedback else "")
     )
+
+
+# Rubrik per jenis konten. Kunci JSON sama (standalone/hook/payoff/emotion/clarity) tetapi ARTINYA beda: momen viral
+# live gaming sering hanya REAKSI (teriak, ketawa, umpatan saat mobil nabrak) tanpa "cerita utuh" atau "kesimpulan" —
+# rubrik podcast dulu menghukum momen seperti itu.
+_RUBRIC_TALK = (
+    "\n\nNilai klip itu seperti penonton FYP yang BELUM PERNAH melihat video penuhnya:\n"
+    "- standalone 0-10: bisa dipahami tanpa konteks sebelumnya? (kata ganti 'dia/itu/begitu' jelas rujukannya? "
+    "tidak mulai dengan jawaban atas pertanyaan yang tidak ikut terpotong?)\n"
+    "- hook 0-10: apakah 3 detik pertama membuat orang berhenti scroll?\n"
+    "- payoff 0-10: ada inti/kesimpulan/punchline yang memuaskan, tidak menggantung atau berakhir di tengah ide?\n"
+    "- emotion 0-10: intensitas emosi/opini/cerita yang membuat orang ingin komentar atau share.\n"
+    "- clarity 0-10: bahasa jelas, tidak berantakan/saling potong.\n"
+)
+_RUBRIC_GAMING = (
+    "\n\nTIPE KONTEN: live streaming gaming (klip vertikal: wajah streamer di atas, gameplay di bawah). Penonton MELIHAT "
+    "gameplay dan wajah streamer, jadi yang penting adalah KEJADIAN di game dan REAKSI streamer — bukan kalimat yang "
+    "rapi atau cerita utuh. Reaksi spontan, teriakan, umpatan, bahasa gaul, dan kalimat pendek itu justru bahan utama. "
+    "Transkrip bisa bercampur dialog karakter game.\n"
+    "Nilai seperti penonton TikTok gaming yang lagi scroll:\n"
+    "- hook 0-10: dalam 3 detik pertama sudah ada reaksi atau kejadian yang bikin berhenti scroll?\n"
+    "- emotion 0-10 (= REAKSI): seberapa kuat & menghibur reaksi streamer — kaget, panik, ngakak, marah, euforia, "
+    "nge-roast, umpatan spontan. Reaksi datar/menjelaskan = rendah.\n"
+    "- payoff 0-10 (= KEJADIAN): ada momen yang seru & tuntas di klip — gagal konyol, aksi epik, plot twist, bug lucu, "
+    "interaksi chat yang kocak. TIDAK perlu kesimpulan atau pelajaran.\n"
+    "- standalone 0-10: penonton baru langsung nangkep apa yang lucu/seru dari gameplay + reaksi, tanpa harus nonton "
+    "live sebelumnya?\n"
+    "- clarity 0-10: reaksi streamer terdengar jelas (tidak tertutup dialog game/musik), alurnya gampang diikuti.\n"
+)
+_SCALE = (
+    "Pakai skala seperti penonton sungguhan, bukan juri: 9-10 = pasti ditonton ulang & dibagikan; 7-8 = seru, "
+    "ditonton sampai habis; 5-6 = biasa, kemungkinan di-scroll lewat; 3-4 = membosankan; 0-2 = rusak/tidak jelas. "
+    "Jujur — jangan menaikkan nilai klip biasa, tapi jangan pelit pada momen yang memang seru.\n"
+)
+# bobot rubrik → skor 0-100. Gaming: reaksi & kejadian paling menentukan; standalone/kejelasan pelengkap.
+_WEIGHTS_TALK = {"standalone": 0.22, "hook": 0.26, "payoff": 0.26, "emotion": 0.14, "clarity": 0.12}
+_WEIGHTS_GAMING = {"standalone": 0.10, "hook": 0.25, "payoff": 0.25, "emotion": 0.30, "clarity": 0.10}
 
 
 # v6.9: gaya clickbait ala kanal clip Indonesia — tetap lolos pemeriksaan "didukung ucapan klip" (grounding)
@@ -280,6 +306,117 @@ def _ask(clip: Dict, transcript: List[Dict], source_title: str, feedback: str = 
     return None
 
 
+# ============================================================================ ranking pembanding (seperti editor manusia)
+#
+# Rubrik per klip = mengisi formulir satu per satu; AI tidak tahu "6" itu bagus atau jelek DIBANDING kandidat lain dari
+# video yang sama, jadi semua nilai menumpuk di 5–6 dan skor ≥80 nyaris mustahil. Editor manusia menonton semuanya
+# lalu MEMBANDINGKAN: "ini paling gila, itu lumayan, sisanya buang". Tahap ini meniru itu: satu panggilan berisi semua
+# kandidat → urutan + tier S/A/B/C. Skor akhir terutama dari posisi di urutan itu.
+
+_TIERS = {"S": (86.0, 96.0), "A": (74.0, 85.0), "B": (60.0, 73.0), "C": (40.0, 55.0)}
+_TIER_NAME = {"S": "pasti rame", "A": "bagus", "B": "layak upload", "C": "lemah"}
+_RANK_SCHEMA = {
+    "type": "object",
+    "properties": {"ranking": {"type": "array", "items": {"type": "object", "properties": {
+        "id": {"type": "integer"}, "tier": {"type": "string"}, "why": {"type": "string"}},
+        "required": ["id", "tier"]}}},
+    "required": ["ranking"],
+}
+
+
+def _rank_item(i: int, clip: Dict) -> str:
+    rv = clip.get("review") or {}
+    vis = rv.get("visual") or {}
+    text = re.sub(r"\s+", " ", str(clip.get("transcript") or clip.get("text") or "")).strip()
+    prof = clip.get("audio_profile") or {}
+    audio = []
+    if prof.get("laughs"):
+        audio.append(f"{len(prof['laughs'])} tawa")
+    if prof.get("pct") is not None:
+        audio.append(f"energi suara {float(prof['pct']):.0f}/100")
+    return (f"#{i} [{float(clip['end']) - float(clip['start']):.0f} dtk] hook: {clip.get('hook_text', '')}\n"
+            f"   isi: {rv.get('summary') or clip.get('reason', '')}\n"
+            + (f"   terlihat di layar: {vis.get('what')}\n" if vis.get("what") else "")
+            + (f"   suara: {', '.join(audio)}\n" if audio else "")
+            + f"   kutipan: \"{text[:320]}{'…' if len(text) > 320 else ''}\"")
+
+
+def rank_clips(clips: List[Dict], source_title: str = "") -> bool:
+    """Urutkan semua kandidat sekaligus (bandingkan satu sama lain) → tier S/A/B/C + skor dari posisi. Mengubah klip di
+    tempat: score, review.tier/rank/rank_why. Return False bila AI gagal (skor rubrik dipakai apa adanya)."""
+    order = sorted(range(len(clips)), key=lambda i: float(clips[i]["start"]))  # urutan waktu = netral, bukan urutan skor
+    gaming = an().CONTENT_TYPE == "gaming_stream"
+    want = ("reaksi streamer paling kuat dan kejadian game paling seru/konyol/epik" if gaming
+            else "pernyataan/cerita paling mengejutkan, lucu, atau memancing debat")
+    prompt = (
+        (f"Video sumber: {source_title}\n" if source_title else "")
+        + f"Ini {len(clips)} kandidat klip pendek dari video yang SAMA. Kamu editor TikTok/Shorts berpengalaman yang "
+        "harus memilih mana yang diupload. Bandingkan SEMUANYA satu sama lain — jangan menilai sendiri-sendiri.\n\n"
+        + "\n".join(_rank_item(n, clips[i]) for n, i in enumerate(order, 1))
+        + f"\n\nUrutkan SEMUA kandidat dari yang paling berpotensi viral ke yang paling lemah. Utamakan {want}; "
+        "pertimbangkan juga apakah penonton baru langsung paham dan apakah 3 detik pertamanya menahan scroll.\n"
+        "Beri tier: S = pasti rame (ditonton ulang & dibagikan), A = bagus, B = layak upload tapi biasa, "
+        "C = lemah (lebih baik tidak diupload). Tier relatif terhadap kandidat lain, tapi tetap jujur: kalau semuanya "
+        "biasa, jangan paksa ada S; kalau banyak yang seru, boleh banyak S/A.\n"
+        "why: 1 kalimat singkat alasannya, seperti editor ngomong ke timnya.\n"
+        'Balas JSON: {"ranking": [{"id": 3, "tier": "S", "why": "..."}, ...]} — semua id muncul tepat sekali, '
+        "urutan array = urutan peringkat.")
+    raw = an()._call_selected_llm(prompt, max_tokens=4000, json_schema=_RANK_SCHEMA,
+                                  system="Kamu editor senior short-form video. Jawab hanya JSON.",
+                                  model=config.AI_REVIEW_MODEL)
+    rows = (ai.parse_json(raw) or {}).get("ranking") or []
+    ranked: List[Tuple[int, str, str]] = []
+    seen = set()
+    for r in rows:
+        try:
+            n = int(r.get("id"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        tier = str(r.get("tier") or "").strip().upper()[:1]
+        if 1 <= n <= len(order) and n not in seen and tier in _TIERS:
+            seen.add(n)
+            ranked.append((order[n - 1], tier, str(r.get("why") or "").strip()[:200]))
+    if len(ranked) < max(3, int(len(clips) * 0.6)):
+        logger.warning(f"Ranking pembanding tidak lengkap ({len(ranked)}/{len(clips)}) — skor rubrik dipakai")
+        return False
+    apply_ranking(clips, ranked)
+    count = {t: sum(1 for _, x, _ in ranked if x == t) for t in _TIERS}
+    logger.info(f"🏆 Ranking pembanding {len(ranked)} klip: " + ", ".join(f"{t}={n}" for t, n in count.items() if n)
+                + (f" · teratas: {ranked[0][2][:90]}" if ranked[0][2] else ""))
+    return True
+
+
+def apply_ranking(clips: List[Dict], ranked: List[Tuple[int, str, str]]) -> None:
+    """Skor dari posisi: tier memberi rentang (S 86–96, A 74–85, B 60–73, C 40–55), urutan di dalam tier menentukan
+    letak di rentang itu. Skor akhir = 75% ranking + 25% skor rubrik/sinyal (tetap ada pengaruh energi suara, chat,
+    penilaian visual). Kandidat yang tidak diurutkan AI ditaruh di bawah dan skornya tidak naik."""
+    by_tier: Dict[str, List[int]] = {}
+    for idx, tier, _ in ranked:
+        by_tier.setdefault(tier, []).append(idx)
+    position = {idx: (tier, members.index(idx), len(members)) for tier, members in by_tier.items() for idx in members}
+    why = {idx: w for idx, _, w in ranked}
+    overall = {idx: n for n, (idx, _, _) in enumerate(ranked, 1)}
+    for idx, clip in enumerate(clips):
+        rv = clip.setdefault("review", {})
+        if idx not in position:
+            rv["tier"] = None
+            clip["score"] = round(min(float(clip["score"]), _TIERS["B"][0]), 1)
+            continue
+        tier, pos, size = position[idx]
+        lo, hi = _TIERS[tier]
+        rank_score = hi - (hi - lo) * (pos / max(1, size - 1) if size > 1 else 0.0)
+        clip["score"] = round(0.75 * rank_score + 0.25 * float(clip["score"]), 1)
+        rv.update(tier=tier, rank=overall[idx], rank_why=why[idx])
+        if why[idx]:
+            clip["reason"] = f"{_TIER_NAME[tier].capitalize()}: {why[idx]}"[:160]
+    # campuran 25% skor lama bisa membuat peringkat #2 sedikit di bawah #3 (uji nyata: A 68,6 vs B 68,7) → paksa urut
+    prev = None
+    for idx, _, _ in ranked:
+        if prev is not None and clips[idx]["score"] >= prev:
+            clips[idx]["score"] = round(prev - 0.1, 1)
+        prev = clips[idx]["score"]
+
+
 def an():
     from . import analyzer
     return analyzer
@@ -315,9 +452,11 @@ def _num(v, default=0.0) -> float:
         return default
 
 
-def rubric_score(d: Dict) -> float:
-    return 10 * (0.22 * _num(d.get("standalone")) + 0.26 * _num(d.get("hook")) + 0.26 * _num(d.get("payoff"))
-                 + 0.14 * _num(d.get("emotion")) + 0.12 * _num(d.get("clarity")))
+def rubric_score(d: Dict, gaming: Optional[bool] = None) -> float:
+    if gaming is None:
+        gaming = an().CONTENT_TYPE == "gaming_stream"
+    w = _WEIGHTS_GAMING if gaming else _WEIGHTS_TALK
+    return 10 * sum(weight * _num(d.get(key)) for key, weight in w.items())
 
 
 def _first_words(text: str, n: int) -> str:
@@ -448,7 +587,8 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
         return clips[:limit]
     pool = clips[:min(len(clips), limit + max(4, limit // 2))]
     workers = max(1, int(getattr(config, "AI_RERANK_WORKERS", 4)))
-    logger.info(f"🎞️ Editor-AI meninjau {len(pool)} kandidat klip (rubrik: standalone, hook, payoff, emosi, kejelasan)…")
+    rubric = "reaksi, kejadian, hook, standalone, kejelasan" if an().CONTENT_TYPE == "gaming_stream"         else "standalone, hook, payoff, emosi, kejelasan"
+    logger.info(f"🎞️ Editor-AI meninjau {len(pool)} kandidat klip (rubrik: {rubric})…")
     with ThreadPoolExecutor(max_workers=workers) as ex:
         results = list(ex.map(lambda c: _review_one(c, transcript, source_title), pool))
     # v6.8: live/gaming → Editor-AI juga MELIHAT 4 frame tiap kandidat (nilai ada di layar, bukan hanya di ucapan)
@@ -521,6 +661,7 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
         clip["ai_packaged_by"] = f"editor-review:{config.AI_PROVIDER}/{config.LLM_MODEL}"
         clip["review"] = {
             "status": "reviewed", "verdict": verdict, "rubric": round(rub, 1),
+            "summary": str(d.get("summary") or "")[:300],  # momen utama (dipakai penulis paket judul)
             "standalone": _num(d.get("standalone")), "hook": _num(d.get("hook")), "payoff": _num(d.get("payoff")),
             "emotion": _num(d.get("emotion")), "clarity": _num(d.get("clarity")),
             "problems": [str(p) for p in (d.get("problems") or [])][:5],
@@ -530,6 +671,11 @@ def review_clips(clips: List[Dict], transcript: List[Dict], limit: int, source_t
         }
         kept.append(clip)
     logger.info(f"🎞️ Editor-AI: {len(kept)} lolos, {rejected} ditolak, {trimmed} batasnya dirapikan")
+    if getattr(config, "AI_COMPARE_RANKING", True) and len(kept) >= 3:
+        try:
+            rank_clips(kept, source_title)
+        except Exception as exc:  # noqa: BLE001 - ranking opsional; skor rubrik tetap dipakai
+            logger.warning(f"Ranking pembanding dilewati: {str(exc)[:160]}")
     kept = an()._remove_overlapping_clips(sorted(kept, key=lambda c: c["score"], reverse=True))
     kept = an()._remove_topic_duplicates(kept)
     return kept[:limit]

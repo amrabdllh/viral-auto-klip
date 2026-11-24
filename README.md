@@ -139,6 +139,7 @@ python tests\test_preupload.py          # pra-unggah jadwal bawaan platform + ja
 python tests\test_transcript_cache.py   # transkrip dipakai ulang saat "Ulangi" (tanpa bayar ElevenLabs lagi)
 python tests\test_ai_gate.py            # gateway AI lokal dibatasi AI_LOCAL_PARALLEL panggilan bersamaan
 python tests\test_render_progress.py    # progres "Render n/N" + tombol Batal berlaku saat render
+python tests\test_editor_ranking.py     # rubrik live gaming + ranking pembanding S/A/B/C seperti editor manusia
 ```
 
 ## Kebutuhan

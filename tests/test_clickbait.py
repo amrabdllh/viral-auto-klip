@@ -78,6 +78,21 @@ check("GTA 6 dari judul 'VI' lolos pemeriksa angka",
       clickbait._rank([{"thumb": "GTA 6 BIKIN KAGET!", "title": "GTA 6 bikin kaget semua", "hook": "Lihat ini"}],
                       [{"i": 0, "jelas": 9, "penasaran": 9, "sinkron": 9, "jujur": True}], "isi klip GTA VI 6") != [])
 
+# Judul harus tentang MOMEN UTAMA (ringkasan Editor-AI + yang terlihat di layar), bukan ucapan sampingan
+prompts.clear()
+focus_clip = {"transcript": TX, "ai_title": "lama", "thumb_text": "lama", "hook_text": "lama",
+              "review": {"summary": "Mobil dicuri pakai slim jim dalam 3 detik", "visual": {"what": "pintu mobil kebuka"},
+                         "rank_why": "cepat & bikin kaget"}}
+clickbait.write(focus_clip, "GTA VI")
+check("penulis & juri menerima momen utama", len(prompts) == 2 and all("MOMEN UTAMA" in p and "slim jim dalam 3 detik" in p
+                                                                     and "pintu mobil kebuka" in p for p in prompts))
+check("tanpa data Editor-AI: prompt tetap jalan tanpa blok momen", "MOMEN UTAMA" not in clickbait.main_moment({}))
+side = clickbait._rank([{"thumb": "SLIM JIM SAKTI?!", "title": "NYOLONG pakai SLIM JIM?!", "hook": "Lihat ini"},
+                        {"thumb": "TARIKAN MOBIL GILA", "title": "Tarikan mobilnya gila", "hook": "Gas pol"}],
+                       [{"i": 0, "jelas": 8, "penasaran": 8, "sinkron": 9, "tepat": 9, "jujur": True},
+                        {"i": 1, "jelas": 9, "penasaran": 9, "sinkron": 9, "tepat": 3, "jujur": True}], TX)
+check("paket yang membahas hal sampingan (tepat < 6) ditolak", [p["thumb"] for p in side] == ["SLIM JIM SAKTI?!"])
+
 # Transkrip (ElevenLabs) menulis angka dengan kata; judul AI memakai digit → tetap dianggap diucapkan.
 # Dulu 9 dari 30 klip uji nyata jatuh ke judul mentah karena "angka tidak diucapkan".
 from core.editor_review import numbers_supported  # noqa: E402
