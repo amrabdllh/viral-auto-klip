@@ -78,5 +78,15 @@ check("GTA 6 dari judul 'VI' lolos pemeriksa angka",
       clickbait._rank([{"thumb": "GTA 6 BIKIN KAGET!", "title": "GTA 6 bikin kaget semua", "hook": "Lihat ini"}],
                       [{"i": 0, "jelas": 9, "penasaran": 9, "sinkron": 9, "jujur": True}], "isi klip GTA VI 6") != [])
 
+# Transkrip (ElevenLabs) menulis angka dengan kata; judul AI memakai digit → tetap dianggap diucapkan.
+# Dulu 9 dari 30 klip uji nyata jatuh ke judul mentah karena "angka tidak diucapkan".
+from core.editor_review import numbers_supported  # noqa: E402
+for claim, said, ok in [("29 KG?!", "kanan kiri dua puluh sembilan kilo", True), ("Pull up 5x", "pull up lima kali", True),
+                        ("61% bocil", "enam puluh satu persen", True), ("Rp1.000 doang", "seribu doang", True),
+                        ("12 polisi", "dua belas polisi", True), ("150 juta", "seratus lima puluh juta", True),
+                        ("3000", "tiga ribu", True), ("100 kali", "lima kali", False), ("7 bintang", "bintang lima", False),
+                        ("5 menit", "dua tiga menit", False)]:
+    check(f"angka terucap: {claim!r} ← {said!r} = {ok}", numbers_supported(claim, said) is ok)
+
 print("\nSemua uji paket judul/thumbnail/hook lulus" if not fails else f"\nGAGAL: {len(fails)} uji")
 sys.exit(1 if fails else 0)

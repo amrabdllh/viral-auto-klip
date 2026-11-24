@@ -88,9 +88,76 @@ def transcribe(ctx: JobContext, video: str, params: Dict, pct: int = 20) -> tupl
     dev, compute = whisper_device(params)
     engine = {"elevenlabs": f"ElevenLabs Scribe ({config.ELEVENLABS_STT_MODEL})", "groq": "Groq Whisper (cloud)"}.get(
         dev, f"Whisper {params.get('whisper_model') or config.WHISPER_MODEL} ({'CPU' if dev == 'cpu' else 'GPU'})")
+    model = params.get("whisper_model") or config.WHISPER_MODEL
+    cache = _transcript_cache_path(video, dev, model)
+    if cache is not None and cache.exists():
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            if data.get("transcript"):
+                ctx.log(f"Transkrip dipakai ulang dari cache ({len(data['transcript'])} segmen) — tanpa biaya {engine}")
+                return data["transcript"], {**(data.get("info") or {}), "cached": True}
+        except (OSError, ValueError):
+            pass
     ctx.progress(pct, "Transkripsi", f"{engine} mentranskrip ucapan…")
-    return transcribe_video(video, model_name=params.get("whisper_model") or config.WHISPER_MODEL,
-                            word_timestamps=True, device=dev, compute_type=compute)
+    transcript, info = transcribe_video(video, model_name=model, word_timestamps=True, device=dev, compute_type=compute)
+    if cache is not None and transcript:
+        # job yang gagal/terputus setelah tahap ini ("Ulangi") tidak membayar ElevenLabs/Groq lagi
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps({"transcript": transcript, "info": info}, ensure_ascii=False, default=str),
+                             encoding="utf-8")
+        except OSError as exc:
+            logger.warning(f"Cache transkrip gagal disimpan: {exc}")
+    return transcript, info
+
+
+class _analyzer_progress:
+    """Selama analisis (bisa 5–10 menit untuk live berjam-jam) teruskan log tahapan core.analyzer ke log & status
+    job, supaya UI tidak tampak macet di 42%. Job klip berjalan satu per satu di worker, jadi log modul analyzer
+    selama blok ini praktis milik job ini (Klip Live di latar bisa ikut menulis — hanya teks info, tidak berbahaya)."""
+
+    def __init__(self, ctx: JobContext):
+        self.ctx, self.sink = ctx, None
+
+    def _write(self, msg) -> None:
+        text = re.sub(r"^[^\w(]+", "", str(msg.record["message"])).strip()[:220]
+        if not text:
+            return
+        try:
+            self.ctx.log(text)
+            db.update_job(self.ctx.id, message=text[:140])
+        except Exception:  # noqa: BLE001 - laporan progres tidak boleh menggagalkan analisis
+            pass
+
+    def __enter__(self):
+        self.sink = logger.add(self._write, level="INFO", format="{message}",
+                               filter=lambda r: r["name"] in ("core.analyzer", "core.audio_signals", "core.editor_review")
+                               and r["level"].no >= 20)
+        return self
+
+    def __exit__(self, *exc):
+        if self.sink is not None:
+            logger.remove(self.sink)
+        return False
+
+
+def _transcript_cache_path(video: str, dev: str, model: str) -> Optional[Path]:
+    """Kunci = file sumber (path, ukuran, sidik isi 1 MB awal + 1 MB akhir) + mesin + model + bahasa.
+    BUKAN mtime: unduhan yang memakai cache sumber menyentuh file itu (penanda LRU), jadi mtime berubah tiap job."""
+    import hashlib
+    try:
+        size = Path(video).stat().st_size
+        h = hashlib.sha1()
+        with open(video, "rb") as fh:
+            h.update(fh.read(1 << 20))
+            if size > 2 << 20:
+                fh.seek(-(1 << 20), 2)
+                h.update(fh.read(1 << 20))
+    except OSError:
+        return None
+    key = "|".join([str(Path(video).resolve()), str(size), h.hexdigest(), str(dev), str(model),
+                    str(getattr(config, "WHISPER_LANGUAGE", "") or ""), str(getattr(config, "ELEVENLABS_STT_MODEL", ""))])
+    return db.DATA_DIR / "source_cache" / "transcripts" / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.json"
 
 
 def register_clips(ctx: JobContext, clips: List[Dict], source: str) -> None:
@@ -103,10 +170,10 @@ def register_clips(ctx: JobContext, clips: List[Dict], source: str) -> None:
 
 
 def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> None:
-    for c in clips:
+    def _one(c: Dict) -> None:
         try:
             src = c["file_path"]
-            tmp = str(Path(src).with_name("_branded.mp4"))
+            tmp = str(Path(src).with_name("_branded.mp4"))  # folder tiap klip terpisah → aman paralel
             out = apply_brand(src, tmp, force=force)
             if out != src:
                 Path(out).replace(src)
@@ -116,6 +183,16 @@ def brand_clips(ctx: JobContext, clips: List[Dict], force: Optional[bool]) -> No
                     subtitle_live.mark_branded(src, force)
         except Exception as exc:
             ctx.log(f"Logo Brand Kit gagal di {Path(c['file_path']).name}: {exc}")
+
+    if not clips:
+        return
+    if len(clips) > 1:
+        ctx.log(f"Brand Kit: memasang logo/penutup di {len(clips)} klip…")
+    # dulu berurutan: 1 encode ulang per klip (±40 dtk × 30 klip ≈ 20 mnt). Paralel sebanyak render klip (NVENC).
+    from concurrent.futures import ThreadPoolExecutor
+    workers = max(1, min(len(clips), int(getattr(config, "PARALLEL_CLIPS", 3) or 1)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(_one, clips))
 
 
 def enforce_clip_duration(clips: List[Dict], *, tolerance: float = 0.75,
@@ -487,7 +564,8 @@ def clip_quick(ctx: JobContext) -> Dict:
     ctx.progress(42, "Analisis AI", f"{config.AI_PROVIDER}/{config.LLM_MODEL} mencari momen viral…" if llm else "Skor lokal (AI nonaktif)")
     focus = parse_focus(p.get("keyword") or p.get("specific_moments"))
     info["focus_moments"] = focus
-    clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video, auto_count=auto_mode)
+    with _analyzer_progress(ctx):
+        clips_data = analyze_viral_potential(transcript, info, use_llm=llm, video_path=video, auto_count=auto_mode)
     clips_data = enforce_clip_duration(clips_data, max_available=float(info.get("duration") or 0))
     if p.get("categories"):
         clips_data = [c for c in clips_data if c.get("category") in p["categories"]]
@@ -537,17 +615,24 @@ def clip_quick(ctx: JobContext) -> Dict:
         # Filter per klip (transkrip 15 menit terlalu panjang untuk satu panggilan LLM):
         # buang dialog game dari caption, biarkan kategori & durasi dari analyzer.
         # Tetap jalan walau pemilihan momen memakai skor lokal; gagal → segmen apa adanya.
-        for c in selected:
-            segs = c.get("subtitle_segments") or []
-            if not segs:
-                continue
+        # Paralel (dulu berurutan: ±50 dtk/klip × 30 klip); gateway lokal tetap dibatasi ai_providers.provider_gate.
+        todo = [c for c in selected if c.get("subtitle_segments")]
+        if todo:
+            ctx.progress(50, "Filter dialog game", f"Memisahkan ucapan streamer dari dialog game di {len(todo)} klip…")
+
+        def _filter_one(c: Dict) -> None:
             try:
                 kept = filter_streamer_segments(
-                    segs, context=str(c.get("ai_title") or c.get("hook_text") or info.get("title") or ""))
+                    c["subtitle_segments"], context=str(c.get("ai_title") or c.get("hook_text") or info.get("title") or ""))
                 c["subtitle_segments"] = kept
                 c["words"] = [w for s in kept for w in (s.get("words") or [])]
             except Exception:  # noqa: BLE001 - filter opsional
                 pass
+
+        if todo:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=max(1, min(len(todo), int(getattr(config, "AI_RERANK_WORKERS", 4))))) as pool:
+                list(pool.map(_filter_one, todo))
     if selected and not p.get("campaign"):
         from . import clickbait
         ctx.progress(56, "Judul & thumbnail", f"Menulis paket judul + thumbnail + hook yang sinkron untuk {len(selected)} klip…")
@@ -561,7 +646,24 @@ def clip_quick(ctx: JobContext) -> Dict:
         from . import live
         clips = live._render_campaign_window(video, selected, ctx.dir, p, 0.0)
     else:
-        clips = process_clips(video, selected, ctx.dir, **render_options(p))
+        t_render = time.time()
+
+        def _render_progress(done: int, total: int, clip: Optional[Dict]) -> None:
+            # 58% → 90% selama render (dulu diam di 58% sampai semua klip jadi, bisa 2 jam lebih)
+            if ctx.cancel_requested():  # tombol Batal kini berlaku saat render (dulu baru setelah semua klip jadi)
+                from .clipper import RenderCancelled
+                raise RenderCancelled()
+            left = (time.time() - t_render) / max(1, done) * (total - done)
+            db.update_job(ctx.id, progress=58 + int(32 * done / max(1, total)),
+                          message=f"Render {done}/{total} klip" + (f" — sisa ±{max(1, round(left / 60))} menit" if done < total else ""))
+            ctx.log(f"Render {done}/{total}: {Path(clip['file_path']).name if clip and clip.get('file_path') else 'gagal'}")
+
+        from .clipper import RenderCancelled
+        from .jobs import JobCancelled
+        try:
+            clips = process_clips(video, selected, ctx.dir, **render_options(p), on_progress=_render_progress)
+        except RenderCancelled:
+            raise JobCancelled()
     brand_clips(ctx, clips, p.get("brand_kit"))
     ai_thumbnails(ctx, clips, video, p, info.get("content_type", ""), str(info.get("title") or ""))
     ctx.progress(92, "Publish", "Paket upload & metadata")

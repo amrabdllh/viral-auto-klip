@@ -262,7 +262,10 @@ def _analyze_viral_potential(transcript_segments: List[Dict], video_info: Dict, 
         clips = _auto_quality_gate(clips, farm=auto_count == "farm")
     clips = clips[:config.MAX_CLIPS_PER_VIDEO]
 
-    detected_niche = detect_niche(" ".join(c.get("transcript", c.get("text", "")) for c in clips))
+    # Live/gaming sudah terdeteksi dari sumbernya; tebakan kata kunci di obrolan berjam-jam selalu menemukan
+    # "uang/modal/rugi" → dulu semua klip live GTA berlabel "finance" (ikut masuk prompt AI packaging).
+    detected_niche = "gaming" if CONTENT_TYPE == "gaming_stream" else \
+        detect_niche(" ".join(c.get("transcript", c.get("text", "")) for c in clips))
     for clip in clips:
         clip["niche"] = detected_niche
 

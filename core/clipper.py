@@ -141,9 +141,11 @@ def process_clips(
     caption_language: str = "",
     source_credit: str = "",
     content_type: str = "",
+    on_progress=None,
 ) -> List[Dict]:
     """
     Process each viral clip: extract, reframe, caption, encode.
+    on_progress(selesai, total, klip|None): dipanggil tiap klip selesai (gagal = None) — untuk progres job di UI.
     v3: paralel (ThreadPoolExecutor), scene-snap boundaries, peak-moment thumbnail.
     v6.4: layout "auto" mendeteksi facecam streamer → split (wajah atas, gameplay bawah).
     Returns list of processed clip info with file paths.
@@ -244,25 +246,47 @@ def process_clips(
                 pool.submit(_process_single_clip, idx, clip_info, output_dir, style, video_path, video_info, scene_cuts, opts): idx
                 for idx, clip_info in enumerate(clips_data)
             }
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Clipping"):
-                idx = futures[future]
-                try:
-                    _, clip = future.result()
-                except Exception as exc:
-                    logger.exception(f"Parallel clip worker {idx} crashed: {exc}")
-                    clip = None
-                results[idx] = clip
-                _write_metadata(output_dir, video_path, results, target_platform, len(clips_data))
+            try:
+                for future in tqdm(as_completed(futures), total=len(futures), desc="Clipping"):
+                    idx = futures[future]
+                    try:
+                        _, clip = future.result()
+                    except Exception as exc:
+                        logger.exception(f"Parallel clip worker {idx} crashed: {exc}")
+                        clip = None
+                    results[idx] = clip
+                    _write_metadata(output_dir, video_path, results, target_platform, len(clips_data))
+                    _report_progress(on_progress, len(results), len(clips_data), clip)
+            except RenderCancelled:
+                for f in futures:  # klip yang belum mulai tidak dirender; yang sedang jalan dituntaskan
+                    f.cancel()
+                raise
     else:
         for idx, clip_info in enumerate(tqdm(clips_data, desc="Clipping")):
             _, clip = _process_single_clip(idx, clip_info, output_dir, style, video_path, video_info, scene_cuts, opts)
             results[idx] = clip
             _write_metadata(output_dir, video_path, results, target_platform, len(clips_data))
+            _report_progress(on_progress, len(results), len(clips_data), clip)
 
     processed_clips = [results[idx] for idx in sorted(results) if results[idx] is not None]
     metadata_path = _write_metadata(output_dir, video_path, results, target_platform, len(clips_data), done=True)
     logger.success(f"🎉 All clips processed! Metadata saved to {metadata_path}")
     return processed_clips
+
+
+class RenderCancelled(Exception):
+    """Dilempar callback on_progress untuk menghentikan render (job dibatalkan)."""
+
+
+def _report_progress(on_progress, done: int, total: int, clip: Optional[Dict]) -> None:
+    if on_progress is None:
+        return
+    try:
+        on_progress(done, total, clip)
+    except RenderCancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001 - laporan progres tidak boleh menghentikan render klip lain
+        logger.debug(f"Laporan progres render gagal: {exc}")
 
 
 def _write_metadata(output_dir: Path, video_path: str, results: Dict[int, Optional[Dict]], target_platform: str,
@@ -2100,20 +2124,30 @@ def _plan_hook_styles(clips: List[Dict]) -> None:
     """(v7) Pilih gaya hook untuk semua klip SEBELUM render (bisa paralel) agar gaya antar-klip bervariasi."""
     if not config.ENABLE_BROLL:
         return
+    from concurrent.futures import ThreadPoolExecutor
     from . import hook_styles
     recent: List[str] = []
-    for c in clips:
-        if c.get("no_hook_card") or not c.get("hook_text"):
-            continue
+    todo = [c for c in clips if not c.get("no_hook_card") and c.get("hook_text")]
+
+    def _one(c: Dict, seen: List[str]) -> Optional[Dict]:
         try:
-            p = hook_styles.plan(c, recent)
+            return hook_styles.plan(c, seen)
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"Rencana gaya hook dilewati: {str(exc)[:160]}")
-            p = None
-        if p:
-            p["for_hook"] = c.get("hook_text")
-            c["hook_plan"] = p
-            recent.append(p["style"])
+            return None
+
+    # Dulu berurutan (1 panggilan AI per klip → 30 klip ±20 mnt sebelum render mulai). Kini per kelompok paralel:
+    # kelompok berikutnya tetap melihat gaya yang sudah dipakai, jadi variasi antar-klip terjaga.
+    group = max(1, min(4, int(getattr(config, "AI_RERANK_WORKERS", 4))))
+    with ThreadPoolExecutor(max_workers=group) as pool:
+        for i in range(0, len(todo), group):
+            batch = todo[i:i + group]
+            seen = list(recent)
+            for c, p in zip(batch, pool.map(lambda c: _one(c, seen), batch)):
+                if p:
+                    p["for_hook"] = c.get("hook_text")
+                    c["hook_plan"] = p
+                    recent.append(p["style"])
     if recent:
         logger.info(f"  Gaya hook: {', '.join(recent)}")
 

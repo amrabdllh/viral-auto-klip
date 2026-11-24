@@ -67,6 +67,7 @@ def _start_background_workers():
 # Dulu CORS "*" -> website APA PUN yang kamu buka bisa memanggil localhost:8000.
 # Sekarang hanya halaman dari localhost/127.0.0.1 (UI di /app) yang diizinkan.
 LOCAL_ORIGIN_RE = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+LOCAL_HOST_RE = r"^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=LOCAL_ORIGIN_RE,
@@ -82,6 +83,11 @@ async def block_foreign_writes(request, call_next):
     Request tanpa header Origin (CLI, curl, skrip lokal) tetap diizinkan."""
     import re as _re
     from fastapi.responses import JSONResponse
+    # DNS rebinding: domain asing yang di-resolve ke 127.0.0.1 tetap membawa Host aslinya → tolak semua method.
+    host = (request.headers.get("host") or "").lower()
+    if host and not _re.match(LOCAL_HOST_RE, host):
+        return JSONResponse({"detail": "Ditolak: host tidak dikenal. Buka UI lewat http://localhost:8000/app."},
+                            status_code=403)
     origin = request.headers.get("origin")
     if request.method not in ("GET", "HEAD", "OPTIONS") and origin and not _re.match(LOCAL_ORIGIN_RE, origin):
         return JSONResponse(

@@ -288,6 +288,9 @@ REVIEW_MIN_PAYOFF = float(os.getenv("REVIEW_MIN_PAYOFF", "5"))          # klip t
 REVIEW_MIN_SCORE = float(os.getenv("REVIEW_MIN_SCORE", "52"))           # skor rubrik minimum (0-100)
 AI_MOMENT_BONUS = float(os.getenv("AI_MOMENT_BONUS", "6"))  # bonus peringkat untuk momen pilihan AI (awal/akhir utuh)
 AI_RERANK_WORKERS = int(os.getenv("AI_RERANK_WORKERS", "6"))  # panggilan rerank LLM paralel
+# Gateway AI di laptop sendiri (koneksi ke localhost / Ollama) dibatasi sekian panggilan bersamaan — lebih dari itu
+# gateway menjawab 503 & melambat. 0 = tanpa batas. API cloud tidak terpengaruh.
+AI_LOCAL_PARALLEL = int(os.getenv("AI_LOCAL_PARALLEL", "4"))
 AI_MOMENT_FINDER = os.getenv("AI_MOMENT_FINDER", "1").lower() in ("1", "true", "yes")
 AI_MOMENT_CHUNK_CHARS = int(os.getenv("AI_MOMENT_CHUNK_CHARS", "24000"))  # ukuran potongan transkrip per panggilan
 AI_MOMENT_MAX_CHUNKS = int(os.getenv("AI_MOMENT_MAX_CHUNKS", "30"))       # batas panggilan per video; bila lebih,

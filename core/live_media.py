@@ -616,9 +616,13 @@ def _write_playlist(path: Path, segments: list[_Segment]) -> None:
 
 
 def _tool(name: str) -> str:
-    # Modul ini tinggal di core/, sedangkan binary ada di <repo>/tools/ffmpeg.
-    bundled = Path(__file__).resolve().parents[1] / "tools" / "ffmpeg" / (name + (".exe" if os.name == "nt" else ""))
-    return str(bundled) if bundled.is_file() else shutil.which(name) or name
+    # Modul ini tinggal di core/; binary bawaan repo ada di <repo>/ffmpeg/bin (start.bat) atau <repo>/tools/ffmpeg.
+    root = Path(__file__).resolve().parents[1]
+    exe = name + (".exe" if os.name == "nt" else "")
+    for bundled in (root / "ffmpeg" / "bin" / exe, root / "tools" / "ffmpeg" / exe):
+        if bundled.is_file():
+            return str(bundled)
+    return shutil.which(name) or name
 
 
 def _run_tool(tool: str, args: list[str], cwd: Path, timeout: int) -> bytes:
