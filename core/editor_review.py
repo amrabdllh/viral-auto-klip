@@ -221,11 +221,15 @@ def _prompt(clip: Dict, transcript: List[Dict], source_title: str, feedback: str
         "(game/tokoh/benda), bukan potongan ucapan, slang, atau julukan yang hanya nyambung setelah menonton "
         "(buruk: 'NGGAK SLOP, MEN', 'UFO NGULIK IBU'; bagus: 'LUCIA GENDONG JASON?!', 'UFO BENERAN MUNCUL?!'). "
         "thumb_alternatives: 2 opsi thumb_text lain dengan teknik berbeda.\n"
-        "title: maks 70 karakter, kata paling memancing di depan, tanpa awalan kategori; format bagus: "
-        "'X, tapi Y', 'Kenapa …?', kutipan berani dalam tanda petik. title_quote: kutipan PERSIS dari klip yang mendasarinya.\n"
-        f"caption: maks {config.UPLOAD_CAPTION_MAX_CHARS} karakter. Baris pertama = kalimat penasaran (BUKAN ringkasan), "
-        "lalu 1–2 kalimat konteks yang jujur, akhiri pertanyaan yang memancing orang berdebat di komentar.\n"
-        f"hashtags: {config.MAX_HASHTAGS} hashtag relevan (campuran spesifik topik + umum). "
+        "title: SINGKAT seperti teks thumbnail — 4–8 kata, maks 50 karakter, tanpa hashtag & tanpa awalan kategori. "
+        "Dibaca 1 detik saat scroll: subjek yang dikenal + kejadian + pemicu penasaran (celah informasi, kontras, reaksi "
+        "ekstrem, pertanyaan). Kata paling memancing di depan. Contoh: 'Lucia Malah Gendong Jason?!', 'Kirain Pesawat "
+        "Jatuh, Ternyata…'. title_quote: kutipan PERSIS dari klip yang mendasarinya.\n"
+        f"caption: SATU kalimat pendek, maks {config.UPLOAD_CAPTION_MAX_CHARS} karakter, TIDAK mengulang judul: pertanyaan "
+        "atau ajakan yang memancing orang berkomentar (mis. 'Kalian tim mana?'). Tanpa hashtag.\n"
+        f"hashtags: {config.MAX_HASHTAGS} kandidat hashtag, urut PALING RELEVAN dulu: nama game/tokoh/kreator/topik spesifik "
+        "dulu, baru niche (mis. #gamingindonesia), terakhir umum. Tanpa spasi/tanda baca; jangan mengarang hashtag yang "
+        "tidak dipakai orang (kandidat akan diriset jumlah videonya, yang mati dibuang). "
         "hook_alternatives: 2 hook lain dengan teknik berbeda (juga berdasar isi klip).\n"
         "Bahasa sama dengan transkrip, gaya natural kreator. Tulis hook/judul/caption dengan suara kreator atau kutipan "
         "langsung; JANGAN memakai kata 'pembicara', 'narator', atau 'dia' sebagai subjek."
@@ -496,7 +500,7 @@ def _apply_fallback(clip: Dict, d: Dict, problems: List[str], clip_text: str) ->
     if any(p.startswith("hook") for p in problems):
         hook = _first_words(d.get("hook_quote") or clip_text, 10)
     if any(p.startswith("judul") for p in problems):
-        title = _first_words(d.get("title_quote") or hook or clip_text, 12)
+        title = _first_words(d.get("title_quote") or hook or clip_text, 8)
         title = title[:1].upper() + title[1:]
     if any(p.startswith("caption") for p in problems):
         # cadangan tetap memancing: hook + kutipan asli dari klip + pertanyaan, tanpa klaim karangan

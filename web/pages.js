@@ -952,13 +952,18 @@ PAGES.chat = { render(view) {
 
 /* ================================================================== AUTO UPLOAD */
 PAGES.upload = { render(view) {
+  const SPICKS = [{ v: "", l: "Pilih cepat…" }, { v: "all", l: "Semua" }, { v: "done", l: "Sudah tayang" }, { v: "failed", l: "Gagal" },
+    { v: "waiting", l: "Belum diunggah (menunggu & dijeda)" }, { v: "scheduled", l: "Terjadwal di platform" }, { v: "none", l: "Kosongkan pilihan" }];
   view.innerHTML = `<div class="page">${pageHead("Jadwal Upload", "Jadwalkan klip ke YouTube Shorts & TikTok. Server mengunggah otomatis saat jadwal tiba (laptop harus menyala).",
-    UI.btn("Jadwalkan klip", { ico: "plus", id: "addOne" }) + UI.btn("Smart Cadence", { ico: "calendar", kind: "primary", id: "addBulk" }))}
+    UI.btn("Jadwalkan klip", { ico: "plus", id: "addOne" }) + UI.btn("Jadwalkan banyak klip", { ico: "calendar", kind: "primary", id: "addBulk" }))}
     <div class="cols-2" id="pf"></div>
     <div id="ins"></div>
     ${UI.panel({ head: `<div class="row nw">${UI.btn("", { ico: "left", size: "sm", title: "Bulan sebelumnya", id: "prev" })}<h2 id="mon" style="min-width:150px;text-align:center"></h2>${UI.btn("", { ico: "right", size: "sm", title: "Bulan berikutnya", id: "next" })}${UI.btn("Hari ini", { size: "sm", kind: "ghost", id: "today" })}</div><span class="spacer"></span><div class="row" id="counts"></div>`,
       bodyCls: "flush", body: `<div class="cal" id="cal"></div>` })}
-    ${UI.panel({ title: "Daftar jadwal", bodyCls: "flush", body: `<div class="table-wrap"><table><thead><tr><th>Klip</th><th>Platform</th><th>Waktu</th><th>Status</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>` })}</div>`;
+    ${UI.panel({ title: "Daftar jadwal", bodyCls: "flush", body: `<div class="row job-bulk" id="ssel"><span class="small muted" id="scount">0 dipilih</span>
+        <select id="spick" aria-label="Pilih cepat berdasarkan status">${UI.options(SPICKS, "")}</select><span class="spacer"></span>
+        ${UI.btn("Antrekan lagi", { ico: "play", size: "sm", attrs: 'data-bulk="resume"' })}${UI.btn("Jeda", { ico: "pause", size: "sm", attrs: 'data-bulk="pause"' })}${UI.btn("Hapus", { ico: "trash", size: "sm", attrs: 'data-bulk="delete"' })}</div>
+      <div class="table-wrap"><table><thead><tr><th style="width:34px"><input type="checkbox" id="sall" title="Pilih semua" aria-label="Pilih semua jadwal"></th><th>Klip</th><th>Platform</th><th>Waktu</th><th>Status</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>` })}</div>`;
   const pf = STATE.status?.platforms || {};
   // status sesi: dicek server tiap 3 jam & ±45 mnt sebelum upload (sekaligus menyegarkan cookie yang dirotasi situs)
   const checked = (s) => (s?.at ? ` · dicek ${new Date(s.at * 1000).toLocaleString("id-ID", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "");
@@ -974,18 +979,28 @@ PAGES.upload = { render(view) {
   // v6.8: jam upload otomatis hari ini + yang sudah dipelajari dari views 24 jam
   const WHY = { pending: ["Menunggu", ""], uploading: ["Mengunggah", "accent"], scheduled: ["Terjadwal di platform", "teal"], done: ["Tayang", "ok"], paused: ["Dijeda", "warn"] };
   const DT = { weekday: "hari kerja", weekend: "akhir pekan" };
+  const day = (t) => new Date(t * 1000).toLocaleDateString("id-ID", { day: "numeric", month: "short" });
   api("/api/upload-insights").then((d) => {
-    const jangkar = d.mode === "jangkar";
     $("#ins").innerHTML = UI.panel({ title: "Jam upload hari ini",
-      head: `${UI.pill(jangkar ? "Mode: jam jangkar" : "Mode: riset per hari", "teal")} ${UI.btn("Ubah", { size: "sm", kind: "ghost", href: "#settings" })}`,
-      sub: jangkar ? "Jam tetap tiap hari kerja & akhir pekan + 1 slot eksplorasi bergiliran (±1 jam), lalu beralih ke jam yang terbukti ramai untuk channel-mu"
-        : "Tiap hari diriset dulu (pola penonton Indonesia per hari + Shorts nyata di niche-mu), lalu bergeser ke jam yang terbukti ramai untuk channel-mu",
-      body: `<div class="cols-2">${Object.entries(d.platforms).map(([k, v]) => `<div><b class="small">${k === "youtube" ? "YouTube Shorts" : "TikTok"}</b>
-        <div class="row" style="margin:6px 0;flex-wrap:wrap">${v.today.length ? v.today.map((t) => UI.pill(`${t.time} · ${WHY[t.why]?.[0] || t.why}`, WHY[t.why]?.[1] || "")).join("") : '<span class="tiny muted">Tidak ada upload hari ini.</span>'}</div>
-        <p class="tiny ink2" style="margin:0 0 4px">Riset: ${esc(v.research || "")}</p>
+      head: UI.btn("Ubah jam di Pengaturan", { size: "sm", kind: "ghost", ico: "sliders", href: "#settings" }),
+      sub: "Atas: jam yang dipakai pengaturan sekarang. Bawah: jadwal yang benar-benar ada hari ini. Mengubah pengaturan hanya berlaku untuk klip yang dijadwalkan berikutnya.",
+      body: `<div class="cols-2">${Object.entries(d.platforms).map(([k, v]) => {
+        const r = v.rule || {};
+        const old = v.today.filter((t) => t.on_rule === false);
+        const extra = v.today.length > (r.per_day || 99);
+        const oldDays = [...new Set(old.map((t) => day(t.created)))].join(", ");
+        return `<div><b class="small">${k === "youtube" ? "YouTube Shorts" : "TikTok"}</b>
+        <p class="tiny muted" style="margin:6px 0 2px">Pengaturan sekarang · ${esc(r.label || "")}</p>
+        <div class="row" style="margin:0 0 2px;flex-wrap:wrap">${r.hours?.length ? r.hours.map((h) => `<span title="${esc(h.why)}">${UI.pill(h.time + (h.why.startsWith("eksplorasi") ? " · uji jam" : h.why.startsWith("terbukti") ? " · terbukti" : ""), h.why.startsWith("terbukti") ? "ok" : h.why.startsWith("eksplorasi") ? "warn" : "")}</span>`).join("")
+          : `<span class="tiny muted">${r.pending ? "Dihitung saat klip berikutnya dijadwalkan (riset jam belum ada)." : "Tidak ada jam yang cocok hari ini."}</span>`}</div>
+        <p class="tiny muted" style="margin:0 0 8px">${esc(r.note || "")}</p>
+        <p class="tiny muted" style="margin:0 0 2px">Terjadwal hari ini</p>
+        <div class="row" style="margin:0 0 4px;flex-wrap:wrap">${v.today.length ? v.today.map((t) => `<span title="${esc(t.title)}${t.on_rule === false ? `\nDibuat ${day(t.created)} dengan pengaturan lama` : ""}">${UI.pill(`${t.time} · ${WHY[t.why]?.[0] || t.why}${t.on_rule === false ? " · lama" : ""}`, WHY[t.why]?.[1] || "")}</span>`).join("") : '<span class="tiny muted">Tidak ada upload hari ini.</span>'}</div>
+        ${old.length || extra ? `<p class="tiny ink2" style="margin:0 0 6px">${old.length ? `${old.length} jadwal ditandai <b>lama</b> karena dibuat ${esc(oldDays)} sebelum pengaturan diubah` : `Ada ${v.today.length} upload, lebih dari maks ${r.per_day}/hari sekarang, karena dibuat sebelum pengaturan diubah`}${v.today.some((t) => ["scheduled", "done"].includes(t.why)) ? " — videonya sudah ada di platform, jadi jamnya tidak ikut pindah" : " — hapus lalu jadwalkan ulang bila ingin ikut jam baru"}.</p>` : ""}
+        ${r.source !== "akun" ? `<p class="tiny ink2" style="margin:0 0 4px">Riset: ${esc(v.research || "")}</p>` : ""}
         <p class="tiny muted" style="margin:0">${v.learning ? `Belajar aktif dari ${v.measured} upload (median ${fmtNum(v.median_views)} views 24 jam).` : `Mengumpulkan data: ${v.measured}/${v.needed} upload terukur.`}
         ${v.best.length ? " Jam terbaik: " + v.best.map((b) => `${String(b.hour).padStart(2, "0")}:00 ${DT[b.daytype]} (${b.score}×)`).join(", ") : ""}
-        ${k === "tiktok" && !d.tiktok_profile ? " Isi <a href='#settings'>Username TikTok</a> agar views TikTok bisa diukur." : ""}</p></div>`).join("")}</div>` });
+        ${k === "tiktok" && !d.tiktok_profile ? " Isi <a href='#settings'>Username TikTok</a> agar views TikTok bisa diukur." : ""}</p></div>`; }).join("")}</div>` });
   }).catch(() => {});
   let cursor = new Date(); cursor.setDate(1);
   let items = [];
@@ -1046,7 +1061,10 @@ PAGES.upload = { render(view) {
       if (s.status === "pending" && s.result?._preupload_error_at) out.push("Unggah lebih awal gagal — dicoba lagi otomatis");
       return out.map((t) => `<span class="tiny muted clip1" style="display:block">${t}</span>`).join("");
     };
-    $("#tb").innerHTML = groups.map((g) => `<tr>
+    for (const id of [...sel]) if (!items.some((s) => s.id === id)) sel.delete(id);
+    $("#tb").innerHTML = groups.map((g) => {
+      const ids = g.rows.map((s) => s.id), on = ids.filter((i) => sel.has(i)).length;
+      return `<tr data-ids="${ids.join(",")}" class="${on ? "selected" : ""}"><td><input type="checkbox" data-sel ${on === ids.length ? "checked" : ""} ${on && on < ids.length ? "data-part" : ""} aria-label="Pilih ${esc(g.title)}"></td>
       <td style="max-width:360px"><b class="clip1" style="display:block">${esc(g.title)}</b>
         <span class="tiny muted">${g.rows.length > 1 ? `1 klip · diunggah sekali ke ${g.rows.length} platform` : "1 klip"}</span>
         ${g.rows.map(resultLine).filter(Boolean).join("")}</td>
@@ -1055,12 +1073,70 @@ PAGES.upload = { render(view) {
       <td>${g.rows.map((s) => line(s, `<span class="pill ${STK[s.status] || ""}">${s.status === "uploading" ? '<span class="dot"></span>' : ""}${STL[s.status] || s.status}</span>`)).join("")}</td>
       <td class="r">${g.rows.map((s) => line(s, `<div class="btn-row" style="justify-content:flex-end;flex-wrap:nowrap">${!["done", "scheduled", "uploading"].includes(s.status) ? UI.btn("Upload sekarang", { size: "sm", attrs: 'data-a="now"' }) : ""}
         ${s.status === "pending" ? UI.btn("", { ico: "pause", size: "sm", kind: "ghost", title: "Jeda", attrs: 'data-a="pause"' }) : ["paused", "failed"].includes(s.status) ? UI.btn("", { ico: "play", size: "sm", kind: "ghost", title: "Antrekan lagi", attrs: 'data-a="resume"' }) : ""}
-        ${UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Hapus jadwal platform ini", attrs: 'data-a="del"' })}</div>`)).join("")}</td></tr>`).join("")
-      || `<tr><td colspan="5">${UI.empty("calendar", "Belum ada jadwal", "Klik Jadwalkan klip atau Smart Cadence untuk mulai.")}</td></tr>`;
+        ${UI.btn("", { ico: "trash", size: "sm", kind: "ghost", title: "Hapus jadwal platform ini", attrs: 'data-a="del"' })}</div>`)).join("")}</td></tr>`; }).join("")
+      || `<tr><td colspan="6">${UI.empty("calendar", "Belum ada jadwal", "Klik Jadwalkan klip atau Jadwalkan banyak klip untuk mulai.")}</td></tr>`;
+    $$("#tb [data-part]").forEach((c) => { c.indeterminate = true; });
+    count();
   }
+  // --- pilih banyak jadwal (satu centang = klip itu di semua platformnya)
+  const sel = new Set();
+  const count = () => {
+    $("#scount").textContent = `${sel.size} jadwal dipilih`;
+    const all = $("#sall"); all.checked = items.length > 0 && sel.size === items.length; all.indeterminate = sel.size > 0 && sel.size < items.length;
+    $$("#ssel [data-bulk]").forEach((b) => { b.disabled = !sel.size; });
+  };
+  $("#tb").addEventListener("change", (e) => {
+    if (!e.target.matches("[data-sel]")) return;
+    const tr = e.target.closest("[data-ids]");
+    tr.dataset.ids.split(",").forEach((i) => (e.target.checked ? sel.add(i) : sel.delete(i)));
+    tr.classList.toggle("selected", e.target.checked); count();
+  });
+  $("#sall").onchange = (e) => { sel.clear(); if (e.target.checked) items.forEach((s) => sel.add(s.id)); load().catch(fail); };
+  $("#spick").onchange = (e) => {
+    const v = e.target.value; e.target.value = "";
+    const match = { all: () => true, done: (s) => s.status === "done", failed: (s) => s.status === "failed",
+      waiting: (s) => ["pending", "paused"].includes(s.status), scheduled: (s) => s.status === "scheduled", none: () => false }[v];
+    if (!match) return;
+    sel.clear(); items.filter(match).forEach((s) => sel.add(s.id)); load().catch(fail);
+  };
+  const runBatch = async (action) => {
+    const r = await api("/api/schedules/batch", { body: { ids: [...sel], action } });
+    const verb = { delete: "dihapus", pause: "dijeda", resume: "diantrekan lagi" }[action];
+    const why = [...new Set(r.skipped.map((s) => s.reason))].join(", ");
+    toast(`${r.done.length} jadwal ${verb}` + (r.skipped.length ? ` · ${r.skipped.length} dilewati (${why})` : ""), !r.done.length);
+    if (action === "delete") sel.clear();
+    await load();
+  };
+  $("#ssel").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-bulk]"); if (!b || !sel.size) return;
+    const action = b.dataset.bulk, n = sel.size;
+    if (action !== "delete") return busy(b, () => runBatch(action).catch(fail));
+    const live = items.filter((s) => sel.has(s.id) && s.status === "scheduled").length;
+    const aired = items.filter((s) => sel.has(s.id) && s.status === "done").length;
+    const notes = [live && `<b>${live}</b> sudah diunggah dan akan tayang otomatis di platform — di sini hanya dihapus dari daftar. Untuk membatalkan tayangnya, hapus videonya di YouTube Studio / TikTok.`,
+      aired && `<b>${aired}</b> sudah tayang — videonya tetap ada di platform.`,
+      "Jadwal yang sedang diunggah dilewati."].filter(Boolean);
+    modal({ title: `Hapus ${n} jadwal?`, body: notes.map((t) => `<p class="small ink2">${t}</p>`).join(""),
+      foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn(`Hapus ${n} jadwal`, { kind: "primary", attrs: "data-ok" }) }, (m) => {
+      $("[data-ok]", m).onclick = (ev) => busy(ev.currentTarget, async () => { closeModal(); await runBatch("delete").catch(fail); });
+    });
+  });
   $("#tb").onclick = async (e) => {
     const b = e.target.closest("[data-a]"); if (!b) return;
-    const id = b.closest("tr").dataset.id;
+    // ID ada di .sched-line (satu per platform), bukan di <tr> — dulu terkirim "undefined" sehingga tombol tak berefek
+    const id = b.closest("[data-id]")?.dataset.id;
+    if (!id) return;
+    const st = items.find((s) => s.id === id)?.status;
+    if (b.dataset.a === "del" && ["scheduled", "done"].includes(st)) {
+      // video sudah ada di YouTube/TikTok — hapus di sini hanya membersihkan daftar, tidak menarik videonya
+      return confirmModal("Hapus dari daftar?", st === "scheduled"
+        ? "Video ini <b>sudah diunggah</b> dan akan tayang otomatis di platform. Menghapus di sini hanya menghapus dari daftar — untuk membatalkan tayangnya, hapus videonya langsung di YouTube Studio / TikTok."
+        : "Video ini sudah tayang. Menghapus di sini hanya menghapus dari daftar, videonya tetap ada di platform.",
+      "Hapus dari daftar", async () => {
+        try { await api(`/api/schedules/${id}`, { method: "DELETE" }); toast("Dihapus dari daftar"); } catch (err) { fail(err); }
+        load();
+      });
+    }
     await busy(b, async () => {
       try {
         if (b.dataset.a === "now") { const r = await api(`/api/schedules/${id}/run-now`, { body: {} }); toast(r.status === "done" ? "Upload berhasil" : "Upload gagal — lihat detail di tabel", r.status !== "done"); }
@@ -1075,7 +1151,7 @@ PAGES.upload = { render(view) {
   $("#next").onclick = () => { cursor.setMonth(cursor.getMonth() + 1); drawCal(); };
   $("#today").onclick = () => { cursor = new Date(); cursor.setDate(1); drawCal(); };
   $("#addOne").onclick = () => libraryPicker((a) => scheduleModal({ asset_id: a.id, onSaved: load }), { kinds: "clip,video" });
-  $("#addBulk").onclick = () => libraryPicker((rows) => bulkScheduleModal(rows.map((r) => r.id), load), { kinds: "clip,video", multi: true, title: "Pilih klip untuk Smart Cadence" });
+  $("#addBulk").onclick = () => libraryPicker((rows) => bulkScheduleModal(rows.map((r) => r.id), load), { kinds: "clip,video", multi: true, title: "Pilih klip yang mau dijadwalkan" });
   load().catch(fail);
 } };
 

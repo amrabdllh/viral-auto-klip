@@ -75,6 +75,12 @@ def _video_meta(vid: str) -> Optional[Dict]:
     return None
 
 
+def market_fresh(niche: str) -> bool:
+    """Data pasar niche ini masih segar di cache (memakainya tidak memicu riset ±20 dtk)."""
+    cached = db.kv_get(f"fyp_research_{niche}", None)
+    return bool(cached) and time.time() - float(cached.get("at", 0)) < _CACHE_H * 3600
+
+
 def market_samples(niche: str, force: bool = False) -> List[Dict]:
     """Shorts populer ≤120 hari untuk niche: [{ts, views, hour, weekday, perf}]. Cache 24 jam."""
     key = f"fyp_research_{niche}"
@@ -208,14 +214,22 @@ def _canonical(dtype: str) -> datetime:
     return today + timedelta(days=(target - today.weekday()) % 7)
 
 
+def anchors_cached(niche: str, platform: str, dtype: str, n: int, gap_h: float) -> List[Tuple[float, float]]:
+    """Jam jangkar yang sudah tersimpan & masih berlaku (kosong bila perlu dihitung ulang)."""
+    cached = db.kv_get(f"slot_anchors_{niche}_{platform}_{dtype}_{n}_{gap_h:g}", None)
+    if cached and time.time() - float(cached.get("at", 0)) < _ANCHOR_DAYS * 86400 and cached.get("hours"):
+        return [(float(h), float(s)) for h, s in cached["hours"]]
+    return []
+
+
 def anchor_hours(niche: str, platform: str, dtype: str, n: int, gap_h: float) -> List[Tuple[float, float]]:
     """Jam jangkar TETAP untuk jenis hari `dtype` ("weekday" = Sen–Jum, "weekend" = Sab–Min): kombinasi n jam
     terbaik berjarak ≥ gap_h dari riset hari wakilnya. Disimpan seminggu agar tiap hari kerja/akhir pekan jamnya
     sama persis. Return [(jam, skor)] urut kronologis."""
+    cached = anchors_cached(niche, platform, dtype, n, gap_h)
+    if cached:
+        return cached
     key = f"slot_anchors_{niche}_{platform}_{dtype}_{n}_{gap_h:g}"
-    cached = db.kv_get(key, None)
-    if cached and time.time() - float(cached.get("at", 0)) < _ANCHOR_DAYS * 86400 and cached.get("hours"):
-        return [(float(h), float(s)) for h, s in cached["hours"]]
     day = _canonical(dtype)
     curve = {int(h): s for h, s in research_day(niche, platform, day)["hours"]}
     picked = pick_hours(niche, platform, day, n, gap_h, [], 0.0)

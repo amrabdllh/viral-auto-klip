@@ -32,7 +32,8 @@ THUMBNAIL (paling penting): 2–5 kata, HURUF BESAR, terbaca 1 detik di layar HP
 (sebut subjek dengan nama yang dikenal: game/tokoh/benda — GTA 6, LUCIA, JASON, UFO, POLISI…). DILARANG potongan
 ucapan/slang/julukan yang hanya nyambung setelah menonton (buruk: "NGGAK SLOP, MEN", "UFO NGULIK IBU", "MOBIL PERTAMA GUA"
 bila judulnya soal mencuri mobil). Teknik: celah informasi, kontras/kejutan, reaksi ekstrem, pertanyaan.
-JUDUL: maks 70 karakter, jelas tanpa konteks, kata paling memancing di depan. {style}
+JUDUL: SINGKAT — 4–8 kata, maks 50 karakter (sependek thumbnail, sedikit lebih jelas), tanpa hashtag, jelas tanpa
+konteks, kata paling memancing di depan (celah informasi / kontras / reaksi / pertanyaan). {style}
 HOOK: teks layar 3 detik pertama video, maks 8 kata, kalimat biasa (bukan huruf besar semua) — MENYAMBUNG rasa
 penasaran dari thumbnail (orang yang mengeklik langsung merasa "ini dia jawabannya, tonton sampai habis").
 SINKRON: thumbnail, judul, dan hook membicarakan hal yang SAMA dan tidak bertentangan; jangan mengulang kata persis —

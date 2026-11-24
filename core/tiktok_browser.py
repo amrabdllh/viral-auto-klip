@@ -246,10 +246,66 @@ def _dismiss_overlays(page) -> None:
         pass
 
 
-def _fill_caption(page, editor, text: str) -> None:
-    """Ganti deskripsi default (nama file) dengan caption. Diverifikasi — lebih baik gagal daripada memposting
-    video dengan caption nama file."""
-    probe = " ".join(text.split()[:5])[:40]
+# Editor caption TikTok Studio (diamati langsung, Nov 2026): saat mengetik "#..." muncul daftar
+# div.hashtag-suggestion-item[role=option] > span.hash-tag-topic ("#gta6") + span.hash-tag-view-count ("81.5K posts").
+# Hashtag yang DIPILIH dari daftar itu menjadi span.mention[data-testid=mentionText] = tautan yang bisa diklik;
+# yang ditempel/diketik saja tetap teks biasa.
+_SUGGEST_JS = r"""() => [...document.querySelectorAll('.hashtag-suggestion-item, [role=option][id^=mention-option]')]
+  .filter(e => e.offsetParent !== null)
+  .map(e => [((e.querySelector('.hash-tag-topic') || e).innerText || '').trim().split(/\s+/)[0] || '',
+             ((e.querySelector('.hash-tag-view-count') || {}).innerText || '').trim()])"""
+_LINKED_JS = """el => [...el.querySelectorAll('[data-testid=mentionText], span.mention')]
+  .map(e => (e.innerText || '').trim()).filter(t => t.startsWith('#'))"""
+
+
+def _split_caption(text: str):
+    """'Judul seru #GTA6 #gaming' → ('Judul seru', ['#GTA6', '#gaming']). Hashtag di tengah kalimat ikut dipindah ke
+    akhir (caption dari scheduler.platform_copy memang judul + hashtag)."""
+    tags = re.findall(r"#\w+", text, flags=re.UNICODE)
+    plain = re.sub(r"\s*#\w+", "", text, flags=re.UNICODE).strip()
+    return re.sub(r"[ \t]{2,}", " ", plain), list(dict.fromkeys(tags))
+
+
+def _suggestions(page) -> List[List[str]]:
+    try:
+        return page.evaluate(_SUGGEST_JS) or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _type_hashtag(page, tag: str) -> Dict:
+    """Ketik hashtag huruf demi huruf, tunggu daftar saran TikTok STABIL, lalu pilih saran yang SAMA PERSIS lewat
+    keyboard (panah bawah + Enter). Tidak pernah memilih saran yang hanya mirip (#GTAVI ≠ #gtavicecity) — bila tidak
+    ada yang sama persis, hashtag dibiarkan sebagai teks. Return {"tag", "picked": bool, "posts": "81.5K posts"|""}."""
+    # "#" dulu lalu JEDA: tanpa jeda, "#tag" yang diketik di belakang teks tidak memicu daftar saran (diamati langsung)
+    page.keyboard.type("#")
+    page.wait_for_timeout(900)
+    page.keyboard.type(tag.lstrip("#"), delay=80)
+    prev, items = None, []
+    for _ in range(24):  # ≤ ±6 dtk: daftar diperbarui per huruf — tunggu sampai dua kali baca hasilnya sama
+        page.wait_for_timeout(250)
+        items = _suggestions(page)
+        if items and items == prev:
+            break
+        prev = items
+    idx = next((i for i, (t, _) in enumerate(items) if t.lower() == tag.lower()), None)
+    if idx is None:
+        page.keyboard.press("Escape")
+        page.keyboard.type(" ")
+        return {"tag": tag, "picked": False, "posts": ""}
+    for _ in range(idx):
+        page.keyboard.press("ArrowDown")
+    page.keyboard.press("Enter")  # TikTok menyisipkan "#tag " (dengan spasi) sebagai tautan
+    page.wait_for_timeout(400)
+    return {"tag": tag, "picked": True, "posts": items[idx][1]}
+
+
+def _fill_caption(page, editor, text: str) -> Dict:
+    """Ganti deskripsi default (nama file) dengan caption. Teks biasa ditempel, hashtag diketik & dipilih dari saran
+    agar bisa diklik. Diverifikasi — lebih baik gagal daripada memposting video dengan caption nama file.
+    Return {"hashtags": n, "linked": n_tautan_terverifikasi, "tags": [...]}."""
+    plain, tags = _split_caption(text)
+    probe = " ".join((plain or text).split()[:5])[:40]
     for _ in range(3):
         _dismiss_overlays(page)
         try:
@@ -258,14 +314,27 @@ def _fill_caption(page, editor, text: str) -> None:
             editor.evaluate("el => el.focus()")
         page.keyboard.press("Control+A")
         page.keyboard.press("Backspace")
-        page.keyboard.insert_text(text)
+        if tags:
+            # diketik (bukan ditempel): teks tempelan tidak tercatat di state editor Draft.js TikTok, sehingga "#"
+            # sesudahnya tidak memunculkan daftar saran hashtag (diamati langsung: 0/5 hashtag jadi tautan)
+            page.keyboard.type(plain + (" " if plain else ""), delay=15)
+        else:
+            page.keyboard.insert_text(plain)
+        page.wait_for_timeout(500)
+        picks = [_type_hashtag(page, tag) for tag in tags]
         page.wait_for_timeout(800)
         try:
             got = " ".join(editor.inner_text().split())
+            links = editor.evaluate(_LINKED_JS) or []
         except Exception:  # noqa: BLE001
-            got = ""
+            got, links = "", []
         if probe and probe in got:
-            return
+            linked = [t for t in tags if t.lower() in {x.lower() for x in links}]
+            if tags:
+                logger.info(f"TikTok: {len(linked)}/{len(tags)} hashtag jadi tautan "
+                            + ", ".join(f"{p['tag']} ({p['posts'] or ('tautan' if p['tag'] in linked else 'teks')})"
+                                        for p in picks))
+            return {"hashtags": len(tags), "linked": len(linked), "tags": picks}
     raise TikTokUploadError("Caption TikTok tidak bisa diisi (deskripsi masih nama file) — upload dibatalkan")
 
 
@@ -492,8 +561,9 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
 
             say("Upload", 40, "Menunggu editor caption…")
             editor = _first(page, CAPTION_SELECTORS, timeout=60_000)
+            tag_info: Dict = {}
             if editor is not None and description:
-                _fill_caption(page, editor, trim_caption(description, 2000))
+                tag_info = _fill_caption(page, editor, trim_caption(description, 2000))
 
             cover_set = None
             if cover and Path(cover).is_file():
@@ -584,9 +654,11 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
             persist_refreshed(context)  # simpan cookie hasil rotasi sesi
             if mode == "schedule":
                 return {"ok": True, "status": "scheduled", "mode": "schedule", "publish_at": float(publish_at),
-                        "privacy": "everyone", "description": description, "file": str(video), "cover": cover_set}
+                        "privacy": "everyone", "description": description, "file": str(video), "cover": cover_set,
+                        "hashtags_linked": tag_info.get("linked"), "hashtags": tag_info.get("hashtags")}
             return {"ok": True, "mode": mode, "privacy": "default", "description": description,
-                    "file": str(video), "cover": cover_set}
+                    "file": str(video), "cover": cover_set, "hashtags_linked": tag_info.get("linked"),
+                    "hashtags": tag_info.get("hashtags")}
         except TikTokUploadError:
             raise
         except Exception as exc:  # noqa: BLE001

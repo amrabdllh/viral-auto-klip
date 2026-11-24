@@ -25,13 +25,41 @@ _YT_ONLY_TAGS = re.compile(r"#(?:shorts|youtubeshorts|youtubeshort|shortvideo|sh
                            re.IGNORECASE)
 
 
+def _tags_in(text: str) -> List[str]:
+    out: List[str] = []
+    for t in re.findall(r"#\w+", text or "", flags=re.UNICODE):
+        if t.lower() not in {x.lower() for x in out}:
+            out.append(t)
+    return out
+
+
+def platform_copy(platform: str, title: str, description: str) -> Dict[str, str]:
+    """Teks akhir per platform dari judul + deskripsi jadwal:
+    - YouTube: judul + maks 5 hashtag topik di JUDUL (tetap ≤ 100 karakter; hashtag di judul bisa diklik), deskripsi
+      = caption + hashtag.
+    - TikTok: caption PENDEK = judul + hashtag pilihan (±5) (tanpa kalimat deskripsi & tanpa hashtag khusus YouTube).
+      Hashtag diketik satu per satu oleh core/tiktok_browser agar menjadi tautan, bukan teks mati."""
+    from .hashtag_research import GENERIC
+    tags = _tags_in(f"{title} {description}")
+    base = re.sub(r"\s*#\w+", "", title or "", flags=re.UNICODE).strip()
+    base = re.sub(r"\s{2,}", " ", base)
+    if platform == "youtube":
+        out = base
+        for t in [t for t in tags if t[1:].lower() not in GENERIC][:5]:
+            if len(out) + 1 + len(t) > 100:
+                break
+            out = f"{out} {t}"
+        return {"title": out[:100], "description": description or ""}
+    tt_tags = [t for t in tags if not _YT_ONLY_TAGS.fullmatch(t)][:8]  # deskripsi sudah berisi ±5 hashtag pilihan
+    return {"title": base, "description": f"{base} {' '.join(tt_tags)}".strip()}
+
+
 def _caption_for(platform: str, title: str, description: str) -> str:
-    """Caption upload per platform. TikTok tidak membawa hashtag khusus YouTube."""
-    text = f"{title} {description}".strip()
-    if platform != "youtube":
-        text = _YT_ONLY_TAGS.sub("", text)
-        text = re.sub(r"[ \t]{2,}", " ", text).strip()
-    return text
+    """Caption satu baris per platform (kompatibilitas): YouTube → judul, TikTok → caption pendek."""
+    c = platform_copy(platform, title, description)
+    return c["title"] if platform == "youtube" else c["description"]
+
+
 _LOCK = threading.Lock()
 
 
@@ -72,11 +100,11 @@ def upload_now(item: Dict, publish_at: Optional[float] = None) -> Dict:
     path = item["file_path"]
     if not Path(path).exists():
         return {"error": f"File tidak ada: {path}"}
-    tags = re.findall(r"#(\w+)", item.get("description", ""))
+    tags = [t[1:] for t in _tags_in(f"{item.get('title', '')} {item.get('description', '')}")]
     from .thumb_ai import upload_image_for
     thumb = upload_image_for(path)  # thumbnail AI → thumbnail frame → (tidak ada)
-    title = (item.get("title") or Path(path).stem)[:100]
-    description = item.get("description", "")
+    yt = platform_copy("youtube", item.get("title") or Path(path).stem, item.get("description", ""))
+    title, description = yt["title"], yt["description"]
 
     # Coba ulang setelah gagal sebagian (mis. TikTok sukses, YouTube kedaluwarsa):
     # jangan unggah ulang platform yang sudah berhasil.
@@ -121,7 +149,8 @@ def upload_now(item: Dict, publish_at: Optional[float] = None) -> Dict:
                         else:
                             raise
             elif platform == "tiktok":
-                caption = _caption_for("tiktok", title, description)
+                caption = platform_copy("tiktok", item.get("title") or Path(path).stem,
+                                        item.get("description", ""))["description"]
                 if tiktok_browser.cookie_status().get("configured"):
                     report["tiktok"] = tiktok_browser.upload_video(str(path), description=caption, publish_at=publish_at,
                                                                    cover=thumb)

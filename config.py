@@ -271,6 +271,8 @@ TITLE_STYLE = os.getenv("TITLE_STYLE", "normal").strip().lower()  # normal | cli
 UPLOAD_SLOT_MODE = os.getenv("UPLOAD_SLOT_MODE", "riset").strip().lower()  # riset = jam dipilih tiap hari · jangkar = jam tetap
 TIKTOK_POST_HOURS = os.getenv("TIKTOK_POST_HOURS", "")  # mis. "09:00,13:00,18:00,20:00,22:00" — jam tetap akun TikTok (kosong = riset)
 YOUTUBE_POST_HOURS = os.getenv("YOUTUBE_POST_HOURS", "")  # sama, untuk YouTube Shorts
+TIKTOK_POST_HOURS_WEEKEND = os.getenv("TIKTOK_POST_HOURS_WEEKEND", "")  # Sabtu–Minggu (kosong = sama dengan Senin–Jumat)
+YOUTUBE_POST_HOURS_WEEKEND = os.getenv("YOUTUBE_POST_HOURS_WEEKEND", "")
 UPLOAD_NATIVE_SCHEDULE = os.getenv("UPLOAD_NATIVE_SCHEDULE", "true").strip().lower() in ("1", "true", "yes", "on")  # unggah lebih awal + jadwal bawaan YouTube/TikTok
 PREUPLOAD_DAYS = float(os.getenv("PREUPLOAD_DAYS", "10"))  # sejauh apa jadwal diunggah lebih awal (TikTok maks ±10 hari)
 SOURCE_CACHE_MAX_GB = float(os.getenv("SOURCE_CACHE_MAX_GB", "60"))  # batas cache video sumber (yang lama dihapus otomatis)
@@ -582,8 +584,8 @@ DEFAULT_HASHTAGS = {
     "engagement": ["#fyp", "#tanyajawab", "#opini", "#viral", "#shorts"],
     "general": ["#fyp", "#viral", "#shorts", "#reels", "#tiktok"]
 }
-MAX_HASHTAGS = 6
-UPLOAD_CAPTION_MAX_CHARS = 140
+MAX_HASHTAGS = 8  # kandidat dari Editor-AI; core/hashtag_research memilih 5 terbaik yang hidup
+UPLOAD_CAPTION_MAX_CHARS = 90  # caption = 1 kalimat pendek (judul + hashtag disusun per platform)
 
 PLATFORM_PROFILES = {
     "TikTok": {
