@@ -1016,6 +1016,7 @@ class ScheduleRequest(BaseModel):
     description: str = ""
     platforms: List[str] = ["youtube"]
     run_at: float = 0
+    reupload: bool = False    # klip sudah pernah diunggah & videonya sudah dihapus di platform → unggah lagi
 
 
 class BulkScheduleRequest(BaseModel):
@@ -1027,6 +1028,7 @@ class BulkScheduleRequest(BaseModel):
     gap_min: int = 0          # jeda antar upload dalam menit; 0 = sebar otomatis per hari
     mode: str = ""            # "settings" = ikuti jam & batas harian di Pengaturan (sama dengan upload otomatis)
     preview: bool = False     # mode settings: hanya rencana, tidak disimpan
+    reupload: bool = False    # unggah ulang klip yang sudah pernah diunggah (videonya sudah dihapus di platform)
 
 
 def _asset_copy(asset: Dict) -> Dict:
@@ -1108,6 +1110,12 @@ def add_schedule(req: ScheduleRequest):
     if not platforms:
         raise HTTPException(400, "Pilih minimal satu platform")
     _require_ready(platforms)
+    done = [pf for pf in platforms if scheduler.uploaded(path, pf)]
+    if done and not req.reupload:
+        raise HTTPException(409, f"Klip ini sudah pernah diunggah ke {', '.join(done)}. Hapus dulu videonya di platform, "
+                                 "lalu centang 'Unggah ulang'.")
+    for pf in done:
+        scheduler.forget_upload(path, pf)
     return db.add_schedule(path, copy["title"], copy["description"], platforms, req.run_at or time.time())
 
 
@@ -1130,8 +1138,14 @@ def bulk_schedule(req: BulkScheduleRequest):
     _require_ready(platforms)
     out = []
     for asset, ts in zip(assets, slots):
+        pfs = [pf for pf in platforms if req.reupload or not scheduler.uploaded(asset["path"], pf)]
+        if not pfs:
+            continue  # sudah ada di semua platform → jangan dobel
+        if req.reupload:
+            for pf in pfs:
+                scheduler.forget_upload(asset["path"], pf)
         copy = _asset_copy(asset)
-        out.append(db.add_schedule(asset["path"], copy["title"], copy["description"], platforms, ts))
+        out.append(db.add_schedule(asset["path"], copy["title"], copy["description"], pfs, ts))
     return out
 
 
@@ -1147,8 +1161,25 @@ def _bulk_by_settings(assets: List[Dict], req: BulkScheduleRequest, start: float
               for pf in s.get("platforms") or []}
     fresh = [a for a in assets if not all((a["path"], pf) in active for pf in platforms)]
     dupes = len(assets) - len(fresh)
+    # riwayat: klip yang sudah pernah terunggah ke platform itu (walau jadwalnya sudah dihapus dari daftar)
+    done_on = {a["id"]: [pf for pf in platforms if scheduler.uploaded(a["path"], pf)] for a in fresh}
+    uploaded_list = [{"title": (a.get("meta") or {}).get("title") or a.get("name") or Path(a["path"]).stem,
+                      "platforms": done_on[a["id"]],
+                      "urls": [scheduler.uploaded(a["path"], pf).get("url") or "" for pf in done_on[a["id"]]]}
+                     for a in fresh if done_on[a["id"]]]
+    if req.reupload and not req.preview:
+        for a in fresh:
+            for pf in done_on[a["id"]]:
+                scheduler.forget_upload(a["path"], pf)
+    if not req.reupload:
+        fresh = [a for a in fresh if len(done_on[a["id"]]) < len(platforms)]
     # klip skor tertinggi mendapat hari & jam paling awal (sama seperti upload otomatis)
-    clips = [autopublish.clip_from_asset(a) for a in fresh]
+    clips = []
+    for a in fresh:
+        c = autopublish.clip_from_asset(a)
+        if not req.reupload and done_on[a["id"]]:
+            c["_skip_platforms"] = done_on[a["id"]]  # sudah ada di platform itu → hanya platform lainnya
+        clips.append(c)
     # jangan memulai di jadwal yang sudah lewat/terlalu mepet untuk jadwal bawaan platform
     start = max(start, time.time() + 15 * 60)
     res = autopublish.schedule_clips(clips, platforms, start=start, dry_run=req.preview) if clips else         {"scheduled": [], "skipped": "", "per_day": int(config.AUTO_PUBLISH_PER_DAY), "platforms": platforms}
@@ -1166,7 +1197,8 @@ def _bulk_by_settings(assets: List[Dict], req: BulkScheduleRequest, start: float
     out_days = [{"date": v["date"], "ts": v["ts"], "clips": len(v["clips"]),
                  "slots": {pf: sorted(t) for pf, t in v["slots"].items()}} for v in sorted(days.values(), key=lambda x: x["date"])]
     return {"mode": "settings", "preview": req.preview, "clips": len({r["file_path"] for r in rows}),
-            "requested": len(assets), "already": dupes, "per_day": res.get("per_day"),
+            "requested": len(assets), "already": dupes, "uploaded": uploaded_list, "reupload": req.reupload,
+            "per_day": res.get("per_day"),
             "platforms": res.get("platforms") or platforms, "days": out_days,
             "scheduled": [] if req.preview else rows}
 
@@ -1176,6 +1208,19 @@ def run_schedule_now(sid: str):
     item = db.get_schedule(sid)
     if not item:
         raise HTTPException(404, "Jadwal tidak ditemukan")
+    # pengaman anti-dobel: dulu "Upload sekarang" saat pra-unggah klip yang sama berjalan menghasilkan dua video
+    if item.get("status") in ("uploading", "scheduled", "done"):
+        raise HTTPException(409, {"uploading": "Jadwal ini sedang diunggah — tunggu sampai selesai.",
+                                  "scheduled": "Jadwal ini sudah terunggah & terjadwal di platform.",
+                                  "done": "Jadwal ini sudah selesai diunggah."}[item["status"]])
+    pfs = item.get("platforms") or []
+    if any(scheduler.busy(item["file_path"], pf) for pf in pfs):
+        raise HTTPException(409, "Klip ini sedang diunggah (pra-unggah otomatis) — tunggu sampai selesai agar tidak dobel.")
+    done = [pf for pf in pfs if scheduler.uploaded(item["file_path"], pf)]
+    if done and len(done) == len(pfs):
+        links = ", ".join(f"{pf}: {scheduler.uploaded(item['file_path'], pf).get('url') or '-'}" for pf in done)
+        raise HTTPException(409, f"Klip ini sudah pernah diunggah ({links}). Hapus dulu videonya di platform, lalu "
+                                 "jadwalkan ulang dengan pilihan 'Unggah ulang'.")
     db.update_schedule(sid, status="uploading")
     report = scheduler.upload_now(item)
     db.update_schedule(sid, status="done" if scheduler._ok(report) else "failed", result=report)

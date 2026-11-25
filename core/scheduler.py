@@ -62,6 +62,83 @@ def _caption_for(platform: str, title: str, description: str) -> str:
 
 _LOCK = threading.Lock()
 
+# ----------------------------------------------------------------------------- pengaman anti-dobel
+# 1) Kunci per (klip, platform): unggahan yang sama tidak bisa berjalan dua kali BERSAMAAN (mis. "Upload sekarang"
+#    ditekan saat pra-unggah klip itu sedang berjalan → dulu jadi dua video).
+# 2) Riwayat unggahan per (klip, platform), TETAP ada walau barisnya dihapus dari daftar jadwal: klip yang sudah
+#    pernah terunggah tidak diunggah lagi kecuali pengguna memilih "unggah ulang" (riwayatnya dilupakan dulu).
+_BUSY: set = set()
+_BUSY_LOCK = threading.Lock()
+_HIST_KEY = "upload_history"
+
+
+def _clip_key(path: str) -> str:
+    try:
+        return str(Path(path).resolve()).lower()
+    except Exception:  # noqa: BLE001
+        return str(path).lower()
+
+
+def busy(path: str, platform: Optional[str] = None) -> bool:
+    k = _clip_key(path)
+    with _BUSY_LOCK:
+        return any(b[0] == k and (platform is None or b[1] == platform) for b in _BUSY)
+
+
+def _claim(path: str, platform: str) -> bool:
+    k = (_clip_key(path), platform)
+    with _BUSY_LOCK:
+        if k in _BUSY:
+            return False
+        _BUSY.add(k)
+        return True
+
+
+def _release(path: str, platform: str) -> None:
+    with _BUSY_LOCK:
+        _BUSY.discard((_clip_key(path), platform))
+
+
+def uploaded(path: str, platform: str) -> Optional[Dict]:
+    """Unggahan terakhir klip ini ke platform itu (url/waktu tayang), atau None."""
+    rows = (db.kv_get(_HIST_KEY, None) or {}).get(f"{_clip_key(path)}|{platform}") or []
+    return rows[-1] if rows else None
+
+
+def record_upload(path: str, platform: str, res: Dict) -> None:
+    hist = db.kv_get(_HIST_KEY, None) or {}
+    rows = hist.setdefault(f"{_clip_key(path)}|{platform}", [])
+    rows.append({"at": time.time(), "url": res.get("url") or "", "video_id": res.get("video_id") or "",
+                 "status": res.get("status") or "", "publish_at": res.get("publish_at"),
+                 "title": str(res.get("title") or res.get("description") or "")[:120]})
+    hist[f"{_clip_key(path)}|{platform}"] = rows[-5:]
+    db.kv_set(_HIST_KEY, hist)
+
+
+def forget_upload(path: str, platform: str) -> None:
+    """Lupakan riwayat (pengguna sudah menghapus videonya di platform & ingin mengunggah ulang)."""
+    hist = db.kv_get(_HIST_KEY, None) or {}
+    if hist.pop(f"{_clip_key(path)}|{platform}", None) is not None:
+        db.kv_set(_HIST_KEY, hist)
+
+
+def seed_history() -> int:
+    """Isi riwayat dari jadwal yang sudah terunggah (sebelum riwayat ada). Hanya platform yang hasilnya sukses & belum
+    tercatat. Return jumlah yang ditambahkan."""
+    n = 0
+    for s in db.list_schedules():
+        if s.get("status") not in ("scheduled", "done"):
+            continue
+        for pf, res in (s.get("result") or {}).items():
+            if pf in PLATFORMS and isinstance(res, dict) and _success(res) and res.get("status") != "duplicate"                     and not uploaded(s["file_path"], pf):
+                record_upload(s["file_path"], pf, res)
+                n += 1
+    return n
+
+
+def _success(res: Dict) -> bool:
+    return str((res or {}).get("status", "")).lower() not in ("failed", "error", "skipped") and not (res or {}).get("error")
+
 
 def platform_status() -> Dict:
     from . import tiktok_browser, youtube_browser
@@ -114,6 +191,16 @@ def upload_now(item: Dict, publish_at: Optional[float] = None) -> Dict:
         if str(prev.get("status", "")).lower() == "done" or prev.get("ok") is True:
             report[platform] = prev
             continue
+        dup = uploaded(path, platform)
+        if dup:
+            # sudah ada di platform dari unggahan sebelumnya → jangan buat video kedua
+            report[platform] = {"status": "duplicate", "ok": True, "url": dup.get("url"),
+                                "reason": "sudah pernah diunggah — dilewati agar tidak dobel"}
+            logger.warning(f"Lewati {platform}: {Path(path).name} sudah pernah diunggah ({dup.get('url') or 'tanpa link'})")
+            continue
+        if not _claim(path, platform):
+            report[platform] = {"status": "failed", "reason": "klip ini sedang diunggah proses lain — tidak diunggah dua kali"}
+            continue
         try:
             if platform == "youtube":
                 method = str(getattr(config, "YOUTUBE_UPLOAD_METHOD", "auto") or "auto").lower()
@@ -158,6 +245,10 @@ def upload_now(item: Dict, publish_at: Optional[float] = None) -> Dict:
                     report["tiktok"] = upload_to_tiktok(path, description=caption)
         except Exception as exc:
             report[platform] = {"status": "failed", "reason": str(exc)[:400]}
+        finally:
+            _release(path, platform)
+        if _success(report.get(platform)):
+            record_upload(path, platform, report[platform])
     return report
 
 
@@ -337,6 +428,12 @@ def start() -> None:
         for item in db.list_schedules():
             if item["status"] == "uploading":
                 db.update_schedule(item["id"], status="pending")
+        try:
+            added = seed_history()
+            if added:
+                logger.info(f"Riwayat unggahan: {added} unggahan lama dicatat (pengaman anti-dobel)")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Riwayat unggahan tidak bisa diisi: {exc}")
         threading.Thread(target=_loop, name="upload-scheduler", daemon=True).start()
 
 

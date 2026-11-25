@@ -143,6 +143,7 @@ python tests\test_job_cancel.py         # tombol Batal menghentikan job di tenga
 python tests\test_job_delete_source.py  # hapus job + video sumber (transkrip tetap, video job aktif dilewati)
 python tests\test_schedule_delete.py  # Jadwal Upload: tombol per jadwal, aksi massal, jam dari Pengaturan
 python tests\test_upload_copy.py  # judul/caption pendek, riset hashtag, hashtag TikTok bisa diklik, jam hari kerja/akhir pekan, jadwalkan semua
+python tests\test_upload_guard.py  # anti-dobel: riwayat unggahan per klip/platform, kunci unggah bersamaan, unggah ulang
 python tests\test_render_progress.py    # progres "Render n/N" + tombol Batal berlaku saat render
 python tests\test_editor_ranking.py     # rubrik live gaming + ranking pembanding S/A/B/C seperti editor manusia
 ```

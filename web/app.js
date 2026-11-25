@@ -743,10 +743,11 @@ function bulkScheduleModal(assetIds, onSaved) {
       <div class="fields two">${UI.field("Mulai dari", `<input type="datetime-local" data-at value="${localInputValue(Date.now() / 1000)}">`)}
         <div data-gapf hidden>${UI.field("Jeda antar upload (menit)", `<input type="number" data-gap min="5" max="1440" value="60">`)}</div></div>
       ${UI.field("Platform", platformToggles(ready.length ? ready : ["youtube"]))}
+      <label class="switch" data-ref hidden><input type="checkbox" data-re><span>Unggah ulang klip yang sudah pernah diunggah<span class="sub">Centang hanya bila videonya SUDAH kamu hapus di YouTube/TikTok — kalau belum, hasilnya video dobel.</span></span></label>
       <div data-prev class="small"></div>`,
     foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Jadwalkan", { kind: "primary", attrs: "data-save" }) }, (m) => {
     const mode = () => $("input[name=bm]:checked", m).value;
-    const body = (preview) => ({ asset_ids: assetIds, mode: mode() === "settings" ? "settings" : "", preview,
+    const body = (preview) => ({ asset_ids: assetIds, mode: mode() === "settings" ? "settings" : "", preview, reupload: $("[data-re]", m).checked,
       gap_min: mode() === "gap" ? Math.max(5, parseInt($("[data-gap]", m).value || "60", 10)) : 0,
       start_at: new Date($("[data-at]", m).value).getTime() / 1000, platforms: pickedPlatforms(m) });
     let seq = 0;
@@ -759,17 +760,19 @@ function bulkScheduleModal(assetIds, onSaved) {
       try {
         const r = await api("/api/schedules/bulk", { body: body(true) });
         if (my !== seq) return;
+        $("[data-ref]", m).hidden = !r.uploaded?.length && !$("[data-re]", m).checked;
         const last = r.days[r.days.length - 1];
         const full = r.days.filter((d) => d.clips >= r.per_day).length;
         box.innerHTML = `<p style="margin:10px 0 6px"><b>${r.clips} klip → ${r.days.length} hari</b>${r.days.length ? ` (${esc(dayName(r.days[0].ts))} – ${esc(dayName(last.ts))})` : ""} · maks ${r.per_day} klip/hari
           ${full && full < r.days.length ? `<span class="muted"> · ${full} hari penuh + ${r.days.length - full} hari sisa</span>` : ""}</p>
           ${r.already ? `<p class="tiny muted" style="margin:0 0 6px">${r.already} klip sudah punya jadwal aktif — dilewati agar tidak terunggah dua kali.</p>` : ""}
+          ${r.uploaded?.length ? `<p class="tiny ink2" style="margin:0 0 6px">${r.uploaded.length} klip <b>sudah pernah diunggah</b> (${r.uploaded.slice(0, 4).map((u) => `${esc(u.title.slice(0, 30))} → ${u.platforms.map((pf) => PF[pf] || pf).join("+")}`).join("; ")}${r.uploaded.length > 4 ? "; …" : ""}) — ${r.reupload ? "<b>akan diunggah ulang</b>." : "dilewati di platform itu agar tidak dobel."}</p>` : ""}
           <div class="list" style="max-height:220px;overflow:auto">${r.days.map((d) => `<div class="row nw" style="padding:4px 0;gap:10px"><b class="nowrap" style="min-width:96px">${esc(dayName(d.ts))}</b><span class="muted nowrap">${d.clips} klip</span>
             <span class="tiny">${Object.entries(d.slots).map(([pf, t]) => `${PF[pf] || pf} ${t.join(", ")}`).join(" · ")}</span></div>`).join("")}</div>
           <p class="tiny muted" style="margin:6px 0 0">Jam bisa geser beberapa menit agar tidak terlihat seperti bot. <a href="#settings" data-close>Ubah jam di Pengaturan</a></p>`;
       } catch (err) { if (my === seq) box.innerHTML = `<p class="bad">${esc(err.message || String(err))}</p>`; }
     };
-    m.addEventListener("change", (e) => { if (e.target.matches("input[name=bm], [data-at], [data-pf], [data-gap]")) preview(); });
+    m.addEventListener("change", (e) => { if (e.target.matches("input[name=bm], [data-at], [data-pf], [data-gap], [data-re]")) preview(); });
     preview();
     $("[data-save]", m).onclick = (e) => busy(e.currentTarget, async () => {
       try {
