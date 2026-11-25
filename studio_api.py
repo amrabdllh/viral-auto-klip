@@ -1025,15 +1025,15 @@ class BulkScheduleRequest(BaseModel):
     per_day: int = 3
     hours: List[int] = []
     gap_min: int = 0          # jeda antar upload dalam menit; 0 = sebar otomatis per hari
+    mode: str = ""            # "settings" = ikuti jam & batas harian di Pengaturan (sama dengan upload otomatis)
+    preview: bool = False     # mode settings: hanya rencana, tidak disimpan
 
 
 def _asset_copy(asset: Dict) -> Dict:
-    meta = asset.get("meta") or {}
-    caption = meta.get("upload_caption") or meta.get("description") or ""
-    from core.autopublish import _hashtags
-    tags = " ".join(_hashtags({"hashtags": meta.get("hashtags") or []}, ""))  # + hashtag global pengguna
-    return {"title": meta.get("ai_title") or meta.get("title") or asset.get("name") or "",
-            "description": f"{caption}\n\n{tags}".strip()}
+    """Judul pendek + caption 1 kalimat + hashtag hasil riset (core/autopublish.copy_for) untuk aset Video Saya."""
+    from core.autopublish import clip_from_asset, copy_for
+    cp = copy_for(clip_from_asset(asset))
+    return {"title": cp["title"], "description": cp["description"]}
 
 
 @router.get("/platforms")
@@ -1048,9 +1048,10 @@ def upload_insights(niche: str = ""):
     from datetime import datetime
     from core import fyp_research, slot_learning
     now = datetime.now()
+    from core.autopublish import rule_for_day
     niche = niche or str(db.kv_get("autopublish_last_niche", "") or "general")
-    # riset memakai data pasar yang sudah tersimpan saja (halaman ini tidak boleh menunggu ±20 dtk riset baru)
-    cached = bool(db.kv_get(f"fyp_research_{niche}", None))
+    # riset memakai data pasar yang masih segar saja (halaman ini tidak boleh menunggu ±20 dtk riset baru)
+    cached = fyp_research.market_fresh(niche)
     todays = [s for s in db.list_schedules()
               if datetime.fromtimestamp(float(s["run_at"])).date() == now.date() and s.get("status") != "failed"]
     out = {}
@@ -1058,9 +1059,17 @@ def upload_insights(niche: str = ""):
         ins = slot_learning.insights(pf)
         best = sorted(((d, h, s) for (d, h), s in ins["hours"].items() if s["n"] >= slot_learning.MIN_SAMPLES_HOUR),
                       key=lambda x: -x[2]["score"])[:5]
-        mine = sorted(float(s["run_at"]) for s in todays if pf in (s.get("platforms") or []))
-        out[pf] = {"today": [{"time": datetime.fromtimestamp(t).strftime("%H:%M"),
-                              "why": next((s["status"] for s in todays if float(s["run_at"]) == t), "pending")} for t in mine],
+        rule = rule_for_day(niche, pf, now)
+        # jam aturan sekarang dalam menit; jadwal yang meleset > 45 mnt = dibuat dengan pengaturan lama
+        rule_min = [int(h["time"][:2]) * 60 + int(h["time"][3:]) for h in rule["hours"]]
+        today = []
+        for s in sorted((s for s in todays if pf in (s.get("platforms") or [])), key=lambda s: float(s["run_at"])):
+            t = datetime.fromtimestamp(float(s["run_at"]))
+            m = t.hour * 60 + t.minute
+            today.append({"id": s["id"], "time": t.strftime("%H:%M"), "why": s["status"], "title": s.get("title") or "",
+                          "created": float(s.get("created") or 0),
+                          "on_rule": (any(-5 <= m - r <= 45 for r in rule_min) if rule_min else None)})
+        out[pf] = {"today": today, "rule": rule,
                    "research": fyp_research.research_day(niche, pf, now, use_market=cached)["summary"],
                    "measured": ins["total"], "needed": slot_learning.MIN_SAMPLES_TOTAL, "learning": ins["ready"],
                    "best": [{"daytype": d, "hour": h, "score": s["score"], "n": s["n"]} for d, h, s in best],
@@ -1108,6 +1117,8 @@ def bulk_schedule(req: BulkScheduleRequest):
     if not assets:
         raise HTTPException(400, "Tidak ada klip valid")
     start = req.start_at or time.time()
+    if req.mode == "settings":
+        return _bulk_by_settings(assets, req, start)
     if req.gap_min and req.gap_min > 0:
         # Jeda tetap: upload berurutan tiap N menit.
         gap = max(1, min(int(req.gap_min), 24 * 60)) * 60
@@ -1122,6 +1133,42 @@ def bulk_schedule(req: BulkScheduleRequest):
         copy = _asset_copy(asset)
         out.append(db.add_schedule(asset["path"], copy["title"], copy["description"], platforms, ts))
     return out
+
+
+def _bulk_by_settings(assets: List[Dict], req: BulkScheduleRequest, start: float) -> Dict:
+    """Jadwalkan banyak klip ke jam dari Pengaturan (jam tetap Senin–Jumat / Sabtu–Minggu, atau riset/jangkar),
+    maks AUTO_PUBLISH_PER_DAY per hari per platform, melewati slot yang sudah terisi. Klip yang sudah punya jadwal
+    aktif di platform itu dilewati agar tidak terunggah dua kali."""
+    from datetime import datetime
+    from core import autopublish
+    platforms = [p for p in req.platforms if p in scheduler.PLATFORMS] or ["youtube"]
+    _require_ready(platforms)
+    active = {(s["file_path"], pf) for s in db.list_schedules() if s.get("status") in ("pending", "uploading", "scheduled")
+              for pf in s.get("platforms") or []}
+    fresh = [a for a in assets if not all((a["path"], pf) in active for pf in platforms)]
+    dupes = len(assets) - len(fresh)
+    # klip skor tertinggi mendapat hari & jam paling awal (sama seperti upload otomatis)
+    clips = [autopublish.clip_from_asset(a) for a in fresh]
+    # jangan memulai di jadwal yang sudah lewat/terlalu mepet untuk jadwal bawaan platform
+    start = max(start, time.time() + 15 * 60)
+    res = autopublish.schedule_clips(clips, platforms, start=start, dry_run=req.preview) if clips else         {"scheduled": [], "skipped": "", "per_day": int(config.AUTO_PUBLISH_PER_DAY), "platforms": platforms}
+    if res.get("skipped") and not res.get("scheduled"):
+        raise HTTPException(400, res["skipped"])
+    rows = res["scheduled"]
+    days: Dict[str, Dict] = {}
+    for r in rows:
+        d = datetime.fromtimestamp(float(r["run_at"]))
+        k = d.strftime("%Y-%m-%d")
+        day = days.setdefault(k, {"date": k, "ts": d.replace(hour=0, minute=0).timestamp(), "clips": set(), "slots": {}})
+        day["clips"].add(r["file_path"])
+        for pf in r["platforms"]:
+            day["slots"].setdefault(pf, []).append(d.strftime("%H:%M"))
+    out_days = [{"date": v["date"], "ts": v["ts"], "clips": len(v["clips"]),
+                 "slots": {pf: sorted(t) for pf, t in v["slots"].items()}} for v in sorted(days.values(), key=lambda x: x["date"])]
+    return {"mode": "settings", "preview": req.preview, "clips": len({r["file_path"] for r in rows}),
+            "requested": len(assets), "already": dupes, "per_day": res.get("per_day"),
+            "platforms": res.get("platforms") or platforms, "days": out_days,
+            "scheduled": [] if req.preview else rows}
 
 
 @router.post("/schedules/{sid}/run-now")
@@ -1154,7 +1201,42 @@ def update_schedule(sid: str, req: ScheduleUpdate):
     return db.get_schedule(sid)
 
 
+class ScheduleBatch(BaseModel):
+    ids: List[str]
+    action: str  # delete | pause | resume
+
+
+@router.post("/schedules/batch")
+def batch_schedules(req: ScheduleBatch):
+    """Hapus / jeda / antrekan lagi banyak jadwal sekaligus. Yang sedang diunggah tidak disentuh;
+    jeda hanya untuk yang menunggu, antrekan lagi hanya untuk yang dijeda/gagal."""
+    if req.action not in ("delete", "pause", "resume"):
+        raise HTTPException(400, "Aksi tidak dikenal")
+    done, skipped = [], []
+    for sid in dict.fromkeys(req.ids):
+        s = db.get_schedule(sid)
+        st = (s or {}).get("status")
+        if not s:
+            skipped.append({"id": sid, "reason": "tidak ditemukan"})
+        elif st == "uploading":
+            skipped.append({"id": sid, "reason": "sedang diunggah"})
+        elif req.action == "delete":
+            db.delete_schedule(sid)
+            done.append(sid)
+        elif req.action == "pause" and st == "pending":
+            db.update_schedule(sid, status="paused")
+            done.append(sid)
+        elif req.action == "resume" and st in ("paused", "failed"):
+            db.update_schedule(sid, status="pending")
+            done.append(sid)
+        else:
+            skipped.append({"id": sid, "reason": "sudah di platform" if st in ("scheduled", "done") else "status tidak cocok"})
+    return {"done": done, "skipped": skipped}
+
+
 @router.delete("/schedules/{sid}")
 def delete_schedule(sid: str):
+    if not db.get_schedule(sid):
+        raise HTTPException(404, "Jadwal tidak ditemukan")
     db.delete_schedule(sid)
     return {"ok": True}

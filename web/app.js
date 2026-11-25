@@ -733,19 +733,50 @@ function scheduleModal({ asset_id, file_path, onSaved } = {}) {
 
 function bulkScheduleModal(assetIds, onSaved) {
   if (!assetIds.length) return toast("Pilih klip dulu", true);
-  modal({ title: `Upload batch · ${assetIds.length} klip`, sub: "Semua klip diunggah otomatis; atur jarak antar upload supaya tidak spam. Server harus menyala saat jadwal tiba.",
-    body: `<div class="fields two">${UI.field("Mulai dari", `<input type="datetime-local" data-at value="${localInputValue(Date.now() / 1000)}">`)}
-      ${UI.field("Jeda antar upload (menit)", `<input type="number" data-gap min="0" max="1440" value="30">`, { hint: "Upload berurutan tiap N menit — klip berikutnya menunggu giliran. 0 = sebar otomatis per hari (Smart Cadence)." })}
-      ${UI.field("Slot per hari", `<select data-pd>${UI.options([1, 2, 3, 4, 5], 3)}</select>`, { hint: "Dipakai hanya kalau jeda = 0" })}
-      ${UI.field("Jam posting", `<input type="text" data-hours placeholder="12, 18, 20">`, { hint: "Dipakai hanya kalau jeda = 0" })}</div>
-      ${UI.field("Platform", platformToggles())}`,
+  const ready = Object.entries(STATE.status?.platforms || {}).filter(([, v]) => v.ready).map(([k]) => k);
+  const PF = { youtube: "YouTube", tiktok: "TikTok" };
+  const dayName = (ts) => new Date(ts * 1000).toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short" });
+  modal({ title: `Jadwalkan ${assetIds.length} klip`, sub: "Klip diunggah otomatis saat jadwalnya tiba. Klip skor tertinggi dapat jam paling awal.",
+    body: `<div class="stack" style="gap:2px">
+        <label class="switch"><input type="radio" name="bm" value="settings" checked><span>Ikuti jam upload di Pengaturan (disarankan)<span class="sub">Jam & batas klip per hari diambil dari Pengaturan → Upload otomatis (Senin–Jumat / Sabtu–Minggu). Slot yang sudah terisi dilewati.</span></span></label>
+        <label class="switch"><input type="radio" name="bm" value="gap"><span>Jeda tetap<span class="sub">Upload berurutan tiap N menit, tanpa melihat jam ramai.</span></span></label></div>
+      <div class="fields two">${UI.field("Mulai dari", `<input type="datetime-local" data-at value="${localInputValue(Date.now() / 1000)}">`)}
+        <div data-gapf hidden>${UI.field("Jeda antar upload (menit)", `<input type="number" data-gap min="5" max="1440" value="60">`)}</div></div>
+      ${UI.field("Platform", platformToggles(ready.length ? ready : ["youtube"]))}
+      <div data-prev class="small"></div>`,
     foot: UI.btn("Batal", { attrs: "data-close" }) + UI.btn("Jadwalkan", { kind: "primary", attrs: "data-save" }) }, (m) => {
+    const mode = () => $("input[name=bm]:checked", m).value;
+    const body = (preview) => ({ asset_ids: assetIds, mode: mode() === "settings" ? "settings" : "", preview,
+      gap_min: mode() === "gap" ? Math.max(5, parseInt($("[data-gap]", m).value || "60", 10)) : 0,
+      start_at: new Date($("[data-at]", m).value).getTime() / 1000, platforms: pickedPlatforms(m) });
+    let seq = 0;
+    const preview = async () => {
+      $("[data-gapf]", m).hidden = mode() !== "gap";
+      const box = $("[data-prev]", m);
+      if (mode() !== "settings") { box.innerHTML = ""; return; }
+      if (!pickedPlatforms(m).length) { box.innerHTML = '<p class="muted">Pilih minimal satu platform.</p>'; return; }
+      const my = ++seq; box.innerHTML = '<p class="muted">Menghitung jadwal…</p>';
+      try {
+        const r = await api("/api/schedules/bulk", { body: body(true) });
+        if (my !== seq) return;
+        const last = r.days[r.days.length - 1];
+        const full = r.days.filter((d) => d.clips >= r.per_day).length;
+        box.innerHTML = `<p style="margin:10px 0 6px"><b>${r.clips} klip → ${r.days.length} hari</b>${r.days.length ? ` (${esc(dayName(r.days[0].ts))} – ${esc(dayName(last.ts))})` : ""} · maks ${r.per_day} klip/hari
+          ${full && full < r.days.length ? `<span class="muted"> · ${full} hari penuh + ${r.days.length - full} hari sisa</span>` : ""}</p>
+          ${r.already ? `<p class="tiny muted" style="margin:0 0 6px">${r.already} klip sudah punya jadwal aktif — dilewati agar tidak terunggah dua kali.</p>` : ""}
+          <div class="list" style="max-height:220px;overflow:auto">${r.days.map((d) => `<div class="row nw" style="padding:4px 0;gap:10px"><b class="nowrap" style="min-width:96px">${esc(dayName(d.ts))}</b><span class="muted nowrap">${d.clips} klip</span>
+            <span class="tiny">${Object.entries(d.slots).map(([pf, t]) => `${PF[pf] || pf} ${t.join(", ")}`).join(" · ")}</span></div>`).join("")}</div>
+          <p class="tiny muted" style="margin:6px 0 0">Jam bisa geser beberapa menit agar tidak terlihat seperti bot. <a href="#settings" data-close>Ubah jam di Pengaturan</a></p>`;
+      } catch (err) { if (my === seq) box.innerHTML = `<p class="bad">${esc(err.message || String(err))}</p>`; }
+    };
+    m.addEventListener("change", (e) => { if (e.target.matches("input[name=bm], [data-at], [data-pf], [data-gap]")) preview(); });
+    preview();
     $("[data-save]", m).onclick = (e) => busy(e.currentTarget, async () => {
       try {
-        const hours = $("[data-hours]", m).value.split(",").map((x) => parseInt(x, 10)).filter((x) => x >= 0 && x < 24);
-        const gap = Math.max(0, parseInt($("[data-gap]", m).value || "0", 10));
-        const r = await api("/api/schedules/bulk", { body: { asset_ids: assetIds, per_day: +$("[data-pd]", m).value, hours, gap_min: gap, start_at: new Date($("[data-at]", m).value).getTime() / 1000, platforms: pickedPlatforms(m) } });
-        toast(`${r.length} klip dijadwalkan${gap ? ` tiap ${gap} menit` : ""}`); closeModal(); onSaved && onSaved();
+        const r = await api("/api/schedules/bulk", { body: body(false) });
+        if (r.mode === "settings") toast(`${r.clips} klip dijadwalkan dalam ${r.days.length} hari` + (r.already ? ` · ${r.already} sudah terjadwal (dilewati)` : ""));
+        else toast(`${r.length} klip dijadwalkan tiap ${body(false).gap_min} menit`);
+        closeModal(); onSaved && onSaved();
       } catch (err) { fail(err); }
     });
   });

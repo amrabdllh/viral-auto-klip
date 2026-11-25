@@ -35,6 +35,7 @@ config.AUTO_PUBLISH_PER_DAY = 5
 config.UPLOAD_SLOT_MODE = "riset"  # bagian awal menguji mode riset (setelan .env pengguna tidak ikut)
 config.AUTO_PUBLISH_MIN_GAP_H = 2.5
 config.TIKTOK_POST_HOURS = config.YOUTUBE_POST_HOURS = ""  # jam tetap akun diuji terpisah di bawah
+config.TIKTOK_POST_HOURS_WEEKEND = config.YOUTUBE_POST_HOURS_WEEKEND = ""  # .env pengguna tidak ikut
 
 START = datetime(2026, 11, 22, 0, 30).timestamp()  # Minggu 00:30
 clips = lambda n, tag: [{"file_path": f"{tag}{i}.mp4", "score": 90 - i, "ai_title": f"{tag}{i}", "niche": "gaming"}

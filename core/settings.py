@@ -70,11 +70,15 @@ SCHEMA: List[Dict] = [
      "help": "Riset: paling mengikuti data harian, jam sedikit bergeser tiap hari. Jangkar: jam sama setiap hari kerja / akhir pekan "
              "(penonton terbiasa & hasil mudah dibandingkan), satu slot digeser ±1 jam bergiliran untuk menguji jam baru. "
              "Keduanya beralih ke jam yang terbukti ramai di channel-mu begitu datanya cukup."},
-    {"key": "TIKTOK_POST_HOURS", "group": "Upload otomatis", "label": "Jam upload tetap TikTok (opsional)", "type": "str",
-     "help": "Mis. 09:00,13:00,18:00,20:00,22:00 — dari Analisis TikTok Studio → Pemirsa → Waktu paling aktif. "
-             "Diisi = jam ini dipakai setiap hari (menit sedikit diacak). Kosong = jam dipilih otomatis oleh riset."},
-    {"key": "YOUTUBE_POST_HOURS", "group": "Upload otomatis", "label": "Jam upload tetap YouTube (opsional)", "type": "str",
-     "help": "Sama seperti di atas untuk YouTube Shorts. Kosong = otomatis."},
+    {"key": "TIKTOK_POST_HOURS", "group": "Upload otomatis", "label": "Jam upload TikTok · Senin–Jumat (opsional)", "type": "str",
+     "help": "Mis. 09:00,13:00,18:00,20:00 — dari Analisis TikTok Studio → Pemirsa → Waktu paling aktif. "
+             "Diisi = jam ini dipakai tiap hari kerja (menit sedikit diacak). Kosong = jam dipilih otomatis oleh riset."},
+    {"key": "TIKTOK_POST_HOURS_WEEKEND", "group": "Upload otomatis", "label": "Jam upload TikTok · Sabtu–Minggu (opsional)", "type": "str",
+     "help": "Akhir pekan penonton bangun lebih siang & ramai lebih lama. Kosong = sama dengan jam Senin–Jumat."},
+    {"key": "YOUTUBE_POST_HOURS", "group": "Upload otomatis", "label": "Jam upload YouTube · Senin–Jumat (opsional)", "type": "str",
+     "help": "Sama seperti TikTok, untuk YouTube Shorts. Kosong = otomatis (riset / jam jangkar)."},
+    {"key": "YOUTUBE_POST_HOURS_WEEKEND", "group": "Upload otomatis", "label": "Jam upload YouTube · Sabtu–Minggu (opsional)", "type": "str",
+     "help": "Kosong = sama dengan jam Senin–Jumat."},
     {"key": "UPLOAD_NATIVE_SCHEDULE", "group": "Upload otomatis", "label": "Unggah lebih awal pakai jadwal bawaan YouTube/TikTok", "type": "bool",
      "help": "Jadwal diunggah sekarang dan YouTube/TikTok sendiri yang memposting pada jamnya — tidak terpengaruh sesi cookie mati atau laptop mati. TikTok butuh Mode upload 'post'."},
     {"key": "KLING_API_KEY", "group": "API key", "label": "Kling AI (video)", "type": "secret",
@@ -374,7 +378,7 @@ def _validate(key: str, value) -> str:
             raise SettingsError(f"{item['label']}: provider tidak dikenal: {', '.join(unknown)} "
                                 f"(pilihan: {', '.join(ai_providers.PROVIDER_INFO)})")
         return ",".join(f"{name}:{model}" if model else name for _, model, name in entries)
-    if key.endswith("_POST_HOURS") and text:
+    if key.endswith(("_POST_HOURS", "_POST_HOURS_WEEKEND")) and text:
         from .autopublish import format_hours, parse_hours
         hours = parse_hours(text)
         if not hours:

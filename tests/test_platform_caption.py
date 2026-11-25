@@ -34,11 +34,15 @@ check("TikTok tetap punya #fyp", "#fyp" in tt)
 check("judul ikut terpasang", tt.startswith(TITLE))
 check("tidak ada spasi dobel", "  " not in tt)
 
-yt = _caption_for("youtube", TITLE, DESC)
-check("YouTube tetap membawa #shorts", "#shorts" in yt.lower())
-check("YouTube tidak diubah", yt == f"{TITLE} {DESC}")
+from core.scheduler import platform_copy  # noqa: E402
+yt = platform_copy("youtube", TITLE, DESC)
+print("youtube:", yt)
+check("YouTube: hashtag topik masuk judul", yt["title"] == f"{TITLE} #windahbasudara #GTAVI")
+check("YouTube: hashtag umum (#shorts/#fyp) tidak memenuhi judul", "#shorts" not in yt["title"] and "#fyp" not in yt["title"])
+check("YouTube: deskripsi tetap membawa #shorts", "#shorts" in yt["description"].lower())
+check("TikTok: kalimat deskripsi tidak ikut (caption pendek)", "Cerita lengkapnya" not in tt)
 
-check("caption tanpa hashtag aman", _caption_for("tiktok", "Halo", "Dunia") == "Halo Dunia")
+check("caption tanpa hashtag aman", _caption_for("tiktok", "Halo", "Dunia") == "Halo")
 # default BAWAAN kode = draft (aman); nilai aktif boleh 'post' bila pengguna memilihnya di Pengaturan
 _src = (Path(config.__file__)).read_text(encoding="utf-8")
 check("default mode TikTok = draft", 'os.getenv("TIKTOK_UPLOAD_MODE", "draft")' in _src)

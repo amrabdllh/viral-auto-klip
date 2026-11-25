@@ -232,11 +232,13 @@ def _transcript_cache_path(video: str, dev: str, model: str, keyterms: Optional[
     return db.DATA_DIR / "source_cache" / "transcripts" / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.json"
 
 
-def register_clips(ctx: JobContext, clips: List[Dict], source: str) -> None:
+def register_clips(ctx: JobContext, clips: List[Dict], source: str, niche: str = "") -> None:
     for c in clips:
         meta = {k: c.get(k) for k in ("score", "category", "hook_text", "ai_title", "upload_caption", "hashtags",
-                                       "duration", "thumbnail", "reason", "fyp_grade", "subtitle_live")}
+                                       "duration", "thumbnail", "reason", "fyp_grade", "subtitle_live", "thumb_text")}
         meta["source"] = source
+        if niche or c.get("niche"):
+            meta["niche"] = niche or c.get("niche")  # dipakai "Jadwalkan semua" untuk riset jam & hashtag niche
         meta["title"] = c.get("ai_title") or c.get("hook_text") or Path(c["file_path"]).stem
         c["asset_id"] = ctx.asset("clip", c["file_path"], name=meta["title"], meta=meta)["id"]
 
@@ -740,7 +742,8 @@ def clip_quick(ctx: JobContext) -> Dict:
     ai_thumbnails(ctx, clips, video, p, info.get("content_type", ""), str(info.get("title") or ""))
     ctx.progress(92, "Publish", "Paket upload & metadata")
     publish = _publish(ctx, clips, p)
-    register_clips(ctx, clips, "analisis_ai")
+    register_clips(ctx, clips, "analisis_ai",
+                   niche=p.get("publish_category") or ("gaming" if info.get("content_type") == "gaming_stream" else ""))
     (ctx.dir / "transcript.json").write_text(json.dumps(transcript, ensure_ascii=False), encoding="utf-8")
     auto_pub = None
     if p.get("auto_publish") and clips:  # v6.8: langsung dijadwalkan ke jam FYP terbaik, upload sendiri
