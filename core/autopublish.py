@@ -351,6 +351,8 @@ def schedule_clips(clips: List[Dict], platforms: Optional[List[str]] = None, nic
         for c, slot in zip(group, _plan(niche, pfs, len(group), start, taken, per_day, gap, plans)):
             cp = copy_for(c, extra_tags)
             for pf, (ts, why) in slot.items():
+                if pf in (c.get("_skip_platforms") or []):
+                    continue  # klip ini sudah ada di platform itu (riwayat unggahan) → jangan dobel
                 item = ({"file_path": c["file_path"], "title": cp["title"], "description": cp["description"],
                          "platforms": [pf], "run_at": ts, "status": "preview"} if dry_run
                         else db.add_schedule(c["file_path"], cp["title"], cp["description"], [pf], ts))
