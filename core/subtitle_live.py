@@ -131,9 +131,36 @@ def editor_view(final_path: str) -> Dict:
         return {"available": False}
     return {"available": True, "style": data.get("style"), "enabled": data.get("enabled", True),
             "edited_at": data.get("edited_at"), "tempo": data.get("tempo", 1.0),
+            "subtitle_y": current_y(data),
             "segments": [{"i": i, "start": s["start"], "end": s["end"], "text": s.get("text") or
                           " ".join(w["word"] for w in s.get("words") or [])} for i, s in enumerate(data["segments"])],
             "original": data.get("original")}
+
+
+# ============================================================================ posisi
+
+def current_y(data: Dict) -> float:
+    """Posisi subtitle saat ini (pecahan dari atas, dibulatkan) untuk slider editor."""
+    st = dict(config.CAPTION_STYLES.get(data.get("style") or "") or {})
+    st.update(data.get("style_overrides") or {})
+    margin = float(st.get("vertical_position", 420))
+    return round(1.0 - margin / 1920.0, 3)
+
+
+def move_overrides(overrides: Dict, subtitle_y: float) -> Dict:
+    """Override gaya dengan posisi baru. Zona geser sementara (caption turun selama headline hook) hanya
+    dipertahankan bila memang di bawah posisi baru — kalau tidak, subtitle akan melompat ke atas."""
+    from .clipper import subtitle_margin
+
+    out = dict(overrides)
+    mv = subtitle_margin(max(0.12, min(0.92, subtitle_y)))
+    out["vertical_position"] = mv
+    zones = [z for z in out.get("margin_zones") or [] if len(z) >= 3 and int(z[2]) < mv]
+    if zones:
+        out["margin_zones"] = zones
+    else:
+        out.pop("margin_zones", None)
+    return out
 
 
 # ============================================================================ edit teks
@@ -169,9 +196,10 @@ def apply_text_edits(segments: List[Dict], edits: Dict[int, str]) -> List[Dict]:
 # ============================================================================ burn ulang
 
 def reburn(final_path: str, *, style: Optional[str] = None, edits: Optional[Dict[int, str]] = None,
-           enabled: Optional[bool] = None, reset: bool = False) -> Dict:
+           enabled: Optional[bool] = None, reset: bool = False, subtitle_y: Optional[float] = None) -> Dict:
     """Burn ulang caption ke klip final. `style` = id gaya (config.CAPTION_STYLES), `edits` = {indeks: teks},
-    `enabled=False` = tanpa caption, `reset` = kembali ke teks & gaya asli."""
+    `enabled=False` = tanpa caption, `reset` = kembali ke teks & gaya asli,
+    `subtitle_y` = posisi bawah teks (pecahan tinggi layar dari atas, 0.12–0.92)."""
     from . import editing
     from .clipper import _escape_ffmpeg_filter_path, _video_encode_args
     from .utils import generate_ass_subtitles
@@ -199,8 +227,10 @@ def reburn(final_path: str, *, style: Optional[str] = None, edits: Optional[Dict
         style_name = style or data.get("style") or "viral"
         on = data.get("enabled", True) if enabled is None else bool(enabled)
         st = dict(config.CAPTION_STYLES.get(style_name) or config.CAPTION_STYLES["viral"])
-        st.update(data.get("style_overrides") or {})
         W, H = int(data["width"]), int(data["height"])
+        if subtitle_y is not None and not reset:
+            data["style_overrides"] = move_overrides(data.get("style_overrides") or {}, float(subtitle_y))
+        st.update(data.get("style_overrides") or {})
         ass = d / "captions_live.ass"
         if on and segs:
             generate_ass_subtitles(segs, st, str(ass), W, H)

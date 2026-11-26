@@ -395,10 +395,24 @@ def render_options(params: Dict) -> Dict:
         # v6.4: "auto" = facecam streamer terdeteksi → split wajah/gameplay; podcast/grup tetap reframe wajah
         layout=params.get("layout") or ("face" if params.get("video_mode") in ("podcast", "group") else "auto"),
         lower_third=params.get("_lower_third") or None,
+        # tata letak manual (kosong = otomatis): tinggi subtitle, tinggi/posisi facecam, letak facecam di sumber
+        manual_layout=manual_layout(params),
         caption_language=(params.get("caption_language") or "") if _needs_translation(params) else "",
         source_credit=params.get("_source_credit") or "",
         content_type=params.get("_content_type") or "",
     )
+
+
+def manual_layout(params: Dict) -> Dict:
+    """Tata letak manual dari form: nilai slider hanya dipakai bila toggle-nya aktif. Pemanggil API tanpa toggle
+    (kunci subtitle_manual / cam_manual tidak ada) cukup mengirim nilainya."""
+    out: Dict = {}
+    if params.get("subtitle_manual", "subtitle_manual" not in params) and params.get("subtitle_y") not in (None, ""):
+        out["subtitle_y"] = params["subtitle_y"]
+    if params.get("cam_manual", "cam_manual" not in params):
+        out.update({k: params[k] for k in ("cam_ratio", "cam_position", "cam_corner", "cam_size")
+                    if params.get(k) not in (None, "")})
+    return out
 
 
 def _needs_translation(params: Dict) -> bool:

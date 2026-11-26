@@ -138,6 +138,7 @@ def process_clips(
     layout: str = "auto",
     lower_third: Optional[Dict] = None,
     stream_layout: Optional[Dict] = None,
+    manual_layout: Optional[Dict] = None,
     caption_language: str = "",
     source_credit: str = "",
     content_type: str = "",
@@ -164,29 +165,56 @@ def process_clips(
     # stream_layout eksplisit (dict) menang: campaign/live sudah menentukan kotak
     # facecam sendiri (rect preset atau deteksi per jendela). layout="off" = tanpa split.
     preset_layout = stream_layout if isinstance(stream_layout, dict) else None
+    manual = clean_manual_layout(manual_layout)
+    can_split = layout in ("auto", "gaming") and target_aspect == "portrait" and not split_screen and not group_framing
     stream_layout = None
+    corner = manual.get("cam_corner")
     if preset_layout is not None:
         stream_layout = preset_layout
-    elif layout != "off" and layout in ("auto", "gaming") and target_aspect == "portrait" \
-            and not split_screen and not group_framing:
+    elif can_split and not corner:
         try:
-            stream_layout = detect_stream_layout(video_path, clips_data, force=layout == "gaming")
+            stream_layout = detect_stream_layout(video_path, clips_data, force=layout == "gaming",
+                                                 cam_ratio=manual.get("cam_ratio") or 0.38)
         except Exception as exc:
             logger.warning(f"Deteksi layout facecam gagal: {exc}")
+    if corner and (can_split or preset_layout is not None):
+        # letak facecam dipilih pengguna → wajah dicari HANYA di area itu (dipaksa split), kotak dipusatkan ke wajah.
+        # Tidak ketemu → kotak tetap di pojok itu (apply_manual_layout).
+        ratio = manual.get("cam_ratio") or float((preset_layout or {}).get("cam_ratio") or 0.38)
+        try:
+            det = detect_stream_layout(video_path, clips_data, force=True, cam_ratio=ratio, area=corner)
+        except Exception as exc:  # noqa: BLE001
+            det = None
+            logger.warning(f"Deteksi facecam di area {corner} gagal: {exc}")
+        if det:
+            logger.info(f"  Facecam ditemukan di area pilihan ({corner}): {det['cam_box']}")
+            stream_layout = {**(preset_layout or {}), **{k: det[k] for k in ("cam_box", "game_box", "face")},
+                             "cam_ratio": ratio}
+            manual = {k: v for k, v in manual.items() if k not in ("cam_corner", "cam_size")}
+        else:
+            logger.info(f"  Wajah tidak ditemukan di area {corner} → kotak facecam tetap di pojok itu")
+    stream_layout = apply_manual_layout(stream_layout, manual, can_split=can_split or preset_layout is not None)
     if stream_layout:
-        logger.info(f"  Layout gaming: facecam {stream_layout['cam_box']} → split wajah/gameplay")
+        logger.info(f"  Layout gaming: facecam {stream_layout['cam_box']} → split wajah/gameplay"
+                    + ("" if stream_layout.get("cam_top", True) else " (facecam di bawah)"))
         # Posisi caption: layout campaign boleh menetapkan sendiri (mis. di bawah
         # gameplay, tepat di atas banner). Default: di sambungan facecam/gameplay.
         caption_y = stream_layout.get("caption_y")
         if caption_y is not None:
             style["vertical_position"] = max(80, min(1800, int(caption_y)))
             logger.info(f"  Caption Y (margin bawah): {style['vertical_position']}px")
-        else:
+        elif stream_layout.get("cam_top", True):
             seam = int(1920 * float(stream_layout.get("cam_ratio", 0.38)))
             style["vertical_position"] = max(200, 1920 - seam - 150)
+        else:  # facecam di bawah: caption tepat di atas sambungan gameplay/facecam
+            style["vertical_position"] = int(1920 * float(stream_layout.get("cam_ratio", 0.38))) + 60
         if stream_layout.get("caption_font_size"):
             style["font_size"] = max(40, min(110, int(stream_layout["caption_font_size"])))
             logger.info(f"  Caption font: {style['font_size']}px")
+    if manual.get("subtitle_y") is not None:  # tinggi subtitle pilihan pengguna menang atas semua posisi otomatis
+        style["vertical_position"] = subtitle_margin(manual["subtitle_y"])
+        logger.info(f"  Subtitle manual: {round(manual['subtitle_y'] * 100)}% dari atas "
+                    f"(margin bawah {style['vertical_position']}px)")
 
     content_rect = None
     if not stream_layout:  # sumber berbingkai (kartu video + border hitam + branding) → crop hanya gambarnya
@@ -349,7 +377,8 @@ def _process_single_clip(
             round(float(p) - float(clip_info["start"]), 2) for p in list(clip_info.get("signal_peaks") or []) + laughs
             if float(clip_info["start"]) + 1 <= float(p) <= float(clip_info["end"]) - 0.5})
         if layout:
-            clip_info["hook_y"] = 0.56
+            # hook di panel gameplay: di bawah caption sambungan (facecam atas) / dekat atas layar (facecam bawah)
+            clip_info["hook_y"] = 0.56 if layout.get("cam_top", True) else 0.12
 
         # 1. Extract raw segment
         extract_segment(video_path, clip_info["start"], clip_info["end"], str(raw_clip_path), crop=opts.get("content_rect"))
@@ -440,7 +469,7 @@ def _process_single_clip(
             # (v6.4) streamer: facecam di atas, gameplay di bawah (tanpa tracking wajah per frame)
             from . import ffx
             ffx.split_cam(str(working_clip_path), str(reframed_path), tuple(layout["cam_box"]), tuple(layout["game_box"]),
-                          cam_ratio=layout["cam_ratio"], cam_top=True,
+                          cam_ratio=layout["cam_ratio"], cam_top=bool(layout.get("cam_top", True)),
                           face=tuple(layout["face"][:2]) if layout.get("face") else None)
         elif opts["enable_face_reframe"]:
             face_bboxes = detect_faces_in_clip(
@@ -624,7 +653,10 @@ def _process_single_clip(
         if _hook_mode() == "broll" and not clip_info.get("no_hook_card"):
             from . import hook_broll
             try:
-                region = (0.0, float(layout["cam_ratio"])) if isinstance(layout, dict) and layout.get("cam_ratio") else None
+                region = None
+                if isinstance(layout, dict) and layout.get("cam_ratio"):  # area facecam (B-roll tidak menutupinya)
+                    r = float(layout["cam_ratio"])
+                    region = (0.0, r) if layout.get("cam_top", True) else (1.0 - r, 1.0)
                 intro = hook_broll.build(clip_info, input_for_caption, out_w, out_h, clip_dir, _video_encode_args(crf=17),
                                          region=region)
             except Exception as exc:  # noqa: BLE001
@@ -701,7 +733,9 @@ def _process_single_clip(
             # Split/campaign: kartu nama di area gameplay, di atas subtitle dan
             # banner (0.86 dulu menabrak banner MotionKlip di y=1584).
             f, files = editing.lower_third_filters(lt_items, clip_dir, _drawtext_font(), _escape_ffmpeg_filter_path,
-                                                   y_frac=0.74 if layout else 0.58)
+                                                   y_frac=(0.74 if layout.get("cam_top", True) else
+                                                           max(0.3, 0.8 - float(layout.get("cam_ratio", 0.38))))
+                                                   if layout else 0.58)
             overlays += f
             overlay_files += files
         polish = dict(width=out_w, height=out_h, duration=clip_duration, ass_path=ass_for_burn, grade=edit["color_grade"],
@@ -930,7 +964,7 @@ def _process_single_clip(
             "thumbnail": str(thumb_path),
             "thumbnail_alt": str(thumb_alt_path) if thumb_alt_path else None,
             # v6.9: tata letak facecam (relatif ke video sumber) → thumbnail AI mengambil wajah bersih dari sumber
-            **({"stream_layout": {k: layout[k] for k in ("cam_box", "face", "cam_ratio") if k in layout}}
+            **({"stream_layout": {k: layout[k] for k in ("cam_box", "face", "cam_ratio", "cam_top") if k in layout}}
                if isinstance(layout, dict) else {}),
             "edit_style": edit,
             # durasi nyata file akhir (cold open, freeze, tempo ikut terhitung)
@@ -947,6 +981,94 @@ def _process_single_clip(
 # Lebar wajah maksimum (fraksi lebar frame) yang masih dianggap facecam streamer.
 # 0.32 memberi ruang untuk facecam besar; wajah podcast biasanya >= 0.35 dan di tengah.
 FACE_CAM_MAX_WIDTH = 0.32
+
+# Letak facecam manual di video sumber (pojok) → kotak relatif (x, y, w, h). Webcam 16:9 di frame 16:9:
+# tinggi relatif = lebar relatif.
+CAM_CORNERS = ("tr", "tl", "br", "bl")
+
+
+def _pct(value, lo: float, hi: float) -> Optional[float]:
+    """'38' / 38 / 0.38 → 0.38 (dibatasi lo..hi). Kosong / 'auto' / tidak valid → None."""
+    if value in (None, "", "auto"):
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v > 1:
+        v /= 100.0
+    return max(lo, min(hi, v))
+
+
+def clean_manual_layout(raw: Optional[Dict]) -> Dict:
+    """Pengaturan tata letak manual dari form (semua opsional; kosong = otomatis).
+
+    subtitle_y  : posisi bawah teks subtitle, pecahan tinggi layar dari atas (0.12–0.92)
+    cam_ratio   : tinggi panel facecam di klip (0.2–0.6)
+    cam_top     : False = facecam di bawah, gameplay di atas
+    cam_corner  : tr/tl/br/bl = letak facecam di video sumber (melewati deteksi otomatis)
+    cam_size    : lebar facecam di video sumber (0.1–0.5), dipakai bersama cam_corner
+    """
+    raw = raw or {}
+    out: Dict = {}
+    y = _pct(raw.get("subtitle_y"), 0.12, 0.92)
+    if y is not None:
+        out["subtitle_y"] = y
+    r = _pct(raw.get("cam_ratio"), 0.2, 0.6)
+    if r is not None:
+        out["cam_ratio"] = r
+    pos = str(raw.get("cam_position") or "").strip().lower()
+    if pos in ("bottom", "bawah") or raw.get("cam_top") is False:
+        out["cam_top"] = False
+    corner = str(raw.get("cam_corner") or "").strip().lower()
+    if corner in CAM_CORNERS:
+        out["cam_corner"] = corner
+        out["cam_size"] = _pct(raw.get("cam_size"), 0.1, 0.5) or 0.25
+    return out
+
+
+def in_area(cx: float, cy: float, area: str) -> bool:
+    """Titik (relatif 0..1) berada di setengah layar yang ditunjuk pojok `area` (tr/tl/br/bl)?"""
+    if not area or len(area) != 2:
+        return True
+    return (cy < 0.5 if area[0] == "t" else cy >= 0.5) and (cx >= 0.5 if area[1] == "r" else cx < 0.5)
+
+
+def corner_cam_box(corner: str, size: float = 0.25) -> List[float]:
+    w = max(0.1, min(0.5, float(size)))
+    x = 1.0 - w if corner in ("tr", "br") else 0.0
+    y = 1.0 - w if corner in ("br", "bl") else 0.0
+    return [round(x, 4), round(y, 4), round(w, 4), round(w, 4)]
+
+
+def subtitle_margin(subtitle_y: float, height: int = 1920) -> int:
+    """Posisi subtitle (pecahan dari atas) → margin bawah ASS dalam px."""
+    return max(80, min(int(height * 0.9), int(round(height * (1.0 - float(subtitle_y))))))
+
+
+def apply_manual_layout(layout: Optional[Dict], manual: Dict, can_split: bool = True) -> Optional[Dict]:
+    """Terapkan pengaturan facecam manual ke hasil deteksi/preset. Tanpa pengaturan → layout apa adanya."""
+    if not manual or not can_split:
+        return layout
+    out = dict(layout) if layout else None
+    if manual.get("cam_corner"):
+        box = corner_cam_box(manual["cam_corner"], manual.get("cam_size", 0.25))
+        out = {**(out or {}), "cam_box": box, "game_box": gameplay_box_from_cam(box), "face": None, "manual": True}
+        out.setdefault("cam_ratio", 0.38)
+    if not out:
+        return None  # deteksi tidak menemukan facecam & letaknya tidak diatur → tetap tanpa split
+    if manual.get("cam_ratio"):
+        out["cam_ratio"] = manual["cam_ratio"]
+        face = out.get("face")
+        if face and len(face) >= 4 and not out.get("manual"):  # kotak dihitung ulang agar wajah tetap di tengah panel
+            out["cam_box"] = centered_cam_box(face, out["cam_ratio"])
+            out["game_box"] = gameplay_box_from_cam(out["cam_box"])
+    if manual.get("cam_top") is False:
+        if out.get("campaign"):
+            logger.info("  Facecam bawah dilewati: template campaign memakai banner di bawah layar")
+        else:
+            out["cam_top"] = False
+    return out
 
 
 def centered_cam_box(face, cam_ratio: float = 0.38) -> List[float]:
@@ -991,8 +1113,10 @@ def gameplay_box_from_cam(cam: Sequence[float]) -> List[float]:
 
 
 def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = None, samples: int = 14,
-                         force: bool = False, cam_ratio: float = 0.38) -> Optional[Dict]:
+                         force: bool = False, cam_ratio: float = 0.38, area: str = "") -> Optional[Dict]:
     """Deteksi facecam streamer (wajah kecil yang posisinya tetap di pinggir layar gameplay).
+    `area` = tr/tl/br/bl: hanya wajah di setengah-kanan/kiri × setengah-atas/bawah itu yang dihitung (pilihan
+    pengguna "letak facecam di sumber"), sehingga wajah lain di gameplay tidak salah terpilih.
 
     Return {cam_box, game_box, cam_ratio} relatif 0..1, atau None bila bukan layout streamer
     (podcast/vlog: wajah besar di tengah → tetap pakai reframe wajah biasa)."""
@@ -1026,6 +1150,8 @@ def detect_stream_layout(video_path: str, clips_data: Optional[List[Dict]] = Non
             # penuh dan gameplay hilang. Podcast tetap terpisah karena wajahnya
             # >= 35% dan biasanya di tengah.
             small = [((x + w / 2) / vw, (y + h / 2) / vh, w / vw, h / vh) for (x, y, w, h), s in faces if s >= 0.6 and w / vw < FACE_CAM_MAX_WIDTH]
+            if area:
+                small = [f for f in small if in_area(f[0], f[1], area)]
             big = [1 for (x, y, w, h), s in faces if s >= 0.6 and w / vw >= FACE_CAM_MAX_WIDTH]
             if big and not force:
                 found.append((-1, -1, 0, 0))  # ada wajah besar = kemungkinan bukan gameplay

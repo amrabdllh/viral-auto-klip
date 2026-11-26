@@ -271,6 +271,7 @@ class ReburnRequest(BaseModel):
     edits: Dict[str, str] = {}
     enabled: Optional[bool] = None
     reset: bool = False
+    subtitle_y: Optional[float] = None  # posisi bawah teks, pecahan tinggi layar dari atas (0.12–0.92)
 
 
 @router.post("/subtitle/reburn")
@@ -284,7 +285,8 @@ def subtitle_reburn(req: ReburnRequest):
     except ValueError:
         raise HTTPException(400, "Indeks layar subtitle harus angka")
     try:
-        out = subtitle_live.reburn(str(p), style=req.style or None, edits=edits, enabled=req.enabled, reset=req.reset)
+        out = subtitle_live.reburn(str(p), style=req.style or None, edits=edits, enabled=req.enabled, reset=req.reset,
+                                     subtitle_y=req.subtitle_y)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except subprocess.CalledProcessError as exc:
