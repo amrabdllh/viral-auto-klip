@@ -105,8 +105,8 @@ SCHEMA: List[Dict] = [
      "labels": {"elevenlabs": "ElevenLabs Scribe (paling akurat)", "auto": "Whisper di GPU, CPU bila tidak ada", "cuda": "Whisper di GPU NVIDIA",
                 "cpu": "Whisper di CPU (lambat)", "groq": "Groq Whisper (cloud)"},
      "help": "Scribe menangkap ucapan lebih lengkap dan timestamp-nya pas, jadi subtitle tidak nyangkut. Bila gagal, otomatis pindah ke Whisper."},
-    {"key": "ELEVENLABS_STT_MODEL", "group": "Transkripsi", "label": "Model Scribe", "type": "enum", "options": ["scribe_v2", "scribe_v1"],
-     "labels": {"scribe_v2": "Scribe v2 (disarankan)", "scribe_v1": "Scribe v1"}},
+    {"key": "ELEVENLABS_STT_MODEL", "group": "Transkripsi", "label": "Model Scribe", "type": "enum", "options": ["scribe_v3", "scribe_v2", "scribe_v1"],
+     "labels": {"scribe_v3": "Scribe v3 (disarankan)", "scribe_v2": "Scribe v2", "scribe_v1": "Scribe v1"}},
     {"key": "ELEVENLABS_KEYTERMS", "group": "Transkripsi", "label": "Ejaan nama otomatis (keyterm)", "type": "bool",
      "help": "Nama channel, tag & nama di judul video dikirim ke Scribe agar dieja benar (mis. Windah, bukan Winda). +20% biaya Scribe"},
     {"key": "TRANSCRIBE_KEYTERMS", "group": "Transkripsi", "label": "Keyterm tetap", "type": "str",
@@ -511,8 +511,8 @@ def recommended() -> Dict:
              USE_NVENC=gpu, PARALLEL_CLIPS=3 if gpu else 2)
     if has("ELEVENLABS_API_KEY"):
         # Scribe: kata lebih lengkap & timestamp pas (subtitle tidak nyangkut); Whisper lokal jadi cadangan
-        v.update(WHISPER_DEVICE="elevenlabs", ELEVENLABS_STT_MODEL="scribe_v2")
-        notes.append("Transkripsi: ElevenLabs Scribe v2 (paling akurat), cadangan Whisper " + ("GPU" if gpu else "CPU"))
+        v.update(WHISPER_DEVICE="elevenlabs", ELEVENLABS_STT_MODEL="scribe_v3")
+        notes.append("Transkripsi: ElevenLabs Scribe v3 (paling akurat), cadangan Whisper " + ("GPU" if gpu else "CPU"))
     elif gpu:
         v["WHISPER_DEVICE"] = "auto"
         notes.append("Transkripsi: Whisper large-v3-turbo di GPU NVIDIA")
