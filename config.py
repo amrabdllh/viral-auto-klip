@@ -133,7 +133,7 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 MISTRAL_API_KEY = _secret("MISTRAL_API_KEY")
 MISTRAL_BASE_URL = os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
 ELEVENLABS_API_KEY = _secret("ELEVENLABS_API_KEY")
-ELEVENLABS_STT_MODEL = os.getenv("ELEVENLABS_STT_MODEL", "scribe_v2")
+ELEVENLABS_STT_MODEL = os.getenv("ELEVENLABS_STT_MODEL", "scribe_v3")
 # Keyterm prompting Scribe: nama channel/tag/judul + daftar tetap dikirim agar nama dieja benar (+20% biaya dasar).
 ELEVENLABS_KEYTERMS = os.getenv("ELEVENLABS_KEYTERMS", "1").lower() in ("1", "true", "yes")
 TRANSCRIBE_KEYTERMS = os.getenv("TRANSCRIBE_KEYTERMS", "")
