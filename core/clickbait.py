@@ -42,7 +42,7 @@ SIAPA MELAKUKAN APA harus persis seperti di klip: "gua/aku/kita" = kreator/pemai
 bernama (mis. LUCIA, JASON) kecuali klip jelas menyebut tokoh itu yang melakukannya — salah pelaku = bohong.
 JUJUR & SPESIFIK: hanya kejadian/ucapan yang ADA DI KLIP INI. Judul video sumber hanya untuk tahu nama game/tokoh — bukan
 bukti kejadian. Jangan mengarang kejadian, angka, nama, atau hal sensitif.
-{locked}{avoid}
+{streamer}{patterns}{locked}{avoid}
 Judul video sumber (hanya untuk nama): {video_title}
 {focus}Isi klip (ucapan kreator):
 \"\"\"{text}\"\"\"
@@ -63,6 +63,7 @@ Nilai SETIAP paket (0-10, jujur true/false):
 
 {focus}Isi klip: \"\"\"{text}\"\"\"
 Judul video sumber (hanya konteks nama): {video_title}
+{streamer_judge}
 
 PAKET:
 {pakets}
@@ -71,6 +72,8 @@ Balas JSON: {{"nilai": [{{"i": 0, "jelas": 0, "penasaran": 0, "sinkron": 0, "tep
 
 # model terkuat yang tersedia untuk tugas kecil tapi menentukan ini (2 panggilan per klip)
 _STRONG = (("DeepSeek", "deepseek-v4-pro"), ("Anthropic", "claude-sonnet-5-5"), ("OpenAI", "gpt-4.1"))
+_CLIPPER_CHANNEL = re.compile(r"clip|klip|moments?\b|highlights?|shorts?\b|compilation|kompilasi|best of|"
+                              r"reupload|re-upload|fan ?page|\bfans?\b|archive|arsip|vods?\b", re.I)
 _ROMAN = {"II": "2", "III": "3", "IV": "4", "V": "5", "VI": "6", "VII": "7", "VIII": "8", "IX": "9", "X": "10"}
 
 
@@ -144,9 +147,25 @@ def main_moment(clip: Dict) -> str:
             + "\n".join(f"- {p}" for p in parts) + "\n")
 
 
+def streamer_block(streamer: str) -> str:
+    """Nama streamer pemilik siaran untuk judul. Riset outlier GTA 6 (2026-11-26): judul yang menyebut streamer
+    ("Tara bilang GTA 5 lewat jauh" 54x, "Windah Review Mandi di GTA 6" 10x) menang di 3 channel berbeda — penonton
+    mengenal namanya. Dipakai sebagian paket saja, dan hanya untuk aksi/reaksi streamer itu sendiri."""
+    name = re.sub(r"\s+", " ", str(streamer or "")).strip()
+    # channel kumpulan klip/re-upload bukan streamernya → "gua" di klip bukan pemilik channel, nama tidak dipakai
+    if not name or _CLIPPER_CHANNEL.search(name):
+        return ""
+    return (f"STREAMER pemilik siaran (\"gua/aku\" di klip = dia): {name}. Penonton mengenal namanya → tulis 2 dari 5 "
+            "paket dengan nama panggilannya di JUDUL (boleh dipendekkan ke panggilan umum, mis. \"Windah Basudara\" → "
+            "\"Windah\"), HANYA untuk aksi/reaksi yang dia lakukan sendiri di klip. Jangan menisbatkan ucapan/aksi orang "
+            "lain (tamu, NPC, tokoh game) kepadanya. Paket lain tanpa nama.\n")
+
+
 def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, fixed_hook: Optional[str] = None,
-          avoid: Optional[List[str]] = None) -> List[Dict]:
-    """Paket {thumb, title, hook} lolos juri, terbaik dulu. Kosong bila gagal (pemanggil memakai teks lama)."""
+          avoid: Optional[List[str]] = None, streamer: str = "") -> List[Dict]:
+    """Paket {thumb, title, hook} lolos juri, terbaik dulu. Kosong bila gagal (pemanggil memakai teks lama).
+    `streamer`: nama channel sumber (pemilik siaran) — sebagian paket menyebutnya di judul."""
+    from . import title_patterns
     text = str(clip.get("transcript") or clip.get("text") or "")[:1500]
     if len(text.split()) < 3:
         return []
@@ -158,9 +177,13 @@ def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, 
         locked += f"HOOK SUDAH TERCETAK DI VIDEO & TIDAK BOLEH DIUBAH (semua paket memakai persis ini): «{fixed_hook}»\n"
     avoid_txt = ("Thumbnail klip lain dari video yang sama (JANGAN mirip): " + " · ".join(avoid) + "\n") if avoid else ""
     focus = main_moment(clip)
+    who = "" if fixed_title else streamer_block(streamer)  # judul terkunci = nama streamer tak bisa ditambahkan
+    patterns = "" if fixed_title else title_patterns.prompt_block(video_title, text)
+    who_judge = (f"Streamer pemilik siaran: {streamer} — \"gua/aku\" di klip = dia, jadi judul yang menyebut namanya untuk "
+                 "aksi/reaksi di klip itu JUJUR (bukan nama karangan).\n") if who else ""
     try:
-        gen = _json(_ask(_WRITER.format(style=_STYLE[style], locked=locked, avoid=avoid_txt,
-                                        video_title=video_title or "-", text=text, focus=focus)))
+        gen = _json(_ask(_WRITER.format(style=_STYLE[style], locked=locked, avoid=avoid_txt, streamer=who,
+                                        patterns=patterns, video_title=video_title or "-", text=text, focus=focus)))
         pkgs = [p for p in (_clean_pkg(x, fixed_title, fixed_hook) for x in (gen.get("paket") or []) if isinstance(x, dict)) if p]
         old = _clean_pkg({"thumb": clip.get("thumb_text"), "title": clip.get("ai_title"), "hook": clip.get("hook_text")},
                          fixed_title, fixed_hook)
@@ -169,7 +192,8 @@ def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, 
         if not pkgs:
             return []
         listing = "\n".join(f"{i}. THUMBNAIL: {p['thumb']} | JUDUL: {p['title']} | HOOK: {p['hook']}" for i, p in enumerate(pkgs))
-        judge = _json(_ask(_JUDGE.format(text=text, video_title=video_title or "-", pakets=listing, focus=focus)))
+        judge = _json(_ask(_JUDGE.format(text=text, video_title=video_title or "-", pakets=listing, focus=focus,
+                                         streamer_judge=who_judge)))
         src = f"{text} {video_title} " + " ".join(_ROMAN[w] for w in re.findall(r"\b[IVX]+\b", video_title or "") if w in _ROMAN)
         ranked = _rank(pkgs, judge.get("nilai") or [], src)
         logger.info(f"Paket judul/thumbnail/hook: {ranked[0] if ranked else None} (lolos {len(ranked)}/{len(pkgs)})")
@@ -179,14 +203,14 @@ def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, 
         return []
 
 
-def apply(clips: List[Dict], video_title: str = "", prerender: bool = False) -> int:
+def apply(clips: List[Dict], video_title: str = "", prerender: bool = False, streamer: str = "") -> int:
     """Tulis paket untuk tiap klip (4 sekaligus) & terapkan: thumb_text, ai_title, dan hook_text (hanya sebelum render —
     sesudah render hook sudah tercetak, jadi dikunci). Judul dikunci bila klip punya `_fixed_title` (sudah tayang).
     Teks thumbnail tiap klip dijaga berbeda. Return jumlah klip yang mendapat paket baru."""
     from concurrent.futures import ThreadPoolExecutor
 
     def one(c: Dict) -> List[Dict]:
-        return write(c, video_title, fixed_title=c.get("_fixed_title"),
+        return write(c, video_title, fixed_title=c.get("_fixed_title"), streamer=streamer,
                      fixed_hook=None if prerender else (str(c.get("hook_text") or "").strip() or None))
 
     with ThreadPoolExecutor(max_workers=4) as ex:
