@@ -34,10 +34,14 @@ ucapan/slang/julukan yang hanya nyambung setelah menonton (buruk: "NGGAK SLOP, M
 bila judulnya soal mencuri mobil). Teknik: celah informasi, kontras/kejutan, reaksi ekstrem, pertanyaan.
 JUDUL: SINGKAT — 4–8 kata, maks 50 karakter (sependek thumbnail, sedikit lebih jelas), tanpa hashtag, jelas tanpa
 konteks, kata paling memancing di depan (celah informasi / kontras / reaksi / pertanyaan). {style}
-HOOK: teks layar 3 detik pertama video, maks 8 kata, kalimat biasa (bukan huruf besar semua) — MENYAMBUNG rasa
-penasaran dari thumbnail (orang yang mengeklik langsung merasa "ini dia jawabannya, tonton sampai habis").
-SINKRON: thumbnail, judul, dan hook membicarakan hal yang SAMA dan tidak bertentangan; jangan mengulang kata persis —
-saling melengkapi.
+HOOK: teks layar 3 detik pertama video, maks 8 kata, kalimat biasa (bukan huruf besar semua) — tetap memancing
+penasaran ("tonton sampai habis"), jangan langsung membocorkan jawabannya.
+TUJUAN UTAMA = PENASARAN: orang yang lewat harus langsung mikir "apa nih??" / "kenapa nih??". Sebut kejadian yang
+aneh/ekstrem/mengagetkan tapi SEMBUNYIKAN jawabannya (celah informasi). Ketiganya cukup membahas momen yang SAMA —
+tidak perlu saling melengkapi, boleh mirip; yang penting tiap teks sendiri sudah bikin penasaran.
+KATA KUNCI WAJIB: tiap paket punya SATU kata kunci — benda/aksi utama momen (mis. BOTOL, BUGATTI, POLISI, RAMPOK;
+bukan nama game "GTA" dan bukan nama streamer) — yang muncul di thumbnail, judul, DAN hook (imbuhan boleh beda:
+rampok/ngerampok).
 SIAPA MELAKUKAN APA harus persis seperti di klip: "gua/aku/kita" = kreator/pemain; JANGAN menisbatkan tindakan ke tokoh
 bernama (mis. LUCIA, JASON) kecuali klip jelas menyebut tokoh itu yang melakukannya — salah pelaku = bohong.
 JUJUR & SPESIFIK: hanya kejadian/ucapan yang ADA DI KLIP INI. Judul video sumber hanya untuk tahu nama game/tokoh — bukan
@@ -47,14 +51,15 @@ Judul video sumber (hanya untuk nama): {video_title}
 {focus}Isi klip (ucapan kreator):
 \"\"\"{text}\"\"\"
 
-Balas JSON: {{"paket": [{{"thumb": "...", "title": "...", "hook": "..."}}]}}"""
+Balas JSON: {{"paket": [{{"kunci": "...", "thumb": "...", "title": "...", "hook": "..."}}]}}"""
 
 _JUDGE = """Kamu juri paket Shorts/TikTok. Penonton yang BELUM menonton melihat THUMBNAIL + JUDUL 1 detik saat scroll;
 yang mengeklik langsung melihat HOOK di awal video.
 Nilai SETIAP paket (0-10, jujur true/false):
 - jelas: thumbnail & judul dipahami orang asing tanpa menonton? (potongan ucapan/slang/julukan dalam = maks 4)
-- penasaran: seberapa kuat membuat orang berhenti scroll & ingin tahu?
-- sinkron: thumbnail, judul, hook membahas hal yang sama & saling menyambung? (topik beda / bertentangan = maks 3)
+- penasaran (PALING PENTING): seberapa kuat orang yang lewat langsung mikir "apa nih??" / "kenapa nih??" dan berhenti
+  scroll? Kejadian aneh/ekstrem yang jawabannya disembunyikan = tinggi; datar/membocorkan jawaban = rendah.
+- sinkron: thumbnail, judul, hook membahas momen yang sama? (tidak perlu saling melengkapi; topik beda / bertentangan = maks 3)
 - jujur: semua yang diklaim BENAR-BENAR ada di ISI KLIP? Periksa PELAKU tiap tindakan: menisbatkan tindakan ke tokoh
   bernama yang tidak disebut klip melakukannya = false. Hanya ada di judul video / dikarang = false.
 - (penasaran) thumbnail yang hanya nama game/tokoh tanpa KEJADIAN spesifik (mis. "GTA 6 LUCIA TEMBAK") = maks 5
@@ -70,8 +75,11 @@ PAKET:
 
 Balas JSON: {{"nilai": [{{"i": 0, "jelas": 0, "penasaran": 0, "sinkron": 0, "tepat": 0, "jujur": true}}]}}"""
 
-# model terkuat yang tersedia untuk tugas kecil tapi menentukan ini (2 panggilan per klip)
-_STRONG = (("DeepSeek", "deepseek-v4-pro"), ("Anthropic", "claude-sonnet-5-5"), ("OpenAI", "gpt-4.1"))
+# model terkuat yang tersedia untuk tugas kecil tapi menentukan ini (2 panggilan per klip).
+# Uji buta 26 Nov 2026 (5 klip, juri claude-opus-5-5): 9router cc/claude-sonnet-5-5 menang 8/10 & jujur 100%,
+# gpt-4.1 menang 2 (jujur 40%), gemini-3.8-flash / gemini-4-hydrogen-xhigh 0 → Sonnet via 9router didahulukan.
+_STRONG = (("9router", "cc/claude-sonnet-5-5"), ("Anthropic", "claude-sonnet-5-5"), ("DeepSeek", "deepseek-v4-pro"),
+           ("OpenAI", "gpt-4.1"))
 _CLIPPER_CHANNEL = re.compile(r"clip|klip|moments?\b|highlights?|shorts?\b|compilation|kompilasi|best of|"
                               r"reupload|re-upload|fan ?page|\bfans?\b|archive|arsip|vods?\b", re.I)
 _ROMAN = {"II": "2", "III": "3", "IV": "4", "V": "5", "VI": "6", "VII": "7", "VIII": "8", "IX": "9", "X": "10"}
@@ -95,6 +103,33 @@ def _json(raw: str) -> Dict:
     return json.JSONDecoder().raw_decode(raw[raw.index("{"):])[0]
 
 
+# bukan kata kunci momen: nama game, kata sambung, dan kata penguat yang ada di hampir semua judul
+_NOT_KEY = {"gta", "vi", "game", "games", "di", "ke", "dan", "yang", "ini", "itu", "nya", "cuma", "pakai", "pake", "malah",
+            "langsung", "banget", "gila", "parah", "sama", "buat", "biar", "bisa", "udah", "sudah", "lagi", "baru", "mau",
+            "kok", "aja", "saja", "jadi", "dari", "untuk", "dengan", "tapi", "terus", "ternyata", "sekali", "begini",
+            "kayak", "kaya", "the", "this", "momen", "moment", "beneran", "kocak", "lucu", "kaget"}
+
+
+def _words(text: str) -> List[str]:
+    return [w for w in re.findall(r"[^\W\d_]+", str(text or "").lower()) if len(w) >= 3]
+
+
+def _has(word: str, text: str) -> bool:
+    """Kata (atau bentuk berimbuhannya: rampok ~ ngerampok, curi ~ mencuri) ada di teks."""
+    return any(word in t or (len(t) >= 4 and t in word) for t in _words(text))
+
+
+def shared_keyword(p: Dict) -> str:
+    """Kata kunci yang muncul di thumbnail, judul, DAN hook (aturan sinkron). Pilihan penulis dipakai bila memang
+    ada di ketiganya; kalau tidak, dicari sendiri. Kosong = paket tidak punya kata kunci bersama."""
+    texts = (p.get("thumb"), p.get("title"), p.get("hook"))
+    cands = _words(p.get("kunci")) + _words(p.get("thumb"))
+    for w in cands:
+        if w not in _NOT_KEY and all(_has(w, t) for t in texts):
+            return w
+    return ""
+
+
 def _clean_pkg(p: Dict, fixed_title: Optional[str], fixed_hook: Optional[str]) -> Optional[Dict]:
     thumb = re.sub(r"\s+", " ", str(p.get("thumb") or "")).strip().upper()
     title = fixed_title or re.sub(r"\s+", " ", str(p.get("title") or "")).strip()
@@ -103,11 +138,14 @@ def _clean_pkg(p: Dict, fixed_title: Optional[str], fixed_hook: Optional[str]) -
         return None
     if not hook or len(hook.split()) > 12:
         return None
-    return {"thumb": thumb, "title": title, "hook": hook}
+    out = {"thumb": thumb, "title": title, "hook": hook}
+    out["kunci"] = shared_keyword({**out, "kunci": p.get("kunci")})
+    return out
 
 
-def _rank(pkgs: List[Dict], scores: List[Dict], src: str) -> List[Dict]:
-    """Paket jujur & sinkron, urut skor. Yang jelas ≥7 didahulukan; sisanya cadangan bila skornya masih layak."""
+def _rank(pkgs: List[Dict], scores: List[Dict], src: str, streamer: str = "") -> List[Dict]:
+    """Paket jujur & sinkron, urut skor. Yang jelas ≥7 didahulukan; sisanya cadangan bila skornya masih layak.
+    Prioritas: judul diawali nama streamer (bila diketahui) → punya kata kunci bersama → skor."""
     from .editor_review import numbers_supported
     good, weak = [], []
     for sc in scores or []:
@@ -121,11 +159,20 @@ def _rank(pkgs: List[Dict], scores: List[Dict], src: str) -> List[Dict]:
         if not sc.get("jujur", False) or sync < 7 or on_point < 6 \
                 or not all(numbers_supported(p[k], src) for k in ("thumb", "title", "hook")):
             continue
-        s = clear * 0.3 + curious * 0.3 + sync * 0.15 + on_point * 0.25
+        # rasa penasaran ("apa nih??") bobot terbesar — pilihan pengguna: daya tarik utama adalah klikbait
+        s = clear * 0.25 + curious * 0.4 + sync * 0.1 + on_point * 0.25
         (good if clear >= 7 else weak).append((s, p))
-    good.sort(key=lambda x: -x[0])
-    weak.sort(key=lambda x: -x[0])
-    return [p for _, p in good] + [p for s, p in weak if s >= 6.0]
+
+    def prio(p: Dict) -> tuple:
+        # 1) judul diawali nama streamer (pilihan pengguna: nama ditonjolkan) · 2) aturan sinkron: SATU kata kunci di
+        # thumbnail + judul + hook. Paket yang tidak memenuhi hanya dipakai bila tidak ada yang memenuhi.
+        return (bool(streamer_name(streamer)) and not name_first(p["title"], streamer),
+                not p.get("kunci", shared_keyword(p)))
+
+    good.sort(key=lambda x: (prio(x[1]), -x[0]))
+    weak.sort(key=lambda x: (prio(x[1]), -x[0]))
+    ranked = [p for _, p in good] + [p for s, p in weak if s >= 6.0]
+    return sorted(ranked, key=prio)
 
 
 def main_moment(clip: Dict) -> str:
@@ -150,21 +197,46 @@ def main_moment(clip: Dict) -> str:
 def streamer_block(streamer: str) -> str:
     """Nama streamer pemilik siaran untuk judul. Riset outlier GTA 6 (2026-11-26): judul yang menyebut streamer
     ("Tara bilang GTA 5 lewat jauh" 54x, "Windah Review Mandi di GTA 6" 10x) menang di 3 channel berbeda — penonton
-    mengenal namanya. Dipakai sebagian paket saja, dan hanya untuk aksi/reaksi streamer itu sendiri."""
-    name = re.sub(r"\s+", " ", str(streamer or "")).strip()
-    # channel kumpulan klip/re-upload bukan streamernya → "gua" di klip bukan pemilik channel, nama tidak dipakai
-    if not name or _CLIPPER_CHANNEL.search(name):
+    mengenal namanya. Pilihan pengguna: nama DITONJOLKAN — SEMUA judul DIAWALI nama panggilannya ("Windah KAGET Tarikan
+    BUGATTI GTA 6! 😱"), untuk aksi/reaksi streamer itu sendiri."""
+    name = streamer_name(streamer)
+    if not name:
         return ""
-    return (f"STREAMER pemilik siaran (\"gua/aku\" di klip = dia): {name}. Penonton mengenal namanya → tulis 2 dari 5 "
-            "paket dengan nama panggilannya di JUDUL (boleh dipendekkan ke panggilan umum, mis. \"Windah Basudara\" → "
-            "\"Windah\"), HANYA untuk aksi/reaksi yang dia lakukan sendiri di klip. Jangan menisbatkan ucapan/aksi orang "
-            "lain (tamu, NPC, tokoh game) kepadanya. Paket lain tanpa nama.\n")
+    return (f"STREAMER pemilik siaran (\"gua/aku\" di klip = dia): {name}. Penonton mengenal namanya → SEMUA 5 JUDUL "
+            "WAJIB DIAWALI nama panggilannya (boleh dipendekkan ke panggilan umum, mis. \"Windah Basudara\" → \"Windah\"), "
+            "langsung disusul kata pemancing HURUF BESAR. Contoh bentuk: \"Windah KAGET Tarikan BUGATTI GTA 6! 😱\", "
+            "\"Windah NEKAT Rampok Toko Pakai BOTOL?!\". Yang dinisbatkan kepadanya hanya aksi/reaksi yang dia lakukan "
+            "sendiri di klip (kalau momennya dilakukan NPC/orang lain, tulis reaksinya: \"Windah SYOK Lihat NPC …\").\n")
+
+
+_NAME_FILLER = {"official", "channel", "tv", "gaming", "games", "game", "id", "indonesia", "indo", "live", "yt", "the"}
+_HONORIFIC = r"(?:bang|kak|mas|bung|om|si)\s+"
+
+
+def streamer_name(streamer: str) -> str:
+    """Nama channel sumber yang layak disebut di judul. Kosong untuk channel kumpulan klip/re-upload ("gua" di klip
+    bukan pemilik channel)."""
+    name = re.sub(r"\s+", " ", str(streamer or "")).strip()
+    return "" if not name or _CLIPPER_CHANNEL.search(name) else name
+
+
+def name_first(title: str, streamer: str) -> bool:
+    """Judul diawali nama streamer (nama panggilan = salah satu kata nama channel, boleh didahului "Bang"/"Kak")."""
+    name = streamer_name(streamer)
+    if not name:
+        return False
+    parts = [w for w in re.findall(r"\w+", name.lower()) if len(w) >= 3 and w not in _NAME_FILLER]
+    head = re.sub(r"^[^\w]+", "", str(title or "").lower())
+    head = re.sub(rf"^{_HONORIFIC}", "", head)
+    first = (re.findall(r"\w+", head) or [""])[0]
+    return bool(first) and any(first == w or (len(first) >= 4 and (w.startswith(first) or first.startswith(w)))
+                               for w in parts)
 
 
 def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, fixed_hook: Optional[str] = None,
           avoid: Optional[List[str]] = None, streamer: str = "") -> List[Dict]:
     """Paket {thumb, title, hook} lolos juri, terbaik dulu. Kosong bila gagal (pemanggil memakai teks lama).
-    `streamer`: nama channel sumber (pemilik siaran) — sebagian paket menyebutnya di judul."""
+    `streamer`: nama channel sumber (pemilik siaran) — judul diawali nama panggilannya."""
     from . import title_patterns
     text = str(clip.get("transcript") or clip.get("text") or "")[:1500]
     if len(text.split()) < 3:
@@ -175,6 +247,8 @@ def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, 
         locked += f"JUDUL SUDAH TAYANG & TIDAK BOLEH DIUBAH (semua paket memakai persis ini): «{fixed_title}»\n"
     if fixed_hook:
         locked += f"HOOK SUDAH TERCETAK DI VIDEO & TIDAK BOLEH DIUBAH (semua paket memakai persis ini): «{fixed_hook}»\n"
+    if locked:
+        locked += "Kata kunci paket diambil dari teks yang terkunci di atas.\n"
     avoid_txt = ("Thumbnail klip lain dari video yang sama (JANGAN mirip): " + " · ".join(avoid) + "\n") if avoid else ""
     focus = main_moment(clip)
     who = "" if fixed_title else streamer_block(streamer)  # judul terkunci = nama streamer tak bisa ditambahkan
@@ -195,7 +269,7 @@ def write(clip: Dict, video_title: str = "", fixed_title: Optional[str] = None, 
         judge = _json(_ask(_JUDGE.format(text=text, video_title=video_title or "-", pakets=listing, focus=focus,
                                          streamer_judge=who_judge)))
         src = f"{text} {video_title} " + " ".join(_ROMAN[w] for w in re.findall(r"\b[IVX]+\b", video_title or "") if w in _ROMAN)
-        ranked = _rank(pkgs, judge.get("nilai") or [], src)
+        ranked = _rank(pkgs, judge.get("nilai") or [], src, streamer="" if fixed_title else streamer)
         logger.info(f"Paket judul/thumbnail/hook: {ranked[0] if ranked else None} (lolos {len(ranked)}/{len(pkgs)})")
         return ranked
     except Exception as exc:  # noqa: BLE001

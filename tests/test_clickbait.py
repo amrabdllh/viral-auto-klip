@@ -128,6 +128,54 @@ check("pola kedaluwarsa tidak dipakai", title_patterns.prompt_block("GTA 6", tod
 clickbait.apply([dict(a)], "GTA VI", prerender=True, streamer="Tara Arts Game Indonesia")
 check("apply meneruskan nama streamer", any("Tara Arts Game Indonesia" in p for p in prompts))
 
+# Aturan sinkron: SATU kata kunci yang sama di thumbnail, judul, dan hook
+sk = clickbait.shared_keyword
+check("kata kunci ditemukan (BOTOL)", sk({"thumb": "RAMPOK GTA 6 PAKE BOTOL", "title": "Windah RAMPOK toko modal BOTOL?!",
+                                       "hook": "Taktik gila lempar botol ke kasir."}) == "botol")
+check("imbuhan boleh beda (rampok ~ ngerampok)", sk({"thumb": "RAMPOK BANK GTA 6", "title": "Nekat banget ngerampok bank",
+                                                    "hook": "Baru masuk langsung merampok"}) == "rampok")
+check("pilihan penulis dipakai bila ada di ketiganya", sk({"kunci": "polisi", "thumb": "KABUR DARI POLISI GTA 6",
+                                                          "title": "Kabur dari POLISI pakai motor", "hook": "Polisinya sampai bingung"}) == "polisi")
+check("nama game & kata umum bukan kata kunci", sk({"thumb": "GTA 6 GILA BANGET", "title": "GTA 6 gila banget sih",
+                                                   "hook": "Ini GTA 6 gila"}) == "")
+check("tanpa kata bersama di hook = tidak ada kata kunci", sk({"thumb": "CURI MOBIL PAKAI SLIM JIM?!",
+                                                              "title": "NYOLONG Mobil Cuma Modal SLIM JIM?!",
+                                                              "hook": "Lihat seberapa cepat pintunya kebuka"}) == "")
+both = [{"thumb": "SLIM JIM SAKTI?!", "title": "NYOLONG pakai SLIM JIM?!", "hook": "Lihat ini"},
+        {"thumb": "SLIM JIM BUKA MOBIL", "title": "Buka mobil cuma pakai SLIM JIM", "hook": "Slim jim ini sakti banget"}]
+both = [clickbait._clean_pkg(p, None, None) for p in both]
+order = clickbait._rank(both, [{"i": 0, "jelas": 10, "penasaran": 10, "sinkron": 9, "tepat": 9, "jujur": True},
+                               {"i": 1, "jelas": 8, "penasaran": 8, "sinkron": 9, "tepat": 9, "jujur": True}], TX)
+check("paket dengan kata kunci bersama didahulukan walau skornya sedikit lebih rendah",
+      [p["thumb"] for p in order] == ["SLIM JIM BUKA MOBIL", "SLIM JIM SAKTI?!"])
+check("tanpa satu pun kata kunci: paket terbaik tetap dipakai", clickbait._rank(both[:1],
+      [{"i": 0, "jelas": 10, "penasaran": 10, "sinkron": 9, "tepat": 9, "jujur": True}], TX) == both[:1])
+# Nama streamer DI DEPAN judul (pilihan pengguna: nama ditonjolkan)
+nf = clickbait.name_first
+check("judul diawali nama panggilan streamer", nf("Windah KAGET Tarikan BUGATTI GTA 6! 😱", "Windah Basudara"))
+check("'Bang Windah …' juga dihitung diawali nama", nf("Bang Windah NEKAT rampok toko", "Windah Basudara"))
+check("nama di tengah judul tidak dihitung", not nf("KAGET! TARIKAN Bugatti Bikin Windah Histeris🔥", "Windah Basudara"))
+check("kata pengisi nama channel bukan nama panggilan", not nf("GAMING paling seru", "Tara Arts Game Indonesia")
+      and nf("Tara SYOK lihat GTA 6", "Tara Arts Game Indonesia"))
+check("tanpa streamer / channel klip: tidak ada syarat nama", not nf("Windah KAGET", "") and not nf("Windah KAGET", "Windah Clips"))
+two = [clickbait._clean_pkg(p, None, None) for p in (
+    {"thumb": "TARIKAN BUGATTI GTA 6", "title": "KAGET! TARIKAN Bugatti Bikin Windah Histeris🔥", "hook": "Tarikan bugatti ini gila"},
+    {"thumb": "BUGATTI GTA 6 NGEBUT", "title": "Windah KAGET Tarikan BUGATTI GTA 6! 😱", "hook": "Bugatti ini kenceng banget"})]
+sc2 = [{"i": 0, "jelas": 10, "penasaran": 10, "sinkron": 9, "tepat": 9, "jujur": True},
+       {"i": 1, "jelas": 8, "penasaran": 8, "sinkron": 9, "tepat": 9, "jujur": True}]
+check("judul berawalan nama streamer menang walau skornya sedikit lebih rendah",
+      clickbait._rank(two, sc2, "bugatti tarikan gta 6", streamer="Windah Basudara")[0]["title"].startswith("Windah KAGET"))
+check("tanpa streamer: urutan skor biasa", clickbait._rank(two, sc2, "bugatti tarikan gta 6")[0]["title"].startswith("KAGET!"))
+prompts.clear()
+clickbait.write(clip, "GTA VI", streamer="Windah Basudara")
+check("penulis diminta SEMUA judul diawali nama", "SEMUA 5 JUDUL WAJIB DIAWALI" in prompts[0])
+check("penulis & juri mengutamakan rasa penasaran ('apa nih??')", "apa nih??" in prompts[0] and "apa nih??" in prompts[1]
+      and "saling melengkapi" not in prompts[0].replace("tidak perlu saling melengkapi", ""))
+
+prompts.clear()
+clickbait.write(clip, "GTA VI")
+check("penulis diminta kata kunci wajib", "KATA KUNCI WAJIB" in prompts[0] and '"kunci"' in prompts[0])
+
 # Transkrip (ElevenLabs) menulis angka dengan kata; judul AI memakai digit → tetap dianggap diucapkan.
 # Dulu 9 dari 30 klip uji nyata jatuh ke judul mentah karena "angka tidak diucapkan".
 from core.editor_review import numbers_supported  # noqa: E402
