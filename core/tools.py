@@ -604,6 +604,7 @@ def clip_quick(ctx: JobContext) -> Dict:
     video = trim_range(ctx, video, p)  # (v7) rentang waktu proses
     info = get_video_info(video)
     info["title"] = _source_title(p, video)
+    info["channel"] = source_channel(p.get("url", ""))  # nama streamer untuk judul (cache 15 mnt, tanpa request baru)
     info["content_type"] = content_type(p, info["title"], p.get("url", ""))
     p["_content_type"] = info["content_type"]
     if info["content_type"] == "gaming_stream":
@@ -710,7 +711,7 @@ def clip_quick(ctx: JobContext) -> Dict:
     if selected and not p.get("campaign"):
         from . import clickbait
         ctx.progress(56, "Judul & thumbnail", f"Menulis paket judul + thumbnail + hook yang sinkron untuk {len(selected)} klip…")
-        n_pkg = clickbait.apply(selected, str(info.get("title") or ""), prerender=True)
+        n_pkg = clickbait.apply(selected, str(info.get("title") or ""), prerender=True, streamer=info.get("channel", ""))
         ctx.log(f"Paket judul/thumbnail/hook sinkron (penulis + juri AI): {n_pkg}/{len(selected)} klip")
     ctx.progress(58, "Render", f"Merender {n_render} klip (reframe wajah, caption, editing)"
                  + (f" — mode otomatis, perkiraan ±{max(1, round(n_render * 4))} menit…" if auto_n else "…"))
@@ -739,7 +740,8 @@ def clip_quick(ctx: JobContext) -> Dict:
         except RenderCancelled:
             raise JobCancelled()
     brand_clips(ctx, clips, p.get("brand_kit"))
-    ai_thumbnails(ctx, clips, video, p, info.get("content_type", ""), str(info.get("title") or ""))
+    ai_thumbnails(ctx, clips, video, p, info.get("content_type", ""), str(info.get("title") or ""),
+                  streamer=info.get("channel", ""))
     ctx.progress(92, "Publish", "Paket upload & metadata")
     publish = _publish(ctx, clips, p)
     register_clips(ctx, clips, "analisis_ai",
@@ -768,7 +770,7 @@ def clip_quick(ctx: JobContext) -> Dict:
 
 
 def ai_thumbnails(ctx: JobContext, clips: List[Dict], video: str, p: Dict, content_type: str = "",
-                  video_title: str = "") -> None:
+                  video_title: str = "", streamer: str = "") -> None:
     """v6.9: (1) teks thumbnail & judul ditulis ulang: penulis + juri AI memilih yang JELAS tanpa konteks & memancing
     (core/clickbait), (2) thumbnail gaya clipper — latar AI + wajah asli + cuplikan momen. Dipakai sebagai cover di
     Library dan diunggah ke YouTube (thumbnail) & TikTok (cover)."""
@@ -778,7 +780,7 @@ def ai_thumbnails(ctx: JobContext, clips: List[Dict], video: str, p: Dict, conte
     todo = [c for c in clips if not c.get("copy_package")]
     if todo:  # klip tanpa paket (mis. campaign): hook sudah tercetak → dikunci, judul & thumbnail mengikutinya
         ctx.progress(89, "Teks thumbnail", f"Menulis judul & teks thumbnail yang sinkron untuk {len(todo)} klip…")
-        n = clickbait.apply(todo, video_title)
+        n = clickbait.apply(todo, video_title, streamer=streamer)
         ctx.log(f"Judul & teks thumbnail sinkron dengan hook (penulis + juri AI): {n}/{len(todo)} klip")
     if p.get("thumb_ai") is False or not thumb_ai.enabled():
         return

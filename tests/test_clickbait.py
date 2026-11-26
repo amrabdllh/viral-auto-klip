@@ -93,6 +93,41 @@ side = clickbait._rank([{"thumb": "SLIM JIM SAKTI?!", "title": "NYOLONG pakai SL
                         {"i": 1, "jelas": 9, "penasaran": 9, "sinkron": 9, "tepat": 3, "jujur": True}], TX)
 check("paket yang membahas hal sampingan (tepat < 6) ditolak", [p["thumb"] for p in side] == ["SLIM JIM SAKTI?!"])
 
+# Nama streamer (riset outlier: judul yang menyebut streamer menang di 3 channel) & pola judul per niche
+from datetime import date  # noqa: E402
+from core import title_patterns  # noqa: E402
+
+prompts.clear()
+clickbait.write(clip, "AKHIRNYA RAMPOK BANK GTA 6 GAMEPLAY #11", streamer="Windah Basudara")
+check("penulis diberi nama streamer", "STREAMER pemilik siaran" in prompts[0] and "Windah Basudara" in prompts[0])
+check("juri tahu nama streamer = jujur", "Streamer pemilik siaran: Windah Basudara" in prompts[1])
+check("pola GTA 6 masuk prompt penulis", "POLA JUDUL YANG TERBUKTI" in prompts[0] and "Ternyata bisa" in prompts[0])
+check("pola tidak masuk prompt juri", "POLA JUDUL" not in prompts[1])
+
+prompts.clear()
+clickbait.write(clip, "Podcast santai bareng teman", streamer="")
+check("tanpa streamer & niche lain: tidak ada blok nama/pola",
+      "STREAMER pemilik" not in prompts[0] and "POLA JUDUL" not in prompts[0] and "Streamer pemilik" not in prompts[1])
+
+prompts.clear()
+clickbait.write(clip, "GTA VI", streamer="Windah Clips Official")
+check("channel kumpulan klip tidak dipakai sebagai nama streamer",
+      "STREAMER pemilik" not in prompts[0] and "Streamer pemilik" not in prompts[1])
+
+prompts.clear()
+clickbait.write(clip, "GTA VI", streamer="Windah Basudara", fixed_title="Judul yang sudah tayang di YouTube")
+check("judul terkunci: nama & pola tidak ditawarkan", "STREAMER pemilik" not in prompts[0] and "POLA JUDUL" not in prompts[0])
+
+check("niche GTA 6 dikenali dari 'GTA VI' / 'gta 6' / 'Grand Theft Auto VI'",
+      all(title_patterns.niche_for(t) for t in ("GTA VI GAMEPLAY", "main gta 6", "Grand Theft Auto VI")))
+check("GTA 5 / GTA Online bukan niche GTA 6", not title_patterns.niche_for("GTA 5 RP") and
+      not title_patterns.niche_for("GTA Online heist") and not title_patterns.niche_for("GTA 60fps"))
+check("pola kedaluwarsa tidak dipakai", title_patterns.prompt_block("GTA 6", today=date(2027, 6, 1)) == ""
+      and title_patterns.prompt_block("GTA 6", today=date(2026, 12, 1)) != "")
+
+clickbait.apply([dict(a)], "GTA VI", prerender=True, streamer="Tara Arts Game Indonesia")
+check("apply meneruskan nama streamer", any("Tara Arts Game Indonesia" in p for p in prompts))
+
 # Transkrip (ElevenLabs) menulis angka dengan kata; judul AI memakai digit → tetap dianggap diucapkan.
 # Dulu 9 dari 30 klip uji nyata jatuh ke judul mentah karena "angka tidak diucapkan".
 from core.editor_review import numbers_supported  # noqa: E402
