@@ -15,6 +15,34 @@ Changelog v3 (backend):
 - NEW: publish package otomatis setelah render (folder publish/).
 """
 
+import os as _os
+
+
+def _detach_stdin() -> None:
+    """Windows: stdin server diarahkan ke NUL. Bila terminal/jendela yang menyalakan server ditutup sementara server
+    tetap hidup, handle stdin bawaan proses jadi tidak valid → SEMUA subprocess gagal dibuat ([WinError 6] The handle
+    is invalid): yt-dlp mengira "ffmpeg is not installed", Playwright "Connection closed while reading from the driver",
+    render ffmpeg gagal. Server tidak pernah membaca stdin, jadi NUL aman."""
+    if _os.name != "nt":
+        return
+    try:
+        import ctypes
+        import sys
+
+        k = ctypes.windll.kernel32
+        k.CreateFileW.restype = ctypes.c_void_p
+        k.SetStdHandle.argtypes = [ctypes.c_ulong, ctypes.c_void_p]
+        # GENERIC_READ, FILE_SHARE_READ|WRITE, OPEN_EXISTING (subprocess menduplikasi handle ini sendiri)
+        nul = k.CreateFileW("NUL", 0x80000000, 3, None, 3, 0, None)
+        if nul and nul != ctypes.c_void_p(-1).value:
+            k.SetStdHandle(ctypes.c_ulong(-10 & 0xFFFFFFFF), ctypes.c_void_p(nul))  # STD_INPUT_HANDLE
+        sys.stdin = open(_os.devnull)
+    except Exception:
+        pass
+
+
+_detach_stdin()
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
