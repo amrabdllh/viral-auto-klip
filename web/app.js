@@ -673,11 +673,21 @@ function subtitleEditor(card) {
           ${UI.field("Gaya subtitle", `<select data-style>${UI.options(styles, data.style)}</select>`,
             { hint: `<img data-cap-prev src="/api/caption-preview?style=${encodeURIComponent(data.style)}" alt="" style="width:100%;max-width:360px;border-radius:8px;display:block;margin-top:6px">` })}
           <div class="stack">${UI.toggle("sl_on", "Tampilkan subtitle", { checked: data.enabled !== false })}
+            <div class="row nw" style="gap:12px;align-items:flex-start">
+              <div class="grow">${UI.range("sl_y", "Tinggi subtitle (dari atas)", { value: Math.min(0.92, Math.max(0.12, +data.subtitle_y || 0.78)), min: 0.12, max: 0.92, step: 0.01, fmt: "%" })}
+                <span class="hint">Geser lalu Burn ulang. Facecam & gameplay tidak berubah.</span></div>
+              <div style="position:relative;width:72px;height:128px;border-radius:6px;overflow:hidden;background:#000;flex:none">
+                <video data-sl-frame src="${fileUrl(path)}#t=1.5" muted preload="metadata" style="width:100%;height:100%;object-fit:cover"></video>
+                <div data-sl-line style="position:absolute;left:8%;right:8%;height:6px;border-radius:2px;background:#ffeb3b;box-shadow:0 0 0 1px #000"></div></div></div>
             <p class="small muted">${data.edited_at ? "Terakhir diubah " + new Date(data.edited_at * 1000).toLocaleString() : "Belum pernah diubah."}
             ${data.tempo > 1.0001 ? ` Klip dipercepat ${(+data.tempo).toFixed(2)}×, waktu di bawah memakai timeline sebelum tempo.` : ""}</p></div></div>
         <div class="stack" style="max-height:46vh;overflow:auto;margin-top:12px">${data.segments.map((s) => `<div class="row nw" style="gap:10px">
             <span class="small muted num" style="min-width:92px">${fmtT(s.start)}–${fmtT(s.end)}</span>
             <input type="text" data-seg="${s.i}" value="${esc(s.text)}" data-orig="${esc(s.text)}" style="flex:1" placeholder="(kosong = layar dihapus)"></div>`).join("")}</div>`;
+      hydrate($("[data-sl]", m));
+      const yIn = $("[name=sl_y]", m), line = $("[data-sl-line]", m);
+      const place = () => (line.style.top = `calc(${(+yIn.value) * 100}% - 6px)`);
+      yIn.addEventListener("input", place); place();
       $("[data-style]", m).onchange = (e) => { const img = $("img[data-cap-prev]", m); if (img) img.src = `/api/caption-preview?style=${encodeURIComponent(e.target.value)}`; };
     };
     try {
@@ -701,7 +711,9 @@ function subtitleEditor(card) {
       if (!data?.available) return;
       const edits = {};
       m.querySelectorAll("[data-seg]").forEach((inp) => { if (inp.value !== inp.dataset.orig) edits[inp.dataset.seg] = inp.value; });
-      run(e.currentTarget, { style: $("[data-style]", m).value, edits, enabled: $("[name=sl_on]", m).checked });
+      const y = +$("[name=sl_y]", m).value;
+      run(e.currentTarget, { style: $("[data-style]", m).value, edits, enabled: $("[name=sl_on]", m).checked,
+        ...(Math.abs(y - (+data.subtitle_y || 0)) >= 0.005 ? { subtitle_y: y } : {}) });
     };
     $("[data-reset]", m).onclick = (e) => { if (data?.available) run(e.currentTarget, { reset: true }); };
   });

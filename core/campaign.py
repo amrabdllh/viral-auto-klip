@@ -481,7 +481,7 @@ def render_edited(video_path: Path | str, preset_path: Path | str, *, start: flo
             layout = {"cam_box": list(cam), "game_box": list(game),
                       "cam_ratio": settings["facecam_height"] / 1920.0,
                       "face": face, "caption_y": caption_margin(settings, preset),
-                      "caption_font_size": caption_font_size(settings)}
+                      "caption_font_size": caption_font_size(settings), "campaign": True}
 
     # Kategori klip (humor/shocking/emotional/…) + kartu nama pembicara, supaya
     # jalur campaign VOD setara dengan klip live (analisis AI memberi kategori).

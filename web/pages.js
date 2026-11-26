@@ -240,6 +240,7 @@ PAGES.analisis = { render(view, q) {
         <div class="switches">${UI.toggle("enable_captions", "Caption otomatis")}${UI.toggle("enable_face_reframe", "Ikuti wajah")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}${UI.toggle("source_credit", "Sertakan sumber video", { checked: false, sub: "Teks kecil 'Sumber: nama channel' di kiri atas" })}</div>
         <div class="fields">${UI.text("source_credit_text", "Teks sumber (opsional)", { placeholder: "Kosong = Sumber: <nama channel> (YouTube)" })}${UI.field("Template campaign", `<select name="preset" id="anPreset"><option value="">Tanpa template</option></select>`, { hint: "Pilih preset untuk mengaktifkan MotionKlip (banner + outro); kosongkan untuk klip biasa." })}</div>
         <div class="switches">${UI.toggle("use_preset_hashtags", "Pakai hashtag preset campaign", { checked: false, sub: "Kalau aktif, hashtag preset menggantikan hashtag AI" })}</div>`) +
+      layoutMore() +
       UI.section("Metadata upload", `<div class="fields">${UI.text("title_override", "Judul", { placeholder: "Kosong = dibuat AI" })}${UI.text("description_override", "Deskripsi", { placeholder: "Kosong = dibuat AI" })}${UI.text("hashtags_override", "Hashtag", { placeholder: "#viral #fyp #gaming", hint: "Pisahkan spasi/koma; kosong = dibuat AI" })}</div>`) +
       UI.section("Upload otomatis", `<div class="switches">${UI.toggle("auto_publish", "Upload otomatis ke jam FYP terbaik", { checked: false, sub: "Klip langsung dijadwalkan & diupload sendiri ke platform yang terhubung — tanpa isi jadwal." })}</div>
         <div class="fields">${UI.select("auto_publish_platform", "Platform", [{ v: "", l: "Semua yang terhubung" }, { v: "youtube", l: "YouTube Shorts" }, { v: "tiktok", l: "TikTok" }], "")}
@@ -259,6 +260,7 @@ PAGES.analisis = { render(view, q) {
       "AI membaca transkrip & memilih momen dengan hook kuat.", "Tiap klip di-reframe mengikuti wajah, diberi caption, jump cut, zoom & thumbnail.",
       "AI menulis judul, caption & hashtag. Hasil bisa langsung dijadwalkan."], UI.banner("info", "Boleh pindah halaman — progres tetap jalan di <a href='#jobs'>Antrean Job</a>.")) });
   const src = sourceInput($("#src"), { prefill: q.url || "" });
+  wireLayout($("#f"));
   /* (v7) Resep: simpan / pakai / hapus opsi form */
   let recipes = [];
   const loadRecipes = (sel = "") => api("/api/recipes").then((r) => {
@@ -382,6 +384,57 @@ const CLIP_LENGTHS = [{ v: "short", l: "Pendek · 15–30 dtk" }, { v: "medium",
 // Posisi subtitle klip campaign. "bottom" = di bawah gameplay, tepat di atas banner
 // (gaya Clipper). "seam" = di sambungan facecam/gameplay.
 const SUB_POSITIONS = [{ v: "bottom", l: "Bawah gameplay (di atas banner)" }, { v: "seam", l: "Sambungan facecam/gameplay" }];
+// Tata letak manual (Analisis AI & Live). Semua opsional: toggle mati = otomatis seperti biasa.
+const CAM_CORNERS = [{ v: "", l: "Seluruh layar (otomatis)" }, { v: "tr", l: "Kanan atas" }, { v: "tl", l: "Kiri atas" }, { v: "br", l: "Kanan bawah" }, { v: "bl", l: "Kiri bawah" }];
+const LAYOUT_KEYS = ["subtitle_manual", "subtitle_y", "cam_manual", "cam_ratio", "cam_position", "cam_corner", "cam_size"];
+function layoutMore() {
+  return UI.more("Posisi subtitle & facecam (opsional)", `<div class="row" style="gap:18px;align-items:flex-start;flex-wrap:wrap">
+    <div class="stack grow" style="min-width:240px;flex:1">
+      <div class="switches">${UI.toggle("subtitle_manual", "Atur tinggi subtitle sendiri", { checked: false, sub: "Mati = otomatis (sambungan facecam / posisi template)" })}</div>
+      <div data-lay="sub">${UI.range("subtitle_y", "Tinggi subtitle (dari atas layar)", { value: 0.72, min: 0.12, max: 0.92, step: 0.01, fmt: "%" })}</div>
+      <div class="switches">${UI.toggle("cam_manual", "Atur facecam sendiri", { checked: false, sub: "Mati = facecam dideteksi & diatur otomatis" })}</div>
+      <div data-lay="cam" class="fields two">${UI.range("cam_ratio", "Tinggi panel facecam", { value: 0.38, min: 0.2, max: 0.6, step: 0.01, fmt: "%" })}
+        ${UI.select("cam_position", "Facecam di klip", [{ v: "top", l: "Atas (gameplay di bawah)" }, { v: "bottom", l: "Bawah (gameplay di atas)" }], "top", { hint: "Template MotionKlip selalu atas (banner di bawah)." })}
+        ${UI.select("cam_corner", "Area facecam di video sumber", CAM_CORNERS, "", { hint: "Wajah dicari di area ini saja. Tidak ketemu = kotak dipasang di pojoknya." })}
+        <div data-lay="size">${UI.range("cam_size", "Lebar kotak cadangan", { value: 0.25, min: 0.1, max: 0.5, step: 0.01, fmt: "%" })}</div></div>
+    </div>
+    <div class="stack" style="align-items:center;gap:6px">
+      <div data-lay-prev style="position:relative;width:108px;height:192px;border-radius:8px;overflow:hidden;background:#e9802b33;border:1px solid var(--line, #8884)">
+        <div data-lp-cam style="position:absolute;left:0;right:0;background:#14b8a655;display:flex;align-items:center;justify-content:center;font-size:10px">facecam</div>
+        <div data-lp-game style="position:absolute;left:0;right:0;display:flex;align-items:center;justify-content:center;font-size:10px">gameplay</div>
+        <div data-lp-sub style="position:absolute;left:12%;right:12%;height:9px;border-radius:3px;background:#fff;box-shadow:0 0 0 1px #000a"></div></div>
+      <div data-lay-src style="position:relative;width:128px;height:72px;border-radius:6px;background:#8883;border:1px solid var(--line, #8884)">
+        <div data-ls-cam style="position:absolute;background:#14b8a688;border:1px solid #14b8a6"></div></div>
+      <span class="tiny muted" data-lay-note style="max-width:150px;text-align:center"></span>
+    </div></div>`);
+}
+function wireLayout(root) {
+  const f = (n) => $(`[name=${n}]`, root);
+  if (!f("subtitle_y")) return;
+  const draw = () => {
+    const subOn = f("subtitle_manual").checked, camOn = f("cam_manual").checked;
+    $("[data-lay=sub]", root).style.opacity = subOn ? 1 : 0.45; f("subtitle_y").disabled = !subOn;
+    $("[data-lay=cam]", root).style.opacity = camOn ? 1 : 0.45;
+    ["cam_ratio", "cam_position", "cam_corner", "cam_size"].forEach((n) => (f(n).disabled = !camOn));
+    const corner = camOn ? f("cam_corner").value : "";
+    $("[data-lay=size]", root).hidden = !corner;
+    const r = camOn ? +f("cam_ratio").value : 0.38, top = !camOn || f("cam_position").value !== "bottom";
+    const cam = $("[data-lp-cam]", root), game = $("[data-lp-game]", root);
+    cam.style.top = top ? "0" : `${(1 - r) * 100}%`; cam.style.height = `${r * 100}%`;
+    game.style.top = top ? `${r * 100}%` : "0"; game.style.height = `${(1 - r) * 100}%`;
+    // otomatis: caption di sambungan (sama dengan core/clipper.py); manual: posisi slider
+    const y = subOn ? +f("subtitle_y").value : top ? Math.min(0.9, r + 150 / 1920) : Math.max(0.1, 1 - r - 60 / 1920);
+    $("[data-lp-sub]", root).style.top = `calc(${y * 100}% - 9px)`;
+    const box = $("[data-ls-cam]", root), w = +f("cam_size").value;
+    box.hidden = !corner;
+    if (corner) Object.assign(box.style, { width: `${w * 100}%`, height: `${w * 100}%`,
+      left: corner.endsWith("r") ? `${(1 - w) * 100}%` : "0", top: corner.startsWith("b") ? `${(1 - w) * 100}%` : "0" });
+    $("[data-lay-note]", root).textContent = corner ? "Hijau = kotak cadangan bila wajah tidak ketemu di area ini" : camOn ? "Letak facecam di sumber: deteksi otomatis" : "Pratinjau tata letak klip";
+  };
+  root.addEventListener("input", (e) => { if (LAYOUT_KEYS.includes(e.target.name)) draw(); });
+  root.addEventListener("change", (e) => { if (LAYOUT_KEYS.includes(e.target.name)) draw(); });
+  draw();
+}
 PAGES.live = { render(view, q) {
   view.innerHTML = toolPage({ id: "live", needs: ["llm", "ffmpeg"],
     desc: "Buat klip dari siaran YouTube yang masih berlangsung. Siaran direkam terus, dan tiap beberapa menit AI memilih momen terbaik dengan bantuan lonjakan chat penonton.",
@@ -390,7 +443,7 @@ PAGES.live = { render(view, q) {
         ${UI.select("backlog_min", "Mulai rekam dari", BACKLOG, 20, { numeric: true, hint: "YouTube menyimpan ±1 jam siaran ke belakang." })}${UI.select("window_min", "Buat klip", WINDOWS, 10, { numeric: true })}
         ${UI.num("clips_per_window", "Maks klip per jendela", { value: 3, min: 1, max: 8 })}${UI.select("clip_length", "Panjang klip", CLIP_LENGTHS, "medium", { hint: "Panjang tiap klip yang dicari AI." })}${UI.select("language", "Bahasa siaran", LANGS, "id")}</div>`) +
       UI.section("Tampilan", `<div class="fields">${captionSelect()}${UI.select("edit_style", "Gaya editing", EDIT_STYLES, "")}${UI.select("subtitle_position", "Posisi subtitle", SUB_POSITIONS, "bottom", { hint: "Berlaku saat template MotionKlip aktif." })}</div>
-        <div class="switches">${UI.toggle("use_chat", "Baca chat live", { sub: "Lonjakan chat & Super Chat jadi petunjuk momen seru" })}${UI.toggle("cold_open", "Cold open + rewind")}${UI.toggle("sound_design", "Sound design")}${UI.toggle("caption_fx", "Caption animasi + emoji")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) +
+        <div class="switches">${UI.toggle("use_chat", "Baca chat live", { sub: "Lonjakan chat & Super Chat jadi petunjuk momen seru" })}${UI.toggle("cold_open", "Cold open + rewind")}${UI.toggle("sound_design", "Sound design")}${UI.toggle("caption_fx", "Caption animasi + emoji")}${UI.toggle("hook_card", "Kartu hook di awal")}${UI.toggle("brand_kit", "Brand Kit (logo + penutup)")}</div>`) + layoutMore() +
       UI.more("Pengaturan lanjutan", `<div class="fields">${UI.num("min_score", "Skor viral minimum", { value: 45, min: 0, max: 100 })}
         ${UI.num("max_hours", "Rekam paling lama", { value: 6, min: 1, max: 12, hint: "jam" })}
         ${UI.select("max_height", "Kualitas rekaman", [{ v: "1080", l: "1080p60" }, { v: "1440", l: "1440p60" }], "1080")}
@@ -412,6 +465,7 @@ PAGES.live = { render(view, q) {
       "Facecam terdeteksi otomatis: wajah di atas, gameplay di bawah. Klip diberi cold open, caption animasi, emoji, dan sound design.",
       "Klip muncul di bawah satu per satu. Tekan \u201cSelesai rekam\u201d kapan saja — sisa rekaman tetap dijadikan klip."],
       UI.banner("info", "Rekaman jalan di background. Job lain tetap bisa dipakai, dan halaman ini boleh ditutup — pantau dari <a href='#jobs'>Antrean Job</a>.")) });
+  wireLayout($("#f"));
   if (q.job) attachJob($("#job"), q.job, {});
   api("/api/campaign/presets").then((r) => {
     const sel = $("#livePreset");
@@ -437,6 +491,7 @@ PAGES.live = { render(view, q) {
         min_lift: p.min_lift ?? 3, max_spikes: p.max_spikes ?? 0,
         poll_interval: 4, max_hours: p.max_hours ?? 6,
         campaign: !!p.campaign, preset: p.preset || undefined,
+        ...Object.fromEntries(LAYOUT_KEYS.filter((k) => k in p).map((k) => [k, p[k]])),
       };
       if (!spike.campaign) delete spike.preset;
       return runJob($("#job"), "live_spike", spike, { title: "Klip Live · spike", btn: e.currentTarget });
